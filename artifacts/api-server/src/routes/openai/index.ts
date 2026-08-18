@@ -257,6 +257,10 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   }
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
   const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+  const auditModelId =
+    typeof req.query.auditModel === "string" && req.query.auditModel !== modelId
+      ? req.query.auditModel
+      : undefined;
 
   // Resolve client for the requested model
   let aiClient: ReturnType<typeof getClientForModel>;
@@ -323,14 +327,17 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     reasoningLevel,
     userText: parsedNewMessage.text,
     chatMessages,
+    auditModelId,
     publicAiError,
-    onComplete: async ({ content, sources }) => {
+    onComplete: async ({ content, sources, audit }) => {
       await db.insert(messages).values({
         conversationId,
         role: "assistant",
         content,
         modelId,
         sources: sources.length > 0 ? JSON.stringify(sources) : null,
+        auditContent: audit?.content ?? null,
+        auditModelId: audit?.modelId ?? null,
       });
     },
   });
@@ -354,6 +361,10 @@ router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
 
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
   const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+  const auditModelId =
+    typeof req.query.auditModel === "string" && req.query.auditModel !== modelId
+      ? req.query.auditModel
+      : undefined;
 
   let aiClient: ReturnType<typeof getClientForModel>;
   try {
@@ -404,6 +415,7 @@ router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
     reasoningLevel,
     userText: parsedNewMessage.text,
     chatMessages,
+    auditModelId,
     publicAiError,
   });
 });

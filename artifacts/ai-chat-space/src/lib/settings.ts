@@ -5,11 +5,15 @@ const STORAGE_KEY = "chat-space.settings.v1";
 export interface AppSettings {
   defaultModel: string;
   defaultReasoning: ReasoningLevel;
+  auditEnabled: boolean;
+  auditModelId: string;
 }
 
 const FALLBACK: AppSettings = {
   defaultModel: "gpt-5.6-terra",
   defaultReasoning: "medium",
+  auditEnabled: false,
+  auditModelId: "qwen3.8-max",
 };
 
 export function loadSettings(): AppSettings {
@@ -23,6 +27,11 @@ export function loadSettings(): AppSettings {
           ? parsed.defaultModel
           : FALLBACK.defaultModel,
       defaultReasoning: parseReasoningLevel(parsed.defaultReasoning),
+      auditEnabled: parsed.auditEnabled === true,
+      auditModelId:
+        typeof parsed.auditModelId === "string" && parsed.auditModelId
+          ? parsed.auditModelId
+          : FALLBACK.auditModelId,
     };
   } catch {
     return { ...FALLBACK };
@@ -50,4 +59,18 @@ export function subscribeSettings(listener: (settings: AppSettings) => void): ()
     window.removeEventListener("storage", onStorage);
     window.removeEventListener("chat-space-settings", onLocal);
   };
+}
+
+export function pickAuditModel(
+  primaryId: string,
+  models: { id: string; provider: string }[],
+  preferred?: string,
+): string {
+  if (preferred && preferred !== primaryId && models.some((m) => m.id === preferred)) {
+    return preferred;
+  }
+  const primary = models.find((m) => m.id === primaryId);
+  const otherProvider = models.find((m) => m.id !== primaryId && m.provider !== primary?.provider);
+  if (otherProvider) return otherProvider.id;
+  return models.find((m) => m.id !== primaryId)?.id ?? primaryId;
 }

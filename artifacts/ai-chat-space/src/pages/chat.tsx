@@ -14,9 +14,9 @@ import { ModelSelector, useAvailableModels } from "@/components/chat/model-selec
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
 import { type ReasoningLevel } from "@/lib/reasoning";
-import { loadSettings } from "@/lib/settings";
+import { loadSettings, pickAuditModel, saveSettings, subscribeSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { Sparkles, X, Shield } from "lucide-react";
+import { Sparkles, X, Shield, Scale } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -33,15 +33,18 @@ async function streamMessage(
   onSearchWarning: (message: string) => void,
   onSources: (sources: { title: string; url: string }[]) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
+  onAudit: (text: string) => void,
   signal?: AbortSignal,
-  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[] },
+  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string },
 ) {
   try {
     const path = extra?.ephemeral
       ? `${BASE}/api/openai/ephemeral/messages`
       : `${BASE}/api/openai/conversations/${conversationId}/messages`;
     const res = await fetch(
-      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}`,
+      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}${
+        extra?.auditModel ? `&auditModel=${encodeURIComponent(extra.auditModel)}` : ""
+      }`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -100,6 +103,11 @@ async function streamMessage(
       if (parsed.status === "fetching") onStatus("fetching");
       if (parsed.status === "thinking") onStatus("thinking");
       if (parsed.status === "generating") onStatus("generating");
+      if (parsed.status === "auditing") onStatus("auditing");
+      if (typeof parsed.audit === "string" && parsed.audit) {
+        onStatus("auditing");
+        onAudit(parsed.audit);
+      }
       if (parsed.status === "search_warning" && typeof parsed.message === "string") {
         onSearchWarning(parsed.message);
       }
@@ -170,7 +178,11 @@ export function ChatPage() {
   const [selectedModel, setSelectedModel] = useState(initialSettings.defaultModel);
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(initialSettings.defaultReasoning);
   const [privateMessages, setPrivateMessages] = useState<OpenaiMessage[]>([]);
-  const streamSnapshotRef = useRef({ content: "", sources: [] as { title: string; url: string }[] });
+  const streamSnapshotRef = useRef({
+    content: "",
+    sources: [] as { title: string; url: string }[],
+    audit: "",
+  });
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
   const [streamingReasoning, setStreamingReasoning] = useState<string>("");
@@ -180,6 +192,14 @@ export function ChatPage() {
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [activeSkills, setActiveSkills] = useState<{ id: string; label: string }[]>([]);
+  const [auditEnabled, setAuditEnabled] = useState(initialSettings.auditEnabled);
+  const [auditModelId, setAuditModelId] = useState(initialSettings.auditModelId);
+  const [streamingAudit, setStreamingAudit] = useState("");
+  const resolvedAuditModel = auditEnabled
+    ? pickAuditModel(selectedModel, models, auditModelId)
+    : undefined;
+  const auditModel =
+    resolvedAuditModel && resolvedAuditModel !== selectedModel ? resolvedAuditModel : undefined;
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   useEffect(() => {
@@ -206,6 +226,7 @@ export function ChatPage() {
     setSearchStatus(null);
     setSearchWarning(null);
     setActiveSkills([]);
+    setStreamingAudit("");
   }, [conversationId]);
 
   const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
@@ -216,6 +237,11 @@ export function ChatPage() {
   useEffect(() => {
     if (!isPrivate) setPrivateMessages([]);
   }, [isPrivate]);
+
+  useEffect(() => subscribeSettings((s) => {
+    setAuditEnabled(s.auditEnabled);
+    setAuditModelId(s.auditModelId);
+  }), []);
 
   // Restore the last used model when opening an existing conversation
   useEffect(() => {
@@ -276,6 +302,7 @@ export function ChatPage() {
     setStreamError(null);
     setSearchWarning(null);
     setActiveSkills([]);
+    setStreamingAudit("");
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
       conversationId: targetId ?? 0,
@@ -289,7 +316,7 @@ export function ChatPage() {
     setStreamingReasoning("");
     setStreamingSources([]);
     setSearchStatus({ kind: "starting" });
-    streamSnapshotRef.current = { content: "", sources: [] };
+    streamSnapshotRef.current = { content: "", sources: [], audit: "" };
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -331,8 +358,10 @@ export function ChatPage() {
               content: streamSnapshotRef.current.content,
               sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
               modelId: selectedModel,
+              auditContent: streamSnapshotRef.current.audit || null,
+              auditModelId: streamSnapshotRef.current.audit ? auditModel : null,
               createdAt: now,
-            },
+            } as OpenaiMessage,
           ]);
         } else {
           await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
@@ -341,6 +370,7 @@ export function ChatPage() {
         setStreamingContent("");
         setStreamingReasoning("");
         setStreamingSources([]);
+        setStreamingAudit("");
         setOptimisticUserMessage(null);
       },
       (err) => {
@@ -348,6 +378,7 @@ export function ChatPage() {
         setSearchStatus(null);
         setStreamingSources([]);
         setStreamingReasoning("");
+        setStreamingAudit("");
         setStreamError(err.message);
         if (!isPrivate && targetId) {
           void queryClient
@@ -370,8 +401,15 @@ export function ChatPage() {
       (skills) => {
         setActiveSkills(skills);
       },
+      (chunk) => {
+        streamSnapshotRef.current.audit += chunk;
+        setStreamingAudit((prev) => prev + chunk);
+      },
       controller.signal,
-      isPrivate ? { ephemeral: true, history: privateHistory } : undefined,
+      {
+        ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
+        ...(auditModel ? { auditModel } : {}),
+      },
     );
     return true;
   };
@@ -444,6 +482,8 @@ export function ChatPage() {
               isStreaming
                 ? searchStatus?.kind === "thinking"
                   ? "thinking"
+                  : searchStatus?.kind === "auditing"
+                    ? "auditing"
                   : searchStatus?.kind === "searching" || searchStatus?.kind === "fetching"
                     ? "searching"
                     : streamingContent
@@ -452,6 +492,7 @@ export function ChatPage() {
                 : null
             }
             streamingReasoning={streamingReasoning}
+            streamingAudit={streamingAudit}
           />
         )}
       </div>
@@ -523,6 +564,26 @@ export function ChatPage() {
                 disabled={isStreaming || createConversation.isPending}
               />
             )}
+            <button
+              type="button"
+              disabled={isStreaming || createConversation.isPending}
+              onClick={() => {
+                const next = !auditEnabled;
+                setAuditEnabled(next);
+                saveSettings({ auditEnabled: next });
+              }}
+              className={cn(
+                "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center",
+                auditEnabled
+                  ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
+                  : "text-muted-foreground border-border/50 hover:text-foreground",
+                (isStreaming || createConversation.isPending) && "opacity-50",
+              )}
+              title={auditModel ? `監査: ${auditModel}` : "監査モード"}
+            >
+              <Scale className="w-3 h-3" />
+              監査{auditEnabled ? " ON" : ""}
+            </button>
           </div>
           <MessageInput
             onSend={handleSend}

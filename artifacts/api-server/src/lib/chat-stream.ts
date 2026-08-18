@@ -14,6 +14,8 @@ import {
   readContentDelta,
   type StreamDelta,
 } from "./stream-delta";
+import { getClientForModel } from "./ai-clients";
+import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { logger } from "./logger";
@@ -31,9 +33,11 @@ export async function streamChatReply(args: {
   reasoningLevel: ReasoningLevel;
   userText: string;
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  auditModelId?: string;
   onComplete?: (result: {
     content: string;
     sources: { title: string; url: string }[];
+    audit?: { content: string; modelId: string };
   }) => Promise<void>;
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
@@ -45,6 +49,7 @@ export async function streamChatReply(args: {
     reasoningLevel,
     userText,
     chatMessages,
+    auditModelId,
     onComplete,
     publicAiError,
   } = args;
@@ -102,70 +107,22 @@ export async function streamChatReply(args: {
       }
     }
 
-    const streamOptions: Parameters<typeof client.chat.completions.create>[0] = {
-      model: modelId,
-      messages: chatMessages,
-      stream: true,
-    };
-    applyGenerationParams(
-      streamOptions as unknown as Record<string, unknown>,
-      modelId,
+    fullResponse = await streamModelText({
+      client,
       provider,
+      modelId,
       reasoningLevel,
-    );
-
-    let stream: AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
-    try {
-      stream = (await client.chat.completions.create(streamOptions)) as AsyncIterable<{
-        choices?: { delta?: StreamDelta }[];
-      }>;
-    } catch (err) {
-      if (!isUnsupportedGenerationParam(err)) throw err;
-      logger.warn({ err, modelId }, "Retrying chat stream without extra generation params");
-      applySafeGenerationParams(streamOptions as unknown as Record<string, unknown>, provider);
-      stream = (await client.chat.completions.create(streamOptions)) as AsyncIterable<{
-        choices?: { delta?: StreamDelta }[];
-      }>;
-    }
-
-    let fullReasoning = "";
-    let emittedThinking = false;
-
-    for await (const chunk of stream) {
-      if (clientGone) break;
-      const delta = chunk.choices?.[0]?.delta;
-      const reasoningDelta = readReasoningDelta(delta);
-      if (reasoningDelta) {
-        const merged = mergeStreamDelta(fullReasoning, reasoningDelta);
-        const added = merged.slice(fullReasoning.length);
-        fullReasoning = merged;
-        if (added && !clientGone) {
-          if (!emittedThinking) {
-            res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
-            emittedThinking = true;
-          }
-          res.write(`data: ${JSON.stringify({ reasoning: added })}\n\n`);
-        }
-      }
-
-      const contentDelta = readContentDelta(delta);
-      if (contentDelta) {
-        const merged = mergeStreamDelta(fullResponse, contentDelta);
-        const added = merged.slice(fullResponse.length);
-        fullResponse = merged;
-        if (added && !clientGone) {
+      messages: chatMessages,
+      onDelta: (added, kind) => {
+        if (clientGone) return;
+        if (kind === "reasoning") {
+          res.write(`data: ${JSON.stringify({ status: "thinking", reasoning: added })}\n\n`);
+        } else {
           res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
         }
-      }
-    }
-
-    const split = splitThinkTags(fullResponse);
-    if (split.reasoning) {
-      fullReasoning = fullReasoning
-        ? mergeStreamDelta(fullReasoning, split.reasoning)
-        : split.reasoning;
-      fullResponse = split.content;
-    }
+      },
+      shouldStop: () => clientGone,
+    });
 
     if (!fullResponse.trim()) {
       if (!clientGone) {
@@ -174,8 +131,53 @@ export async function streamChatReply(args: {
         );
       }
     } else {
+      let audit: { content: string; modelId: string } | undefined;
+      if (auditModelId && auditModelId !== modelId && !clientGone) {
+        try {
+          const auditor = getClientForModel(auditModelId);
+          res.write(
+            `data: ${JSON.stringify({ status: "auditing", model: auditModelId })}\n\n`,
+          );
+          const auditText = await streamModelText({
+            client: auditor.client,
+            provider: auditor.provider,
+            modelId: auditModelId,
+            reasoningLevel: "off",
+            messages: [
+              { role: "system", content: AUDIT_SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: buildAuditUserMessage({
+                  question: userText,
+                  answer: fullResponse,
+                  sourceText: webContext.contextText,
+                }),
+              },
+            ],
+            onDelta: (added, kind) => {
+              if (clientGone || kind !== "content") return;
+              res.write(`data: ${JSON.stringify({ audit: added })}\n\n`);
+            },
+            shouldStop: () => clientGone,
+          });
+          if (auditText.trim()) {
+            audit = { content: auditText.trim(), modelId: auditModelId };
+          }
+        } catch (err) {
+          logger.warn({ err, auditModelId }, "Audit pass failed; returning main answer only");
+          if (!clientGone) {
+            res.write(
+              `data: ${JSON.stringify({
+                status: "search_warning",
+                message: "監査モデルの実行に失敗しました。本文の回答のみ表示します。",
+              })}\n\n`,
+            );
+          }
+        }
+      }
+
       if (onComplete) {
-        await onComplete({ content: fullResponse, sources: webContext.sources });
+        await onComplete({ content: fullResponse, sources: webContext.sources, audit });
       }
       if (!clientGone) {
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
@@ -191,4 +193,62 @@ export async function streamChatReply(args: {
   if (!res.writableEnded) {
     res.end();
   }
+}
+
+async function streamModelText(args: {
+  client: OpenAI;
+  provider: ModelProvider;
+  modelId: string;
+  reasoningLevel: ReasoningLevel;
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  onDelta: (text: string, kind: "content" | "reasoning") => void;
+  shouldStop: () => boolean;
+}): Promise<string> {
+  const streamOptions: Parameters<typeof args.client.chat.completions.create>[0] = {
+    model: args.modelId,
+    messages: args.messages,
+    stream: true,
+  };
+  applyGenerationParams(
+    streamOptions as unknown as Record<string, unknown>,
+    args.modelId,
+    args.provider,
+    args.reasoningLevel,
+  );
+
+  let stream: AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
+  try {
+    stream = (await args.client.chat.completions.create(streamOptions)) as AsyncIterable<{
+      choices?: { delta?: StreamDelta }[];
+    }>;
+  } catch (err) {
+    if (!isUnsupportedGenerationParam(err)) throw err;
+    logger.warn({ err, modelId: args.modelId }, "Retrying stream without extra generation params");
+    applySafeGenerationParams(streamOptions as unknown as Record<string, unknown>, args.provider);
+    stream = (await args.client.chat.completions.create(streamOptions)) as AsyncIterable<{
+      choices?: { delta?: StreamDelta }[];
+    }>;
+  }
+
+  let full = "";
+  let reasoning = "";
+  for await (const chunk of stream) {
+    if (args.shouldStop()) break;
+    const delta = chunk.choices?.[0]?.delta;
+    const reasoningDelta = readReasoningDelta(delta);
+    if (reasoningDelta) {
+      const merged = mergeStreamDelta(reasoning, reasoningDelta);
+      const added = merged.slice(reasoning.length);
+      reasoning = merged;
+      if (added) args.onDelta(added, "reasoning");
+    }
+    const contentDelta = readContentDelta(delta);
+    if (contentDelta) {
+      const merged = mergeStreamDelta(full, contentDelta);
+      const added = merged.slice(full.length);
+      full = merged;
+      if (added) args.onDelta(added, "content");
+    }
+  }
+  return splitThinkTags(full).content;
 }

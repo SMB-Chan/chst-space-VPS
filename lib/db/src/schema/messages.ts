@@ -16,6 +16,8 @@ export const messages = pgTable(
     modelId: text("model_id"),
     /** JSON-encoded array of {title, url} objects for web search sources */
     sources: text("sources"),
+    auditContent: text("audit_content"),
+    auditModelId: text("audit_model_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
