@@ -136,12 +136,17 @@ export async function streamChatReply(args: {
       }
     } else {
       let audit: { content: string; modelId: string } | undefined;
-      if (auditModelId && auditModelId !== modelId && !clientGone) {
+      // Run the audit even if the client disconnected mid-stream: the audited
+      // result is still persisted via onComplete, so revisiting the
+      // conversation shows the audited answer instead of the raw draft.
+      if (auditModelId && auditModelId !== modelId) {
         try {
           const auditor = getClientForModel(auditModelId);
-          res.write(
-            `data: ${JSON.stringify({ status: "auditing", model: auditModelId })}\n\n`,
-          );
+          if (!clientGone) {
+            res.write(
+              `data: ${JSON.stringify({ status: "auditing", model: auditModelId })}\n\n`,
+            );
+          }
           const auditText = await streamModelText({
             client: auditor.client,
             provider: auditor.provider,
@@ -162,7 +167,7 @@ export async function streamChatReply(args: {
               if (clientGone || kind !== "content") return;
               res.write(`data: ${JSON.stringify({ audit: added })}\n\n`);
             },
-            shouldStop: () => clientGone,
+            shouldStop: () => false,
           });
           if (auditText.trim()) {
             audit = { content: auditText.trim(), modelId: auditModelId };
@@ -180,11 +185,16 @@ export async function streamChatReply(args: {
         }
       }
 
-      if (audit?.content && !clientGone) {
+      // The revision pass runs regardless of clientGone: SSE writes are
+      // skipped after a disconnect, but the revised final answer is what
+      // onComplete persists, so a reload shows the corrected answer.
+      if (audit?.content) {
         const draft = fullResponse;
         let replacedDraft = false;
         try {
-          res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
+          if (!clientGone) {
+            res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
+          }
           const revised = await streamModelText({
             client,
             provider,
@@ -205,7 +215,7 @@ export async function streamChatReply(args: {
             onDelta: (added, kind) => {
               if (clientGone) return;
               if (kind === "reasoning") {
-                res.write(`data: ${JSON.stringify({ status: "thinking", reasoning: added })}\n\n`);
+                res.write(`data: ${JSON.stringify({ status: "revising", reasoning: added })}\n\n`);
                 return;
               }
               if (!replacedDraft) {
@@ -214,9 +224,9 @@ export async function streamChatReply(args: {
               }
               res.write(`data: ${JSON.stringify({ content: added, status: "revising" })}\n\n`);
             },
-            shouldStop: () => clientGone,
+            shouldStop: () => false,
           });
-          if (revised.trim() && !clientGone) {
+          if (revised.trim()) {
             fullResponse = revised.trim();
           }
         } catch (err) {
