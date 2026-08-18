@@ -128,7 +128,8 @@ export function ChatPage() {
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
-  const handleSend = async (content: string, fileData?: { name: string; content: string; isBase64: boolean }) => {
+  // 戻り値: false = 送信ブロック（入力・添付は保持される）
+  const handleSend = async (content: string, fileData?: { name: string; content: string; isBase64: boolean }): Promise<boolean> => {
     let finalContent = content;
 
     if (fileData) {
@@ -139,7 +140,7 @@ export function ChatPage() {
           setStreamError(
             `${model.label} は画像を読み取れません。画像を送る場合は GPT や Qwen などの画像対応モデルを選択してください。`
           );
-          return;
+          return false;
         }
       }
       if (fileData.isBase64) {
@@ -159,11 +160,11 @@ export function ChatPage() {
         queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
         setLocation(`/conversations/${newConv.id}`, { replace: true });
       } catch {
-        return;
+        return false;
       }
     }
 
-    if (!targetId) return;
+    if (!targetId) return false;
 
     setStreamError(null);
     setSearchWarning(null);
@@ -213,6 +214,7 @@ export function ChatPage() {
         setStreamingSources(sources);
       }
     );
+    return true;
   };
 
   // サーバー側に既に同じユーザーメッセージが保存済みなら楽観的表示を重複させない

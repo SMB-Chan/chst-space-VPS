@@ -4,10 +4,11 @@ import { Paperclip, Send, X, File as FileIcon, Image as ImageIcon } from "lucide
 import { cn } from "@/lib/utils";
 
 interface MessageInputProps {
+  // 戻り値がfalseの場合は送信がブロックされた（入力・添付は保持する）
   onSend: (
     content: string,
     file?: { name: string; content: string; isBase64: boolean },
-  ) => void | Promise<void>;
+  ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
 }
 
@@ -96,7 +97,10 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
         };
       }
 
-      await onSend(content.trim() || "What's in this file?", fileData);
+      const result = await onSend(content.trim() || "What's in this file?", fileData);
+      // 送信がブロックされた場合（例: 画像非対応モデル）は入力・添付を保持する
+      if (result === false) return;
+
       setContent("");
       setFile(null);
       setFileError(null);
