@@ -7,7 +7,6 @@ import {
 import { Link, useLocation, useParams } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  MessageSquare,
   Plus,
   Trash2,
   MoreVertical,
@@ -15,6 +14,8 @@ import {
   PanelLeftOpen,
   Command,
   Loader2,
+  Settings,
+  Shield,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ja } from "date-fns/locale";
@@ -50,7 +51,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
   const isMobile = useIsMobile();
   // On mobile, sidebar starts closed. On desktop, starts open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean | undefined>(undefined);
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const params = useParams();
   const queryClient = useQueryClient();
 
@@ -129,7 +130,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           </Button>
         </div>
 
-        <div className="p-3 flex-shrink-0">
+        <div className="p-3 flex-shrink-0 space-y-1">
           <Button
             onClick={handleNewChat}
             className="w-full justify-start gap-2 h-10 bg-sidebar-accent/50 text-sidebar-foreground hover:bg-sidebar-accent hover:text-primary transition-colors"
@@ -137,6 +138,20 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           >
             <Plus className="w-4 h-4" />
             新しい会話
+          </Button>
+          <Button
+            onClick={() => {
+              setLocation("/private");
+              if (isMobile) setSidebarOpen(false);
+            }}
+            className={cn(
+              "w-full justify-start gap-2 h-10 text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
+              location === "/private" && "bg-violet-500/15 text-violet-200 hover:bg-violet-500/20",
+            )}
+            variant="ghost"
+          >
+            <Shield className="w-4 h-4" />
+            プライベート
           </Button>
         </div>
 
@@ -220,6 +235,21 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               {user?.primaryEmailAddress?.emailAddress ?? ""}
             </div>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="設定"
+            className={cn(
+              "w-8 h-8 text-sidebar-foreground/60 hover:text-sidebar-foreground",
+              location === "/settings" && "text-foreground",
+            )}
+            onClick={() => {
+              setLocation("/settings");
+              if (isMobile) setSidebarOpen(false);
+            }}
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"

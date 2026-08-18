@@ -14,7 +14,9 @@ import { ModelSelector, useAvailableModels } from "@/components/chat/model-selec
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
 import { type ReasoningLevel } from "@/lib/reasoning";
-import { Sparkles, X } from "lucide-react";
+import { loadSettings } from "@/lib/settings";
+import { cn } from "@/lib/utils";
+import { Sparkles, X, Shield } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -31,14 +33,21 @@ async function streamMessage(
   onSearchWarning: (message: string) => void,
   onSources: (sources: { title: string; url: string }[]) => void,
   signal?: AbortSignal,
+  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[] },
 ) {
   try {
+    const path = extra?.ephemeral
+      ? `${BASE}/api/openai/ephemeral/messages`
+      : `${BASE}/api/openai/conversations/${conversationId}/messages`;
     const res = await fetch(
-      `${BASE}/api/openai/conversations/${conversationId}/messages?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}`,
+      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+          content,
+          ...(extra?.ephemeral && extra.history ? { history: extra.history } : {}),
+        }),
         credentials: "include",
         signal,
       }
@@ -129,7 +138,9 @@ async function streamMessage(
 
 export function ChatPage() {
   const params = useParams();
-  const [_, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+  const isPrivate = location === "/private" || location.startsWith("/private?");
+  const initialSettings = loadSettings();
   const rawId = params.id;
   const parsedId = rawId ? Number.parseInt(rawId, 10) : NaN;
   const invalidConversationId = rawId != null && !Number.isFinite(parsedId);
@@ -140,8 +151,10 @@ export function ChatPage() {
   const abortRef = useRef<AbortController | null>(null);
   const sendingToRef = useRef<number | null>(null);
 
-  const [selectedModel, setSelectedModel] = useState("gpt-5.6-terra");
-  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("medium");
+  const [selectedModel, setSelectedModel] = useState(initialSettings.defaultModel);
+  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(initialSettings.defaultReasoning);
+  const [privateMessages, setPrivateMessages] = useState<OpenaiMessage[]>([]);
+  const streamSnapshotRef = useRef({ content: "", sources: [] as { title: string; url: string }[] });
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
   const [streamingReasoning, setStreamingReasoning] = useState<string>("");
@@ -179,19 +192,23 @@ export function ChatPage() {
 
   const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
     conversationId as number,
-    { query: { enabled: !!conversationId, queryKey: getGetOpenaiConversationQueryKey(conversationId as number) } }
+    { query: { enabled: !!conversationId && !isPrivate, queryKey: getGetOpenaiConversationQueryKey(conversationId as number) } }
   );
+
+  useEffect(() => {
+    if (!isPrivate) setPrivateMessages([]);
+  }, [isPrivate]);
 
   // Restore the last used model when opening an existing conversation
   useEffect(() => {
-    if (!conversation || modelRestoredForConv === conversation.id) return;
+    if (isPrivate || !conversation || modelRestoredForConv === conversation.id) return;
     const msgs = conversation.messages ?? [];
     const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.modelId);
     if (lastAssistant?.modelId && models.some((m) => m.id === lastAssistant.modelId)) {
       setSelectedModel(lastAssistant.modelId);
     }
     setModelRestoredForConv(conversation.id);
-  }, [conversation, modelRestoredForConv, models]);
+  }, [conversation, modelRestoredForConv, models, isPrivate]);
 
   const createConversation = useCreateOpenaiConversation();
 
@@ -219,7 +236,7 @@ export function ChatPage() {
 
     let targetId = conversationId;
 
-    if (!targetId) {
+    if (!isPrivate && !targetId) {
       try {
         const newConv = await createConversation.mutateAsync({
           data: { title: conversationTitle(content) },
@@ -235,14 +252,14 @@ export function ChatPage() {
       }
     }
 
-    if (!targetId) return false;
+    if (!isPrivate && !targetId) return false;
 
-    sendingToRef.current = targetId;
+    sendingToRef.current = targetId ?? 0;
     setStreamError(null);
     setSearchWarning(null);
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
-      conversationId: targetId,
+      conversationId: targetId ?? 0,
       role: "user",
       content: finalContent,
       createdAt: new Date().toISOString(),
@@ -253,17 +270,23 @@ export function ChatPage() {
     setStreamingReasoning("");
     setStreamingSources([]);
     setSearchStatus({ kind: "starting" });
+    streamSnapshotRef.current = { content: "", sources: [] };
 
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const privateHistory = isPrivate
+      ? privateMessages.map((m) => ({ role: m.role, content: m.content }))
+      : undefined;
+
     await streamMessage(
-      targetId,
+      targetId ?? 0,
       finalContent,
       selectedModel,
       reasoningLevel,
       (chunk) => {
+        streamSnapshotRef.current.content += chunk;
         setStreamingContent((prev) => prev + chunk);
       },
       (chunk) => {
@@ -271,9 +294,30 @@ export function ChatPage() {
       },
       async () => {
         setSearchStatus(null);
-        // サーバーの再取得が完了してからストリーミング表示をクリアする
-        // （先にクリアすると一瞬消え、後に残すと保存済みメッセージと二重表示になる）
-        await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
+        if (isPrivate) {
+          const now = new Date().toISOString();
+          setPrivateMessages((prev) => [
+            ...prev,
+            {
+              id: OPTIMISTIC_USER_ID - prev.length - 1,
+              conversationId: 0,
+              role: "user",
+              content: finalContent,
+              createdAt: now,
+            },
+            {
+              id: STREAMING_ASSISTANT_ID - prev.length - 1,
+              conversationId: 0,
+              role: "assistant",
+              content: streamSnapshotRef.current.content,
+              sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
+              modelId: selectedModel,
+              createdAt: now,
+            },
+          ]);
+        } else {
+          await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
+        }
         setIsStreaming(false);
         setStreamingContent("");
         setStreamingReasoning("");
@@ -295,15 +339,17 @@ export function ChatPage() {
         setSearchWarning(message);
       },
       (sources) => {
+        streamSnapshotRef.current.sources = sources;
         setStreamingSources(sources);
       },
       controller.signal,
+      isPrivate ? { ephemeral: true, history: privateHistory } : undefined,
     );
     return true;
   };
 
   // サーバー側に既に同じユーザーメッセージが保存済みなら楽観的表示を重複させない
-  const serverMessages = conversation?.messages || [];
+  const serverMessages = isPrivate ? privateMessages : (conversation?.messages || []);
   const optimisticAlreadyOnServer =
     optimisticUserMessage != null &&
     serverMessages.some(
@@ -334,21 +380,32 @@ export function ChatPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-hidden flex flex-col">
-        {invalidConversationId || (conversationLoadError && !optimisticUserMessage && !isStreaming) ? (
+        {!isPrivate && (invalidConversationId || (conversationLoadError && !optimisticUserMessage && !isStreaming)) ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <h2 className="text-xl font-serif font-medium mb-2">会話が見つかりません</h2>
             <p className="text-muted-foreground text-sm">URL が正しくないか、この会話にアクセスできません。左の履歴から選び直してください。</p>
           </div>
-        ) : !conversationId && !optimisticUserMessage ? (
+        ) : !conversationId && !optimisticUserMessage && privateMessages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-2xl mx-auto w-full">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 shadow-inner border border-primary/20">
-              <Sparkles className="w-8 h-8 text-primary" />
+            <div className={cn(
+              "w-16 h-16 rounded-2xl flex items-center justify-center mb-6 shadow-inner border",
+              isPrivate
+                ? "bg-violet-500/10 border-violet-500/30"
+                : "bg-primary/10 border-primary/20",
+            )}>
+              {isPrivate ? (
+                <Shield className="w-8 h-8 text-violet-300" />
+              ) : (
+                <Sparkles className="w-8 h-8 text-primary" />
+              )}
             </div>
             <h2 className="text-3xl font-serif font-medium mb-3 text-foreground tracking-tight">
-              {greeting.title}
+              {isPrivate ? "プライベートセッション" : greeting.title}
             </h2>
             <p className="text-muted-foreground mb-8 text-lg max-w-md font-sans font-light">
-              {greeting.subtitle}
+              {isPrivate
+                ? "この会話はサーバーに保存されません。タブを閉じると履歴は消えます。"
+                : greeting.subtitle}
             </p>
           </div>
         ) : (

@@ -10,6 +10,7 @@ import NotFound from '@/pages/not-found';
 import { ChatLayout } from '@/components/layout/chat-layout';
 import { ChatPage } from '@/pages/chat';
 import { HomePage } from '@/pages/home';
+import { SettingsPage } from '@/pages/settings';
 import {
   Redirect,
   Route,
@@ -199,6 +200,16 @@ function Router() {
       <Route path="/chat">
         <ProtectedChat>
           <ChatPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/private">
+        <ProtectedChat>
+          <ChatPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/settings">
+        <ProtectedChat>
+          <SettingsPage />
         </ProtectedChat>
       </Route>
       <Route path="/conversations/:id">
