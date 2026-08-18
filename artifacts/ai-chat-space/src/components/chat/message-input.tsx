@@ -4,18 +4,44 @@ import { Paperclip, Send, X, File as FileIcon, Image as ImageIcon } from "lucide
 import { cn } from "@/lib/utils";
 
 interface MessageInputProps {
-  onSend: (content: string, file?: { name: string; content: string; isBase64: boolean }) => void;
+  onSend: (
+    content: string,
+    file?: { name: string; content: string; isBase64: boolean },
+  ) => void | Promise<void>;
   disabled?: boolean;
+}
+
+// 画像のみ対応（PDFなどバイナリは非対応）
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"];
+const ACCEPTED_TEXT_TYPES = ["text/plain", "text/markdown", "text/csv", "application/json"];
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
+
+function validateFile(file: File): string | null {
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。15MB以下のファイルを選択してください。`;
+  }
+  const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type) || file.type.startsWith("image/");
+  const isText = ACCEPTED_TEXT_TYPES.includes(file.type) ||
+    file.name.endsWith(".txt") || file.name.endsWith(".md") ||
+    file.name.endsWith(".csv") || file.name.endsWith(".json");
+  if (!isImage && !isText) {
+    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP）またはテキストファイル（TXT・MD・CSV・JSON）を添付してください。`;
+  }
+  return null;
 }
 
 export function MessageInput({ onSend, disabled }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 送信処理中フラグ（二重送信防止）
+  const isSendingRef = useRef(false);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // IME変換確定のEnterは無視する
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSubmit();
     }
@@ -24,9 +50,16 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (selected) {
-      setFile(selected);
-      // Return focus to input after picking a file
-      setTimeout(() => textareaRef.current?.focus(), 10);
+      const error = validateFile(selected);
+      if (error) {
+        setFileError(error);
+        setFile(null);
+      } else {
+        setFileError(null);
+        setFile(selected);
+        // Return focus to input after picking a file
+        setTimeout(() => textareaRef.current?.focus(), 10);
+      }
     }
     // reset so same file can be picked again if removed
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -34,39 +67,46 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
 
   const handleSubmit = async () => {
     if ((!content.trim() && !file) || disabled) return;
+    // 実行中ガード（二重送信防止）
+    if (isSendingRef.current) return;
+    isSendingRef.current = true;
 
-    let fileData = undefined;
+    try {
+      let fileData = undefined;
 
-    if (file) {
-      const isImage = file.type.startsWith("image/");
-      const reader = new FileReader();
+      if (file) {
+        const isImage = file.type.startsWith("image/");
+        const reader = new FileReader();
 
-      const readFile = new Promise<{ content: string; isBase64: boolean }>((resolve) => {
-        reader.onload = (e) => {
-          const result = e.target?.result as string;
-          resolve({ content: result, isBase64: isImage });
+        const readFile = new Promise<{ content: string; isBase64: boolean }>((resolve) => {
+          reader.onload = (e) => {
+            const result = e.target?.result as string;
+            resolve({ content: result, isBase64: isImage });
+          };
+          if (isImage) {
+            reader.readAsDataURL(file);
+          } else {
+            reader.readAsText(file);
+          }
+        });
+
+        fileData = {
+          name: file.name,
+          ...(await readFile),
         };
-        if (isImage) {
-          reader.readAsDataURL(file);
-        } else {
-          // For non-images, try to read as text. If it's binary, it might look messy but we'll extract what we can.
-          reader.readAsText(file);
-        }
-      });
+      }
 
-      fileData = {
-        name: file.name,
-        ...(await readFile),
-      };
-    }
+      await onSend(content.trim() || "What's in this file?", fileData);
+      setContent("");
+      setFile(null);
+      setFileError(null);
 
-    onSend(content.trim() || "What's in this file?", fileData);
-    setContent("");
-    setFile(null);
-    
-    // Reset textarea height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+    } finally {
+      isSendingRef.current = false;
     }
   };
 
@@ -79,6 +119,20 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
 
   return (
     <div className="relative bg-card rounded-3xl border border-border shadow-lg shadow-black/5 flex flex-col transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20">
+      {fileError && (
+        <div className="flex items-start gap-2 px-4 pt-3 pb-1">
+          <div className="flex items-start gap-2 px-3 py-2 rounded-2xl bg-destructive/10 border border-destructive/20 text-xs text-destructive w-full animate-in fade-in slide-in-from-bottom-2">
+            <span className="shrink-0 mt-0.5">⚠️</span>
+            <span>{fileError}</span>
+            <button
+              onClick={() => setFileError(null)}
+              className="ml-auto p-0.5 rounded-full hover:bg-destructive/20 transition-colors shrink-0"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
       {file && (
         <div className="flex items-center gap-3 px-4 pt-3 pb-1">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-foreground max-w-[200px] animate-in fade-in slide-in-from-bottom-2">
@@ -104,7 +158,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           ref={fileInputRef} 
           onChange={handleFileChange} 
           className="hidden" 
-          accept="image/*,.txt,.md,.pdf,.csv,.json"
+          accept="image/*,.txt,.md,.csv,.json"
         />
         
         <Button 

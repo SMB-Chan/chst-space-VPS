@@ -37,12 +37,28 @@ async function streamMessage(
     );
 
     if (!res.ok) {
-      throw new Error(`Failed to send message: ${res.statusText}`);
+      // JSONエラー本文を読み取り、具体的なメッセージを表示する
+      let errorMessage: string;
+      try {
+        const errorBody = await res.json();
+        errorMessage = errorBody.error ?? errorBody.message ?? res.statusText;
+      } catch {
+        errorMessage = res.statusText || `エラー (HTTP ${res.status})`;
+      }
+      throw new Error(errorMessage);
     }
 
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    // onDoneが二重実行されないようフラグで管理
+    let doneCalled = false;
+    const callDoneOnce = () => {
+      if (!doneCalled) {
+        doneCalled = true;
+        onDone();
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -65,12 +81,13 @@ async function streamMessage(
               onChunk(parsed.content);
             }
             if (parsed.error) onError(new Error(parsed.error));
-            if (parsed.done) onDone();
+            if (parsed.done) callDoneOnce();
           } catch {}
         }
       }
     }
-    onDone();
+    // ストリーム終端でもdoneが来なかった場合に呼ぶ
+    callDoneOnce();
   } catch (err) {
     onError(err instanceof Error ? err : new Error(String(err)));
   }
@@ -152,19 +169,22 @@ export function ChatPage() {
     setStreamingContent("");
     setStreamingSources([]);
 
-    streamMessage(
+    await streamMessage(
       targetId,
       finalContent,
       selectedModel,
       (chunk) => {
         setStreamingContent((prev) => prev + chunk);
       },
-      () => {
-        setIsStreaming(false);
+      async () => {
         setSearchStatus(null);
+        // サーバーの再取得が完了してからストリーミング表示をクリアする
+        // （先にクリアすると一瞬消え、後に残すと保存済みメッセージと二重表示になる）
+        await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
+        setIsStreaming(false);
+        setStreamingContent("");
         setStreamingSources([]);
         setOptimisticUserMessage(null);
-        queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
       },
       (err) => {
         setIsStreaming(false);
@@ -185,10 +205,24 @@ export function ChatPage() {
     );
   };
 
+  // サーバー側に既に同じユーザーメッセージが保存済みなら楽観的表示を重複させない
+  const serverMessages = conversation?.messages || [];
+  const optimisticAlreadyOnServer =
+    optimisticUserMessage != null &&
+    serverMessages.some(
+      (m) => m.role === "user" && m.content === optimisticUserMessage.content
+        && new Date(m.createdAt).getTime() >= new Date(optimisticUserMessage.createdAt).getTime() - 60_000
+    );
+
+  // ストリーミング中の内容がサーバーに保存済みなら、ストリーミング吹き出しも重複させない
+  const streamingAlreadyOnServer =
+    streamingContent.length > 0 &&
+    serverMessages.some((m) => m.role === "assistant" && m.content === streamingContent);
+
   const allMessages = [
-    ...(conversation?.messages || []),
-    ...(optimisticUserMessage ? [optimisticUserMessage] : []),
-    ...(isStreaming || streamingContent
+    ...serverMessages,
+    ...(optimisticUserMessage && !optimisticAlreadyOnServer ? [optimisticUserMessage] : []),
+    ...((isStreaming || streamingContent) && !streamingAlreadyOnServer
       ? [{
           id: Date.now() + 1,
           conversationId: conversationId || 0,
