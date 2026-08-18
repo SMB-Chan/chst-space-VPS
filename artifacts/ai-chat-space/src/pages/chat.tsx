@@ -120,7 +120,7 @@ async function streamMessage(
         onSources(parsed.sources as { title: string; url: string }[]);
       }
       if (typeof parsed.reasoning === "string" && parsed.reasoning) {
-        onStatus("thinking");
+        onStatus(parsed.status === "revising" ? "revising" : "thinking");
         onReasoning(parsed.reasoning);
       }
       if (typeof parsed.content === "string" && parsed.content) {
@@ -156,9 +156,17 @@ async function streamMessage(
       if (failed) break;
     }
     if (!failed && buffer.trim()) handleSseLine(buffer.trim());
-    if (!failed && !doneCalled && !receivedContent) {
+    if (!failed && !doneCalled) {
+      // done を受け取らずにストリームが終わった = 途中切断。
+      // サーバー側は監査・修正と保存を続行するので、開き直せば最終稿が見える。
       failed = true;
-      onError(new Error("応答が空でした。もう一度お試しください。"));
+      onError(
+        new Error(
+          receivedContent
+            ? "接続が途中で切れました。会話を開き直すと、保存された最新の回答を確認できます。"
+            : "応答が空でした。もう一度お試しください。",
+        ),
+      );
       return;
     }
     if (!failed) callDoneOnce();
