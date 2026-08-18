@@ -37,18 +37,28 @@ export type ModelProvider = "openai" | "dashscope";
 
 export const AVAILABLE_MODELS = [
   // OpenAI models (via Replit AI Integrations)
-  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" as ModelProvider, description: "高性能・汎用" },
-  { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",  provider: "openai" as ModelProvider, description: "高速・低コスト" },
-  { id: "o4-mini",       label: "o4-mini",        provider: "openai" as ModelProvider, description: "高度な推論" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" as ModelProvider, description: "高性能・汎用", supportsVision: true },
+  { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",  provider: "openai" as ModelProvider, description: "高速・低コスト", supportsVision: true },
+  { id: "o4-mini",       label: "o4-mini",        provider: "openai" as ModelProvider, description: "高度な推論", supportsVision: true },
   // Alibaba Cloud Model Studio (Token Plan endpoint)
-  { id: "qwen3.8-max",           label: "Qwen3.8 Max",       provider: "dashscope" as ModelProvider, description: "Alibaba最高性能" },
-  { id: "qwen3.7-plus",          label: "Qwen3.7 Plus",      provider: "dashscope" as ModelProvider, description: "高速・バランス" },
-  { id: "qwen3.6-flash",         label: "Qwen3.6 Flash",     provider: "dashscope" as ModelProvider, description: "最速・低コスト" },
-  { id: "deepseek-v4-pro",       label: "DeepSeek V4 Pro",   provider: "dashscope" as ModelProvider, description: "推論特化" },
-  { id: "glm-5.2",               label: "GLM-5.2",           provider: "dashscope" as ModelProvider, description: "汎用" },
+  { id: "qwen3.8-max",           label: "Qwen3.8 Max",       provider: "dashscope" as ModelProvider, description: "Alibaba最高性能", supportsVision: true },
+  { id: "qwen3.7-plus",          label: "Qwen3.7 Plus",      provider: "dashscope" as ModelProvider, description: "高速・バランス", supportsVision: true },
+  { id: "qwen3.6-flash",         label: "Qwen3.6 Flash",     provider: "dashscope" as ModelProvider, description: "最速・低コスト", supportsVision: true },
+  { id: "deepseek-v4-pro",       label: "DeepSeek V4 Pro",   provider: "dashscope" as ModelProvider, description: "推論特化", supportsVision: false },
+  { id: "glm-5.2",               label: "GLM-5.2",           provider: "dashscope" as ModelProvider, description: "汎用", supportsVision: false },
 ] as const;
 
 export type ModelId = typeof AVAILABLE_MODELS[number]["id"];
+
+export function modelSupportsVision(modelId: string): boolean {
+  const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+  // Unknown model falls back to OpenAI default (vision-capable)
+  return model ? model.supportsVision : true;
+}
+
+export function getModelLabel(modelId: string): string {
+  return AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
+}
 
 export function getClientForModel(modelId: string): { client: OpenAI; provider: ModelProvider } {
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);

@@ -10,7 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import { MessageFeed } from "@/components/chat/message-feed";
 import { MessageInput } from "@/components/chat/message-input";
-import { ModelSelector } from "@/components/chat/model-selector";
+import { ModelSelector, MODELS } from "@/components/chat/model-selector";
 import { Sparkles } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -132,6 +132,16 @@ export function ChatPage() {
     let finalContent = content;
 
     if (fileData) {
+      // 選択中モデルが画像非対応なら、送信前に分かりやすいエラーを表示する
+      if (fileData.isBase64) {
+        const model = MODELS.find((m) => m.id === selectedModel);
+        if (model && !model.supportsVision) {
+          setStreamError(
+            `${model.label} は画像を読み取れません。画像を送る場合は GPT や Qwen などの画像対応モデルを選択してください。`
+          );
+          return;
+        }
+      }
       if (fileData.isBase64) {
         finalContent = `[Image: ${fileData.name}]\n\n${fileData.content}\n\n---\n\nUser question: ${content}`;
       } else {

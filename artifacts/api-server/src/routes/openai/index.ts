@@ -1,7 +1,13 @@
 import { Router, type IRouter } from "express";
+import type OpenAI from "openai";
 import { desc, eq } from "drizzle-orm";
 import { db, conversations, messages } from "@workspace/db";
-import { getClientForModel, AVAILABLE_MODELS } from "../../lib/ai-clients";
+import {
+  getClientForModel,
+  AVAILABLE_MODELS,
+  modelSupportsVision,
+  getModelLabel,
+} from "../../lib/ai-clients";
 import {
   CreateOpenaiConversationBody,
   GetOpenaiConversationParams,
@@ -14,6 +20,46 @@ import { logger } from "../../lib/logger";
 import { buildWebContext } from "../../lib/web-search";
 
 const router: IRouter = Router();
+
+// Matches user messages created by the frontend when an image is attached:
+// "[Image: name]\n\n<data URL>\n\n---\n\nUser question: <question>"
+const IMAGE_MESSAGE_RE =
+  /^\[Image:\s([^\]]+)\]\n\n(data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=\s]+?)\n\n---\n\nUser question:\s([\s\S]*)$/;
+
+interface ParsedUserContent {
+  text: string;
+  imageName?: string;
+  imageDataUrl?: string;
+}
+
+function parseUserContent(content: string): ParsedUserContent {
+  const m = content.match(IMAGE_MESSAGE_RE);
+  if (!m) return { text: content };
+  return { imageName: m[1], imageDataUrl: m[2].trim(), text: m[3] };
+}
+
+type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+// Convert a stored user message into the payload sent to the model.
+// Vision-capable models get structured content (text + image parts);
+// non-vision models get the question text with a placeholder so history
+// containing images does not break them.
+function toModelContent(
+  content: string,
+  visionCapable: boolean
+): string | ChatContentPart[] {
+  const parsed = parseUserContent(content);
+  if (!parsed.imageDataUrl) return content;
+  if (!visionCapable) {
+    return `[添付画像: ${parsed.imageName}（このモデルでは画像は読み取れません）]\n\n${parsed.text}`;
+  }
+  return [
+    { type: "text", text: parsed.text },
+    { type: "image_url", image_url: { url: parsed.imageDataUrl } },
+  ];
+}
 
 // List available models
 router.get("/openai/models", async (_req, res): Promise<void> => {
@@ -138,6 +184,16 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     return;
   }
 
+  // Reject image attachments up front when the selected model cannot see them
+  const visionCapable = modelSupportsVision(modelId);
+  const parsedNewMessage = parseUserContent(userContent);
+  if (parsedNewMessage.imageDataUrl && !visionCapable) {
+    res.status(400).json({
+      error: `${getModelLabel(modelId)} は画像を読み取れません。画像を送る場合は GPT-5.6 Terra / Luna、o4-mini、または Qwen のモデルを選択してください。`,
+    });
+    return;
+  }
+
   // Ensure conversation exists
   const [conv] = await db
     .select()
@@ -162,11 +218,18 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     .where(eq(messages.conversationId, conversationId))
     .orderBy(messages.createdAt);
 
-  const chatMessages: { role: "user" | "assistant" | "system"; content: string }[] =
-    history.map((m) => ({
-      role: m.role as "user" | "assistant" | "system",
-      content: m.content,
-    }));
+  // User messages may contain an attached image (as a data URL). For
+  // vision-capable models, convert those to structured multimodal content;
+  // assistant/system messages stay plain strings.
+  const chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
+    history.map((m) =>
+      m.role === "user"
+        ? { role: "user" as const, content: toModelContent(m.content, visionCapable) }
+        : {
+            role: m.role as "assistant" | "system",
+            content: m.content,
+          }
+    );
 
   // Set up SSE
   res.setHeader("Content-Type", "text/event-stream");
@@ -177,11 +240,13 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   let fullResponse = "";
   try {
     // Web search / URL fetch pre-step (model-independent, works with any provider)
+    // Use only the question text for search decisions / URL extraction —
+    // never feed base64 image data into the web-search pipeline
     const webContext = await buildWebContext(
       aiClient.client,
       modelId,
       aiClient.provider,
-      userContent,
+      parsedNewMessage.text,
       (event) => {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
