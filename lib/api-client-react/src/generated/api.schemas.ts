@@ -15,12 +15,18 @@ export interface OpenaiConversation {
   createdAt: string;
 }
 
+export interface OpenaiSource {
+  title: string;
+  url: string;
+}
+
 export interface OpenaiMessage {
   id: number;
   conversationId: number;
   role: string;
   content: string;
   modelId?: string | null;
+  sources?: OpenaiSource[] | null;
   createdAt: string;
 }
 

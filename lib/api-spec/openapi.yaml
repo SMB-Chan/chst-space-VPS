@@ -164,6 +164,16 @@ components:
         - id
         - title
         - createdAt
+    OpenaiSource:
+      type: object
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+      required:
+        - title
+        - url
     OpenaiMessage:
       type: object
       properties:
@@ -177,6 +187,11 @@ components:
           type: string
         modelId:
           type: string
+          nullable: true
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenaiSource'
           nullable: true
         createdAt:
           type: string

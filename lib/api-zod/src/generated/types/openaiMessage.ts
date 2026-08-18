@@ -6,11 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export interface OpenaiSource {
+  title: string;
+  url: string;
+}
+
 export interface OpenaiMessage {
   id: number;
   conversationId: number;
   role: string;
   content: string;
   modelId?: string | null;
+  sources?: OpenaiSource[] | null;
   createdAt: Date;
 }

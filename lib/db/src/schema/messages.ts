@@ -12,6 +12,8 @@ export const messages = pgTable("messages", {
   role: text("role").notNull(),
   content: text("content").notNull(),
   modelId: text("model_id"),
+  /** JSON-encoded array of {title, url} objects for web search sources */
+  sources: text("sources"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

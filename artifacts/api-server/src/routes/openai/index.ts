@@ -64,7 +64,11 @@ router.get("/openai/conversations/:id", async (req, res): Promise<void> => {
     .from(messages)
     .where(eq(messages.conversationId, params.data.id))
     .orderBy(messages.createdAt);
-  res.json({ ...conv, messages: msgs });
+  const parsedMsgs = msgs.map((m) => ({
+    ...m,
+    sources: m.sources ? JSON.parse(m.sources) : null,
+  }));
+  res.json({ ...conv, messages: parsedMsgs });
 });
 
 // Delete conversation
@@ -99,7 +103,11 @@ router.get("/openai/conversations/:id/messages", async (req, res): Promise<void>
     .from(messages)
     .where(eq(messages.conversationId, params.data.id))
     .orderBy(messages.createdAt);
-  res.json(msgs);
+  const parsedMsgs = msgs.map((m) => ({
+    ...m,
+    sources: m.sources ? JSON.parse(m.sources) : null,
+  }));
+  res.json(parsedMsgs);
 });
 
 // Send message — streaming SSE response
@@ -219,23 +227,15 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
       }
     }
 
-    // Append sources deterministically (server-side), stream them, then persist
-    if (webContext.sources.length > 0 && fullResponse.trim() !== "") {
-      const sourcesBlock =
-        "\n\n参照元:\n" +
-        webContext.sources
-          .map((s) => `- [${s.title.replace(/[\[\]]/g, "")}](${s.url})`)
-          .join("\n");
-      fullResponse += sourcesBlock;
-      res.write(`data: ${JSON.stringify({ content: sourcesBlock })}\n\n`);
-    }
-
-    // Save assistant message with the model that generated it
+    // Save assistant message with the model and sources that generated it
     await db.insert(messages).values({
       conversationId,
       role: "assistant",
       content: fullResponse,
       modelId,
+      sources: webContext.sources.length > 0
+        ? JSON.stringify(webContext.sources)
+        : null,
     });
 
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);

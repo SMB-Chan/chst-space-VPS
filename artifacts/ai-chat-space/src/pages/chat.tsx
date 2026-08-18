@@ -23,7 +23,8 @@ async function streamMessage(
   onDone: () => void,
   onError: (err: Error) => void,
   onStatus: (status: string | null, query?: string) => void,
-  onSearchWarning: (message: string) => void
+  onSearchWarning: (message: string) => void,
+  onSources: (sources: { title: string; url: string }[]) => void
 ) {
   try {
     const res = await fetch(
@@ -58,6 +59,7 @@ async function streamMessage(
             if (parsed.status === "search_warning" && parsed.message) {
               onSearchWarning(parsed.message);
             }
+            if (parsed.sources) onSources(parsed.sources);
             if (parsed.content) {
               onStatus(null);
               onChunk(parsed.content);
@@ -102,6 +104,7 @@ export function ChatPage() {
   const createConversation = useCreateOpenaiConversation();
 
   const [streamingContent, setStreamingContent] = useState<string>("");
+  const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
@@ -147,6 +150,7 @@ export function ChatPage() {
 
     setIsStreaming(true);
     setStreamingContent("");
+    setStreamingSources([]);
 
     streamMessage(
       targetId,
@@ -158,12 +162,14 @@ export function ChatPage() {
       () => {
         setIsStreaming(false);
         setSearchStatus(null);
+        setStreamingSources([]);
         setOptimisticUserMessage(null);
         queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
       },
       (err) => {
         setIsStreaming(false);
         setSearchStatus(null);
+        setStreamingSources([]);
         setOptimisticUserMessage(null);
         setStreamError(err.message);
       },
@@ -172,6 +178,9 @@ export function ChatPage() {
       },
       (message) => {
         setSearchWarning(message);
+      },
+      (sources) => {
+        setStreamingSources(sources);
       }
     );
   };
@@ -185,6 +194,7 @@ export function ChatPage() {
           conversationId: conversationId || 0,
           role: "assistant",
           content: streamingContent,
+          sources: streamingSources.length > 0 ? streamingSources : null,
           createdAt: new Date().toISOString(),
         }]
       : []),
