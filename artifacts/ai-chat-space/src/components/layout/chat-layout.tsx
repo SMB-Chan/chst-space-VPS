@@ -26,6 +26,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useClerk, useUser } from "@clerk/react";
+import { LogOut } from "lucide-react";
+
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 interface ChatLayoutProps {
   children: React.ReactNode;
@@ -51,8 +55,11 @@ export function ChatLayout({ children }: ChatLayoutProps) {
 
   const activeId = params.id ? parseInt(params.id) : null;
 
+  const { signOut } = useClerk();
+  const { user } = useUser();
+
   const handleNewChat = useCallback(() => {
-    setLocation("/");
+    setLocation("/chat");
     if (isMobile) setSidebarOpen(false);
   }, [setLocation, isMobile]);
 
@@ -65,7 +72,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         {
           onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
-            if (activeId === id) setLocation("/");
+            if (activeId === id) setLocation("/chat");
           },
         }
       );
@@ -180,6 +187,24 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               </div>
             ))
           )}
+        </div>
+
+        {/* User footer */}
+        <div className="border-t border-sidebar-border p-3 flex items-center gap-2 flex-shrink-0">
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-sidebar-foreground/70 truncate">
+              {user?.primaryEmailAddress?.emailAddress ?? ""}
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="ログアウト"
+            className="w-8 h-8 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            onClick={() => signOut({ redirectUrl: basePath || "/" })}
+          >
+            <LogOut className="w-4 h-4" />
+          </Button>
         </div>
       </div>
 

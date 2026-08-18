@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import type OpenAI from "openai";
-import { desc, eq } from "drizzle-orm";
 import { db, conversations, messages } from "@workspace/db";
 import {
   getClientForModel,
@@ -18,6 +17,8 @@ import {
 } from "@workspace/api-zod";
 import { logger } from "../../lib/logger";
 import { buildWebContext } from "../../lib/web-search";
+import { and, desc, eq } from "drizzle-orm";
+import { requireAuth } from "../../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -71,6 +72,7 @@ router.get("/openai/conversations", async (_req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(conversations)
+    .where(eq(conversations.userId, req.userId!))
     .orderBy(desc(conversations.createdAt));
   res.json(rows);
 });
@@ -83,16 +85,21 @@ router.post("/openai/conversations", async (req, res): Promise<void> => {
     return;
   }
   const [conv] = await db
-    .insert(conversations)
-    .values({ title: parsed.data.title })
-    .returning();
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, req.userId!)));
   res.status(201).json(conv);
 });
 
 // Get conversation with messages
 router.get("/openai/conversations/:id", async (req, res): Promise<void> => {
   const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = GetOpenaiConversationParams.safeParse({ id: rawId });
+  const params = SendOpenaiMessageParams.safeParse({ id: rawId });
+
+  const [owned] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)));
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
@@ -100,48 +107,9 @@ router.get("/openai/conversations/:id", async (req, res): Promise<void> => {
   const [conv] = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.id, params.data.id));
+    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, req.userId!)));
   if (!conv) {
     res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  const msgs = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, params.data.id))
-    .orderBy(messages.createdAt);
-  const parsedMsgs = msgs.map((m) => ({
-    ...m,
-    sources: m.sources ? JSON.parse(m.sources) : null,
-  }));
-  res.json({ ...conv, messages: parsedMsgs });
-});
-
-// Delete conversation
-router.delete("/openai/conversations/:id", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = DeleteOpenaiConversationParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [deleted] = await db
-    .delete(conversations)
-    .where(eq(conversations.id, params.data.id))
-    .returning();
-  if (!deleted) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  res.sendStatus(204);
-});
-
-// List messages in a conversation
-router.get("/openai/conversations/:id/messages", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = ListOpenaiMessagesParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
     return;
   }
   const msgs = await db
@@ -161,6 +129,57 @@ router.get("/openai/conversations/:id/messages", async (req, res): Promise<void>
 router.post("/openai/conversations/:id/messages", async (req, res): Promise<void> => {
   const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const params = SendOpenaiMessageParams.safeParse({ id: rawId });
+
+  const [owned] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)));
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [deleted] = await db
+    .delete(conversations)
+    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)))
+    .returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Conversation not found" });
+    return;
+  }
+  res.sendStatus(204);
+});
+
+// List messages in a conversation
+router.get("/openai/conversations/:id/messages", async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const params = SendOpenaiMessageParams.safeParse({ id: rawId });
+
+  const [owned] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)));
+  const msgs = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, params.data.id))
+    .orderBy(messages.createdAt);
+  const parsedMsgs = msgs.map((m) => ({
+    ...m,
+    sources: m.sources ? JSON.parse(m.sources) : null,
+  }));
+  res.json(parsedMsgs);
+});
+
+// Send message — streaming SSE response
+// Accepts optional ?model= query param to select the AI model
+router.post("/openai/conversations/:id/messages", async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const params = SendOpenaiMessageParams.safeParse({ id: rawId });
+
+  const [owned] = await db
+    .select()
+    .from(conversations)
+    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)));
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
@@ -198,7 +217,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   const [conv] = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.id, conversationId));
+    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, req.userId!)));
   if (!conv) {
     res.status(404).json({ error: "Conversation not found" });
     return;
