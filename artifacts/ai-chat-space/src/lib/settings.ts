@@ -7,6 +7,7 @@ export interface AppSettings {
   defaultReasoning: ReasoningLevel;
   auditEnabled: boolean;
   auditModelId: string;
+  auditReasoning: ReasoningLevel;
 }
 
 const FALLBACK: AppSettings = {
@@ -14,6 +15,7 @@ const FALLBACK: AppSettings = {
   defaultReasoning: "medium",
   auditEnabled: false,
   auditModelId: "qwen3.8-max",
+  auditReasoning: "off",
 };
 
 export function loadSettings(): AppSettings {
@@ -32,6 +34,7 @@ export function loadSettings(): AppSettings {
         typeof parsed.auditModelId === "string" && parsed.auditModelId
           ? parsed.auditModelId
           : FALLBACK.auditModelId,
+      auditReasoning: parseReasoningLevel(parsed.auditReasoning),
     };
   } catch {
     return { ...FALLBACK };
