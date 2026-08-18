@@ -32,6 +32,7 @@ async function streamMessage(
   onStatus: (status: string | null, query?: string) => void,
   onSearchWarning: (message: string) => void,
   onSources: (sources: { title: string; url: string }[]) => void,
+  onSkills: (skills: { id: string; label: string }[]) => void,
   signal?: AbortSignal,
   extra?: { ephemeral?: boolean; history?: { role: string; content: string }[] },
 ) {
@@ -86,6 +87,14 @@ async function streamMessage(
         parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
       } catch {
         return;
+      }
+      if (parsed.status === "skill" && Array.isArray(parsed.skills)) {
+        onSkills(
+          parsed.skills.filter(
+            (s): s is { id: string; label: string } =>
+              !!s && typeof s === "object" && typeof (s as { id?: unknown }).id === "string" && typeof (s as { label?: unknown }).label === "string",
+          ),
+        );
       }
       if (parsed.status === "searching") onStatus("searching", parsed.query as string | undefined);
       if (parsed.status === "fetching") onStatus("fetching");
@@ -170,6 +179,7 @@ export function ChatPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
+  const [activeSkills, setActiveSkills] = useState<{ id: string; label: string }[]>([]);
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   useEffect(() => {
@@ -195,6 +205,7 @@ export function ChatPage() {
     setStreamError(null);
     setSearchStatus(null);
     setSearchWarning(null);
+    setActiveSkills([]);
   }, [conversationId]);
 
   const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
@@ -264,6 +275,7 @@ export function ChatPage() {
     sendingToRef.current = targetId ?? 0;
     setStreamError(null);
     setSearchWarning(null);
+    setActiveSkills([]);
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
       conversationId: targetId ?? 0,
@@ -355,6 +367,9 @@ export function ChatPage() {
         streamSnapshotRef.current.sources = sources;
         setStreamingSources(sources);
       },
+      (skills) => {
+        setActiveSkills(skills);
+      },
       controller.signal,
       isPrivate ? { ephemeral: true, history: privateHistory } : undefined,
     );
@@ -440,6 +455,22 @@ export function ChatPage() {
           />
         )}
       </div>
+
+      {activeSkills.length > 0 && (
+        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300">
+            <span className="text-xs uppercase tracking-wider opacity-80">自動スキル</span>
+            {activeSkills.map((skill) => (
+              <span
+                key={skill.id}
+                className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-medium"
+              >
+                {skill.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {searchStatus && (searchStatus.kind === "searching" || searchStatus.kind === "fetching") && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">

@@ -310,8 +310,13 @@ export async function decideSearch(
   client: OpenAI,
   model: string,
   provider: "openai" | "dashscope",
-  userMessage: string
+  userMessage: string,
+  options?: { forceQuery?: string },
 ): Promise<{ search: boolean; query: string; skippedDueToError?: boolean; usedFallback?: boolean }> {
+  if (options?.forceQuery) {
+    return { search: true, query: options.forceQuery };
+  }
+
   const inferred = inferSearchQuery(userMessage);
   if (inferred.needed && inferred.query) {
     return { search: true, query: inferred.query };
@@ -397,7 +402,8 @@ export async function buildWebContext(
   model: string,
   provider: "openai" | "dashscope",
   userMessage: string,
-  onStatus: (event: Record<string, unknown>) => void
+  onStatus: (event: Record<string, unknown>) => void,
+  options?: { forceQuery?: string },
 ): Promise<WebContext> {
   const sources: { title: string; url: string }[] = [];
   const parts: string[] = [];
@@ -416,7 +422,7 @@ export async function buildWebContext(
     urls.length > 0
       ? Promise.all(urls.map((u) => fetchPageText(u)))
       : Promise.resolve([] as (Awaited<ReturnType<typeof fetchPageText>>)[]),
-    decideSearch(client, model, provider, userMessage),
+    decideSearch(client, model, provider, userMessage, options),
   ]);
 
   // Process user-provided URL pages; notify when any fail

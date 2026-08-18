@@ -15,6 +15,7 @@ import {
   type StreamDelta,
 } from "./stream-delta";
 import { buildWebContext } from "./web-search";
+import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { logger } from "./logger";
 
 export type ChatContentPart =
@@ -62,6 +63,19 @@ export async function streamChatReply(args: {
 
   let fullResponse = "";
   try {
+    const skills = matchSkills(userText);
+    if (skills.length > 0 && !clientGone) {
+      res.write(
+        `data: ${JSON.stringify({
+          status: "skill",
+          skills: skills.map((s) => ({ id: s.id, label: s.label })),
+        })}\n\n`,
+      );
+      for (const skill of skills) {
+        chatMessages.push({ role: "system", content: skill.prompt });
+      }
+    }
+
     const webContext = await buildWebContext(
       client,
       modelId,
@@ -70,6 +84,7 @@ export async function streamChatReply(args: {
       (event) => {
         if (!clientGone) res.write(`data: ${JSON.stringify(event)}\n\n`);
       },
+      { forceQuery: composeSkillSearchQuery(userText, skills) },
     );
 
     if (webContext.contextText) {
