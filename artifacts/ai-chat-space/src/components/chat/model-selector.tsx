@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronDown, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -9,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export interface ModelInfo {
   id: string;
@@ -40,11 +43,52 @@ interface ModelSelectorProps {
   disabled?: boolean;
 }
 
-export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelectorProps) {
-  const current = MODELS.find((m) => m.id === selectedModel) ?? MODELS[0];
+function isModelInfo(value: unknown): value is ModelInfo {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.label === "string" &&
+    (v.provider === "openai" || v.provider === "dashscope") &&
+    typeof v.description === "string" &&
+    typeof v.supportsVision === "boolean"
+  );
+}
 
-  const openaiModels = MODELS.filter((m) => m.provider === "openai");
-  const qwenModels = MODELS.filter((m) => m.provider === "dashscope");
+/** Live list from the API, falling back to the bundled catalog if the request fails. */
+export function useAvailableModels(): ModelInfo[] {
+  const [models, setModels] = useState<ModelInfo[]>(MODELS);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE}/api/openai/models`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        const parsed = data.filter(isModelInfo);
+        if (parsed.length > 0) setModels(parsed);
+      })
+      .catch(() => {
+        /* keep fallback catalog */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return models;
+}
+
+export function getModelLabel(modelId: string, models: ModelInfo[] = MODELS): string {
+  return models.find((m) => m.id === modelId)?.label ?? modelId;
+}
+
+export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelectorProps) {
+  const models = useAvailableModels();
+  const current = models.find((m) => m.id === selectedModel) ?? models[0] ?? MODELS[0];
+
+  const openaiModels = models.filter((m) => m.provider === "openai");
+  const qwenModels = models.filter((m) => m.provider === "dashscope");
 
   return (
     <DropdownMenu>

@@ -4,7 +4,9 @@ import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 import { SourceCards } from "./source-cards";
 import { Loader2, Paperclip, Bot } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useUser } from "@clerk/react";
+import { getModelLabel } from "./model-selector";
 
 interface MessageFeedProps {
   messages: OpenaiMessage[];
@@ -13,6 +15,11 @@ interface MessageFeedProps {
 
 export function MessageFeed({ messages, isLoading }: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const { user } = useUser();
+  const userInitial =
+    user?.firstName?.[0] ??
+    user?.primaryEmailAddress?.emailAddress?.[0] ??
+    "U";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -79,7 +86,10 @@ export function MessageFeed({ messages, isLoading }: MessageFeedProps) {
               <div className="flex-shrink-0 mt-1">
                 {isUser ? (
                   <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-primary/20 bg-primary/10 text-primary">
-                    <AvatarFallback className="bg-transparent font-medium">U</AvatarFallback>
+                    {user?.imageUrl ? <AvatarImage src={user.imageUrl} alt="" /> : null}
+                    <AvatarFallback className="bg-transparent font-medium">
+                      {userInitial.toUpperCase()}
+                    </AvatarFallback>
                   </Avatar>
                 ) : (
                   <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-border bg-card">
@@ -120,7 +130,7 @@ export function MessageFeed({ messages, isLoading }: MessageFeedProps) {
 
                 {!isUser && message.modelId && (
                   <div className="text-[11px] text-muted-foreground/60 px-1 select-none">
-                    {message.modelId}
+                    {getModelLabel(message.modelId)}
                   </div>
                 )}
               </div>

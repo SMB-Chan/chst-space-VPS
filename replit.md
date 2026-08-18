@@ -1,44 +1,64 @@
-# [Project name]
+# Chat-Space（AI Chat Space）
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+ファイルを添付して内容について質問できる、個人向けの AI チャットスペース。会話は Clerk アカウントごとに保存される。
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm --filter @workspace/api-server run dev` — API サーバー（未設定時ポート 5000）
+- `PORT=5173 BASE_PATH=/ pnpm --filter @workspace/ai-chat-space run dev` — フロント（ローカル）
+- `pnpm run typecheck` — 全パッケージの型チェック
+- `pnpm run build` — 型チェック + 全パッケージのビルド
+- `pnpm --filter @workspace/api-spec run codegen` — OpenAPI からフック / Zod を再生成
+- `pnpm --filter @workspace/db run push` — DB スキーマ反映（開発のみ）
+- `pnpm --filter @workspace/api-server run test:ssrf` — SSRF ガードの単体テスト
+- 必須 env: `DATABASE_URL`, Clerk キー, `AI_INTEGRATIONS_OPENAI_*`。任意: `DASHSCOPE_API_KEY`
+- 一覧は `.env.example` を参照
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
+- フロント: Vite, React 19, wouter, TanStack Query, Clerk, Tailwind
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Build: esbuild (CJS bundle of the API)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/ai-chat-space` — チャット UI
+- `artifacts/api-server` — Express API（会話 CRUD + SSE ストリーム + Web 検索前段）
+- `lib/db/src/schema` — `conversations` / `messages`（ソースオブトゥルース）
+- `lib/api-spec/openapi.yaml` — API 契約
+- `artifacts/api-server/src/lib/ai-clients.ts` — モデル一覧とプロバイダ解決
+- `artifacts/api-server/src/lib/web-search.ts` — DDG 検索と SSRF ガード
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Web 検索は tool calling ではなく、応答前の独立ステップ（モデル非依存、キー不要）。
+- 画像は DB に文字列（data URL）で保存し、送信直前に multimodal content へ変換する。
+- OpenAI は `max_completion_tokens`、DashScope 互換は `max_tokens`。混在会話では切替必須。
+- DashScope Token Plan はリージョン共通 URL ではなく専用エンドポイントが必要。
+- 会話は `userId` で隔離。未認証は 401。
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- 複数モデル切替（OpenAI / Qwen / DeepSeek / GLM）
+- SSE ストリーミング、楽観的 UI
+- Web 検索と参照元カード
+- 画像・テキスト添付
+- ユーザーごとの会話履歴
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- UI 文言は日本語を正とする。
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Token Plan の DashScope は専用エンドポイント必須。モデル ID は `/openai/models` とフロントのフォールバック一覧を揃える。
+- 「二重送信」報告は、まず DB に 2 件あるのか表示が 2 件なのかを切り分ける。再取得完了を待ってからストリーミング状態をクリアする。
+- ローカルでは Vite が `/api` を `API_PROXY_TARGET`（デフォルト `http://127.0.0.1:5000`）へプロキシする。
+- `.env` はコミットしない。`.env.example` だけを更新する。
 
 ## Pointers
 

@@ -79,10 +79,17 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
         const isImage = file.type.startsWith("image/");
         const reader = new FileReader();
 
-        const readFile = new Promise<{ content: string; isBase64: boolean }>((resolve) => {
+        const readFile = new Promise<{ content: string; isBase64: boolean }>((resolve, reject) => {
           reader.onload = (e) => {
-            const result = e.target?.result as string;
+            const result = e.target?.result;
+            if (typeof result !== "string") {
+              reject(new Error("ファイルの読み込みに失敗しました。"));
+              return;
+            }
             resolve({ content: result, isBase64: isImage });
+          };
+          reader.onerror = () => {
+            reject(new Error("ファイルの読み込みに失敗しました。"));
           };
           if (isImage) {
             reader.readAsDataURL(file);
@@ -97,7 +104,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
         };
       }
 
-      const result = await onSend(content.trim() || "What's in this file?", fileData);
+      const result = await onSend(content.trim() || "このファイルの内容を説明してください。", fileData);
       // 送信がブロックされた場合（例: 画像非対応モデル）は入力・添付を保持する
       if (result === false) return;
 
@@ -109,6 +116,8 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : "送信に失敗しました。");
     } finally {
       isSendingRef.current = false;
     }
@@ -181,7 +190,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           value={content}
           onChange={adjustHeight}
           onKeyDown={handleKeyDown}
-          placeholder="Ask anything..."
+          placeholder="メッセージを入力..."
           className="flex-1 max-h-[200px] min-h-[44px] w-full resize-none bg-transparent py-3 px-1 text-base outline-none placeholder:text-muted-foreground/60 scrollbar-none font-sans"
           rows={1}
           disabled={disabled}

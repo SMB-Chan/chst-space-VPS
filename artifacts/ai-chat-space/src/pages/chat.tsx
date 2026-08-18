@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { 
@@ -10,8 +10,12 @@ import {
 } from "@workspace/api-client-react";
 import { MessageFeed } from "@/components/chat/message-feed";
 import { MessageInput } from "@/components/chat/message-input";
-import { ModelSelector, MODELS } from "@/components/chat/model-selector";
-import { Sparkles } from "lucide-react";
+import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
+import { conversationTitle, timeGreeting } from "@/lib/chat";
+import { Sparkles, X } from "lucide-react";
+
+const OPTIMISTIC_USER_ID = -1;
+const STREAMING_ASSISTANT_ID = -2;
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -24,7 +28,8 @@ async function streamMessage(
   onError: (err: Error) => void,
   onStatus: (status: string | null, query?: string) => void,
   onSearchWarning: (message: string) => void,
-  onSources: (sources: { title: string; url: string }[]) => void
+  onSources: (sources: { title: string; url: string }[]) => void,
+  signal?: AbortSignal,
 ) {
   try {
     const res = await fetch(
@@ -33,6 +38,8 @@ async function streamMessage(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
+        credentials: "include",
+        signal,
       }
     );
 
@@ -89,6 +96,8 @@ async function streamMessage(
     // ストリーム終端でもdoneが来なかった場合に呼ぶ
     callDoneOnce();
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
     onError(err instanceof Error ? err : new Error(String(err)));
   }
 }
@@ -96,13 +105,25 @@ async function streamMessage(
 export function ChatPage() {
   const params = useParams();
   const [_, setLocation] = useLocation();
-  const conversationId = params.id ? parseInt(params.id) : null;
+  const rawId = params.id;
+  const parsedId = rawId ? Number.parseInt(rawId, 10) : NaN;
+  const invalidConversationId = rawId != null && !Number.isFinite(parsedId);
+  const conversationId = Number.isFinite(parsedId) ? parsedId : null;
   const queryClient = useQueryClient();
+  const models = useAvailableModels();
+  const greeting = timeGreeting();
+  const abortRef = useRef<AbortController | null>(null);
 
   const [selectedModel, setSelectedModel] = useState("gpt-5.6-terra");
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
 
-  const { data: conversation, isLoading } = useGetOpenaiConversation(
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
     conversationId as number,
     { query: { enabled: !!conversationId, queryKey: getGetOpenaiConversationQueryKey(conversationId as number) } }
   );
@@ -112,11 +133,11 @@ export function ChatPage() {
     if (!conversation || modelRestoredForConv === conversation.id) return;
     const msgs = conversation.messages ?? [];
     const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.modelId);
-    if (lastAssistant?.modelId) {
+    if (lastAssistant?.modelId && models.some((m) => m.id === lastAssistant.modelId)) {
       setSelectedModel(lastAssistant.modelId);
     }
     setModelRestoredForConv(conversation.id);
-  }, [conversation, modelRestoredForConv]);
+  }, [conversation, modelRestoredForConv, models]);
 
   const createConversation = useCreateOpenaiConversation();
 
@@ -135,7 +156,7 @@ export function ChatPage() {
     if (fileData) {
       // 選択中モデルが画像非対応なら、送信前に分かりやすいエラーを表示する
       if (fileData.isBase64) {
-        const model = MODELS.find((m) => m.id === selectedModel);
+        const model = models.find((m) => m.id === selectedModel);
         if (model && !model.supportsVision) {
           setStreamError(
             `${model.label} は画像を読み取れません。画像を送る場合は GPT や Qwen などの画像対応モデルを選択してください。`
@@ -153,13 +174,17 @@ export function ChatPage() {
     let targetId = conversationId;
 
     if (!targetId) {
-      const title = content.split(" ").slice(0, 4).join(" ") + (content.split(" ").length > 4 ? "..." : "");
       try {
-        const newConv = await createConversation.mutateAsync({ data: { title: title || "New Conversation" } });
+        const newConv = await createConversation.mutateAsync({
+          data: { title: conversationTitle(content) },
+        });
         targetId = newConv.id;
         queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
         setLocation(`/conversations/${newConv.id}`, { replace: true });
-      } catch {
+      } catch (err) {
+        setStreamError(
+          err instanceof Error ? err.message : "会話の作成に失敗しました。もう一度お試しください。",
+        );
         return false;
       }
     }
@@ -169,7 +194,7 @@ export function ChatPage() {
     setStreamError(null);
     setSearchWarning(null);
     setOptimisticUserMessage({
-      id: Date.now(),
+      id: OPTIMISTIC_USER_ID,
       conversationId: targetId,
       role: "user",
       content: finalContent,
@@ -179,6 +204,10 @@ export function ChatPage() {
     setIsStreaming(true);
     setStreamingContent("");
     setStreamingSources([]);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     await streamMessage(
       targetId,
@@ -212,7 +241,8 @@ export function ChatPage() {
       },
       (sources) => {
         setStreamingSources(sources);
-      }
+      },
+      controller.signal,
     );
     return true;
   };
@@ -236,7 +266,7 @@ export function ChatPage() {
     ...(optimisticUserMessage && !optimisticAlreadyOnServer ? [optimisticUserMessage] : []),
     ...((isStreaming || streamingContent) && !streamingAlreadyOnServer
       ? [{
-          id: Date.now() + 1,
+          id: STREAMING_ASSISTANT_ID,
           conversationId: conversationId || 0,
           role: "assistant",
           content: streamingContent,
@@ -249,16 +279,21 @@ export function ChatPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-hidden flex flex-col">
-        {!conversationId && !optimisticUserMessage ? (
+        {invalidConversationId || (conversationLoadError && !optimisticUserMessage && !isStreaming) ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+            <h2 className="text-xl font-serif font-medium mb-2">会話が見つかりません</h2>
+            <p className="text-muted-foreground text-sm">URL が正しくないか、この会話にアクセスできません。左の履歴から選び直してください。</p>
+          </div>
+        ) : !conversationId && !optimisticUserMessage ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-2xl mx-auto w-full">
             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 shadow-inner border border-primary/20">
               <Sparkles className="w-8 h-8 text-primary" />
             </div>
             <h2 className="text-3xl font-serif font-medium mb-3 text-foreground tracking-tight">
-              Good evening.
+              {greeting.title}
             </h2>
             <p className="text-muted-foreground mb-8 text-lg max-w-md font-sans font-light">
-              What are we working on tonight? Attach a document or just start typing.
+              {greeting.subtitle}
             </p>
           </div>
         ) : (
@@ -291,8 +326,16 @@ export function ChatPage() {
 
       {streamError && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
-          <div className="px-4 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
-            エラー: {streamError}
+          <div className="flex items-start gap-2 px-4 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+            <span className="flex-1">エラー: {streamError}</span>
+            <button
+              type="button"
+              onClick={() => setStreamError(null)}
+              className="shrink-0 p-0.5 rounded hover:bg-destructive/20"
+              aria-label="エラーを閉じる"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}

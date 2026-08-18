@@ -52,8 +52,7 @@ export type ModelId = typeof AVAILABLE_MODELS[number]["id"];
 
 export function modelSupportsVision(modelId: string): boolean {
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
-  // Unknown model falls back to OpenAI default (vision-capable)
-  return model ? model.supportsVision : true;
+  return model ? model.supportsVision : false;
 }
 
 export function getModelLabel(modelId: string): string {
@@ -63,8 +62,7 @@ export function getModelLabel(modelId: string): string {
 export function getClientForModel(modelId: string): { client: OpenAI; provider: ModelProvider } {
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
   if (!model) {
-    // Default to OpenAI
-    return { client: openaiClient, provider: "openai" };
+    throw new Error(`未対応のモデルです: ${modelId}`);
   }
   if (model.provider === "dashscope") {
     if (!dashscopeClient) {

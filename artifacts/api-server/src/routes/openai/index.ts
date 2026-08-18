@@ -20,6 +20,17 @@ import { buildWebContext } from "../../lib/web-search";
 import { and, desc, eq } from "drizzle-orm";
 import { requireAuth } from "../../middlewares/requireAuth";
 
+function parseStoredSources(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    logger.warn({ raw }, "Ignoring malformed message sources JSON");
+    return null;
+  }
+}
+
 const router: IRouter = Router();
 
 // Matches user messages created by the frontend when an image is attached:
@@ -117,7 +128,7 @@ router.get("/openai/conversations/:id", async (req, res): Promise<void> => {
     .orderBy(messages.createdAt);
   const parsedMsgs = msgs.map((m) => ({
     ...m,
-    sources: m.sources ? JSON.parse(m.sources) : null,
+    sources: parseStoredSources(m.sources),
   }));
   res.json({ ...conv, messages: parsedMsgs });
 });
@@ -164,7 +175,7 @@ router.get("/openai/conversations/:id/messages", async (req, res): Promise<void>
     .orderBy(messages.createdAt);
   const parsedMsgs = msgs.map((m) => ({
     ...m,
-    sources: m.sources ? JSON.parse(m.sources) : null,
+    sources: parseStoredSources(m.sources),
   }));
   res.json(parsedMsgs);
 });
@@ -250,6 +261,11 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 
+  let clientGone = false;
+  req.on("close", () => {
+    clientGone = true;
+  });
+
   let fullResponse = "";
   try {
     // Web search / URL fetch pre-step (model-independent, works with any provider)
@@ -298,6 +314,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     )) as AsyncIterable<{ choices: { delta?: { content?: string | null } }[] }>;
 
     for await (const chunk of stream) {
+      if (clientGone) break;
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
         fullResponse += content;
@@ -305,25 +322,38 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
       }
     }
 
-    // Save assistant message with the model and sources that generated it
-    await db.insert(messages).values({
-      conversationId,
-      role: "assistant",
-      content: fullResponse,
-      modelId,
-      sources: webContext.sources.length > 0
-        ? JSON.stringify(webContext.sources)
-        : null,
-    });
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    if (!fullResponse.trim()) {
+      if (!clientGone) {
+        res.write(
+          `data: ${JSON.stringify({ error: "応答が空でした。もう一度お試しください。" })}\n\n`,
+        );
+      }
+    } else {
+      // Save assistant message with the model and sources that generated it
+      await db.insert(messages).values({
+        conversationId,
+        role: "assistant",
+        content: fullResponse,
+        modelId,
+        sources: webContext.sources.length > 0
+          ? JSON.stringify(webContext.sources)
+          : null,
+      });
+      if (!clientGone) {
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      }
+    }
   } catch (err) {
     logger.error({ err, modelId }, "Error streaming AI response");
     const msg = err instanceof Error ? err.message : "AI response failed";
-    res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+    if (!clientGone) {
+      res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+    }
   }
 
-  res.end();
+  if (!clientGone) {
+    res.end();
+  }
 });
 
 export default router;
