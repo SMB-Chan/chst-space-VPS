@@ -8,7 +8,7 @@ import {
   getListOpenaiConversationsQueryKey,
   OpenaiMessage
 } from "@workspace/api-client-react";
-import { MessageFeed } from "@/components/chat/message-feed";
+import { MessageFeed, type ChatArtifact } from "@/components/chat/message-feed";
 import { MessageInput, type OutgoingAttachment } from "@/components/chat/message-input";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
@@ -34,6 +34,7 @@ async function streamMessage(
   onSources: (sources: { title: string; url: string }[]) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
   onAudit: (text: string) => void,
+  onArtifacts: (artifacts: ChatArtifact[]) => void,
   onResetContent: () => void,
   signal?: AbortSignal,
   extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string },
@@ -120,6 +121,26 @@ async function streamMessage(
       if (Array.isArray(parsed.sources)) {
         onSources(parsed.sources as { title: string; url: string }[]);
       }
+      if (Array.isArray(parsed.artifacts)) {
+        const artifacts = parsed.artifacts.flatMap((item): ChatArtifact[] => {
+          if (!item || typeof item !== "object") return [];
+          const raw = item as Record<string, unknown>;
+          if (typeof raw.filename !== "string" || typeof raw.mime !== "string") return [];
+          const artifact: ChatArtifact = {
+            id: typeof raw.id === "number" ? raw.id : undefined,
+            filename: raw.filename,
+            mime: raw.mime,
+            size: typeof raw.size === "number" ? raw.size : 0,
+            downloadUrl: typeof raw.downloadUrl === "string" ? raw.downloadUrl : undefined,
+            content: typeof raw.content === "string" ? raw.content : undefined,
+          };
+          if (!artifact.downloadUrl && artifact.content) {
+            artifact.downloadUrl = URL.createObjectURL(new Blob([artifact.content], { type: artifact.mime }));
+          }
+          return artifact.downloadUrl ? [artifact] : [];
+        });
+        if (artifacts.length > 0) onArtifacts(artifacts);
+      }
       if (typeof parsed.reasoning === "string" && parsed.reasoning) {
         onStatus(parsed.status === "revising" ? "revising" : "thinking");
         onReasoning(parsed.reasoning);
@@ -200,11 +221,13 @@ export function ChatPage() {
     content: "",
     sources: [] as { title: string; url: string }[],
     audit: "",
+    artifacts: [] as ChatArtifact[],
   });
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
   const [streamingReasoning, setStreamingReasoning] = useState<string>("");
   const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
+  const [streamingArtifacts, setStreamingArtifacts] = useState<ChatArtifact[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
@@ -239,6 +262,7 @@ export function ChatPage() {
     setStreamingContent("");
     setStreamingReasoning("");
     setStreamingSources([]);
+    setStreamingArtifacts([]);
     setOptimisticUserMessage(null);
     setStreamError(null);
     setSearchStatus(null);
@@ -326,6 +350,7 @@ export function ChatPage() {
     setSearchWarning(null);
     setActiveSkills([]);
     setStreamingAudit("");
+    setStreamingArtifacts([]);
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
       conversationId: targetId ?? 0,
@@ -339,7 +364,7 @@ export function ChatPage() {
     setStreamingReasoning("");
     setStreamingSources([]);
     setSearchStatus({ kind: "starting" });
-    streamSnapshotRef.current = { content: "", sources: [], audit: "" };
+    streamSnapshotRef.current = { content: "", sources: [], audit: "", artifacts: [] };
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -382,6 +407,7 @@ export function ChatPage() {
               role: "assistant",
               content: streamSnapshotRef.current.content,
               sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
+              artifacts: streamSnapshotRef.current.artifacts.length > 0 ? streamSnapshotRef.current.artifacts : null,
               modelId: selectedModel,
               auditContent: streamSnapshotRef.current.audit || null,
               auditModelId: streamSnapshotRef.current.audit ? auditModel : null,
@@ -395,6 +421,7 @@ export function ChatPage() {
         setStreamingContent("");
         setStreamingReasoning("");
         setStreamingSources([]);
+        setStreamingArtifacts([]);
         setStreamingAudit("");
         setOptimisticUserMessage(null);
       },
@@ -402,6 +429,7 @@ export function ChatPage() {
         setIsStreaming(false);
         setSearchStatus(null);
         setStreamingSources([]);
+        setStreamingArtifacts([]);
         setStreamingReasoning("");
         setStreamingAudit("");
         setStreamError(err.message);
@@ -429,6 +457,10 @@ export function ChatPage() {
       (chunk) => {
         streamSnapshotRef.current.audit += chunk;
         setStreamingAudit((prev) => prev + chunk);
+      },
+      (artifacts) => {
+        streamSnapshotRef.current.artifacts = artifacts;
+        setStreamingArtifacts(artifacts);
       },
       () => {
         streamSnapshotRef.current.content = "";
@@ -467,6 +499,7 @@ export function ChatPage() {
           role: "assistant",
           content: streamingContent,
           sources: streamingSources.length > 0 ? streamingSources : null,
+          artifacts: streamingArtifacts.length > 0 ? streamingArtifacts : null,
           createdAt: new Date().toISOString(),
         }]
       : []),
