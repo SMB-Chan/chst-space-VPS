@@ -171,8 +171,10 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
       stream: true,
     };
 
-    // o4-mini doesn't support max_tokens in the same way — use max_completion_tokens only for non-o-series
-    if (!modelId.startsWith("o")) {
+    // OpenAI models require max_completion_tokens; DashScope (OpenAI-compatible) uses max_tokens
+    if (aiClient.provider === "openai") {
+      (streamOptions as Record<string, unknown>).max_completion_tokens = 8192;
+    } else {
       (streamOptions as Record<string, unknown>).max_tokens = 8192;
     }
 

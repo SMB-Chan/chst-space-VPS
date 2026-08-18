@@ -17,10 +17,14 @@ export const openaiClient = new OpenAI({
 // DashScope (Alibaba Cloud) — OpenAI-compatible endpoint
 let dashscopeClient: OpenAI | null = null;
 
+const DASHSCOPE_BASE_URL =
+  process.env.DASHSCOPE_BASE_URL ??
+  "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+
 if (process.env.DASHSCOPE_API_KEY) {
   dashscopeClient = new OpenAI({
     apiKey: process.env.DASHSCOPE_API_KEY,
-    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    baseURL: DASHSCOPE_BASE_URL,
   });
   logger.info("DashScope client initialized");
 } else {
@@ -36,10 +40,12 @@ export const AVAILABLE_MODELS = [
   { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" as ModelProvider, description: "高性能・汎用" },
   { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",  provider: "openai" as ModelProvider, description: "高速・低コスト" },
   { id: "o4-mini",       label: "o4-mini",        provider: "openai" as ModelProvider, description: "高度な推論" },
-  // Qwen models (via DashScope)
-  { id: "qwen-max",      label: "Qwen Max",       provider: "dashscope" as ModelProvider, description: "Alibaba最高性能" },
-  { id: "qwen-plus",     label: "Qwen Plus",      provider: "dashscope" as ModelProvider, description: "Alibaba高速・バランス" },
-  { id: "qwen-turbo",    label: "Qwen Turbo",     provider: "dashscope" as ModelProvider, description: "Alibaba最速" },
+  // Alibaba Cloud Model Studio (Token Plan endpoint)
+  { id: "qwen3.8-max",           label: "Qwen3.8 Max",       provider: "dashscope" as ModelProvider, description: "Alibaba最高性能" },
+  { id: "qwen3.7-plus",          label: "Qwen3.7 Plus",      provider: "dashscope" as ModelProvider, description: "高速・バランス" },
+  { id: "qwen3.6-flash",         label: "Qwen3.6 Flash",     provider: "dashscope" as ModelProvider, description: "最速・低コスト" },
+  { id: "deepseek-v4-pro",       label: "DeepSeek V4 Pro",   provider: "dashscope" as ModelProvider, description: "推論特化" },
+  { id: "glm-5.2",               label: "GLM-5.2",           provider: "dashscope" as ModelProvider, description: "汎用" },
 ] as const;
 
 export type ModelId = typeof AVAILABLE_MODELS[number]["id"];
