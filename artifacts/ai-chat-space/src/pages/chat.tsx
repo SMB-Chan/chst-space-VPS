@@ -22,7 +22,8 @@ async function streamMessage(
   onChunk: (text: string) => void,
   onDone: () => void,
   onError: (err: Error) => void,
-  onStatus: (status: string | null, query?: string) => void
+  onStatus: (status: string | null, query?: string) => void,
+  onSearchWarning: (message: string) => void
 ) {
   try {
     const res = await fetch(
@@ -54,6 +55,9 @@ async function streamMessage(
             const parsed = JSON.parse(line.slice(6));
             if (parsed.status === "searching") onStatus("searching", parsed.query);
             if (parsed.status === "fetching") onStatus("fetching");
+            if (parsed.status === "search_warning" && parsed.message) {
+              onSearchWarning(parsed.message);
+            }
             if (parsed.content) {
               onStatus(null);
               onChunk(parsed.content);
@@ -101,6 +105,7 @@ export function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
+  const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   const handleSend = async (content: string, fileData?: { name: string; content: string; isBase64: boolean }) => {
@@ -131,6 +136,7 @@ export function ChatPage() {
     if (!targetId) return;
 
     setStreamError(null);
+    setSearchWarning(null);
     setOptimisticUserMessage({
       id: Date.now(),
       conversationId: targetId,
@@ -163,6 +169,9 @@ export function ChatPage() {
       },
       (status, query) => {
         setSearchStatus(status ? { kind: status, query } : null);
+      },
+      (message) => {
+        setSearchWarning(message);
       }
     );
   };
@@ -211,6 +220,15 @@ export function ChatPage() {
             {searchStatus.kind === "searching"
               ? `Webを検索中${searchStatus.query ? `: 「${searchStatus.query}」` : "..."}`
               : "ページを読み込み中..."}
+          </div>
+        </div>
+      )}
+
+      {searchWarning && (
+        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm">
+            <span className="shrink-0">⚠️</span>
+            {searchWarning}
           </div>
         </div>
       )}

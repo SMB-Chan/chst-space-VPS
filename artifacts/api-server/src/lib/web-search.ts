@@ -17,12 +17,60 @@ export interface WebContext {
   query?: string;
   sources: { title: string; url: string }[];
   contextText: string;
+  searchWarning?: string;
 }
 
-const FETCH_TIMEOUT_MS = 10_000;
+/** Timeout covering ALL phases (DNS + connect + headers + body) for DDG search. */
+const SEARCH_FETCH_TIMEOUT_MS = 10_000;
+/** Shorter end-to-end timeout (DNS + connect + headers + body) for individual pages. */
+const PAGE_FETCH_TIMEOUT_MS = 5_000;
+/** Hard deadline for the search-decision LLM call. */
+const DECIDE_TIMEOUT_MS = 8_000;
+
 const MAX_PAGE_CHARS = 4000;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+
+// ---------------------------------------------------------------------------
+// Bounded in-memory search-result cache
+// ---------------------------------------------------------------------------
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes per entry
+const SEARCH_CACHE_MAX = 200;               // max distinct queries retained
+
+interface CacheEntry {
+  results: SearchResult[];
+  expiry: number;
+}
+const searchCache = new Map<string, CacheEntry>();
+
+function getCachedResults(query: string): SearchResult[] | null {
+  const entry = searchCache.get(query);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    searchCache.delete(query);
+    return null;
+  }
+  return entry.results;
+}
+
+function setCachedResults(query: string, results: SearchResult[]): void {
+  const now = Date.now();
+  // Sweep all expired entries first so they don't count toward the size limit
+  for (const [key, entry] of searchCache) {
+    if (now > entry.expiry) searchCache.delete(key);
+  }
+  // If still at capacity, evict the oldest entry (Map preserves insertion order)
+  while (searchCache.size >= SEARCH_CACHE_MAX) {
+    const firstKey = searchCache.keys().next().value;
+    if (firstKey !== undefined) searchCache.delete(firstKey);
+    else break;
+  }
+  searchCache.set(query, { results, expiry: now + SEARCH_CACHE_TTL_MS });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 export function extractUrls(text: string): string[] {
   const matches = text.match(/https?:\/\/[^\s<>"')\]]+/g) ?? [];
@@ -86,7 +134,12 @@ export function isPrivateAddress(ip: string): boolean {
   return addr.range() !== "unicast";
 }
 
-async function assertSafeUrl(rawUrl: string): Promise<URL> {
+/**
+ * Preflight SSRF check.  The DNS lookup here is raced against the caller's
+ * AbortSignal so a stalled resolver cannot hold the request beyond the
+ * configured deadline.
+ */
+async function assertSafeUrl(rawUrl: string, signal?: AbortSignal): Promise<URL> {
   const url = new URL(rawUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Blocked protocol: ${url.protocol}`);
@@ -99,11 +152,28 @@ async function assertSafeUrl(rawUrl: string): Promise<URL> {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
     throw new Error(`Blocked host: ${host}`);
   }
-  const addrs = await lookup(host, { all: true });
-  for (const { address } of addrs) {
-    if (isPrivateAddress(address)) throw new Error(`Blocked host resolving to private address: ${host}`);
-  }
-  return url;
+
+  // Race the DNS lookup against the abort signal so a stalled resolver is
+  // interrupted as soon as the overall fetch deadline fires.
+  const lookupPromise = lookup(host, { all: true }).then((addrs) => {
+    for (const { address } of addrs) {
+      if (isPrivateAddress(address)) throw new Error(`Blocked host resolving to private address: ${host}`);
+    }
+    return url;
+  });
+
+  if (!signal) return lookupPromise;
+
+  // Wrap the signal into a rejecting promise so we can race it
+  const abortPromise = new Promise<URL>((_, reject) => {
+    if (signal.aborted) {
+      reject(new Error("DNS lookup aborted"));
+    } else {
+      signal.addEventListener("abort", () => reject(new Error("DNS lookup aborted")), { once: true });
+    }
+  });
+
+  return Promise.race([lookupPromise, abortPromise]);
 }
 
 // Connection-layer SSRF guard: the address actually connected to is validated
@@ -132,14 +202,28 @@ const safeAgent = new Agent({
   },
 });
 
-async function fetchWithTimeout(rawUrl: string): Promise<UndiciResponse> {
+/**
+ * Fetch a URL with a hard end-to-end deadline covering DNS (preflight + connector),
+ * TCP connect, TLS, response headers, AND body reading.
+ *
+ * Returns the `UndiciResponse` together with a `cancel` function the caller
+ * MUST invoke after consuming the body (or on error) to disarm the timer.
+ * The abort timer is intentionally NOT cleared inside this function so that
+ * a server that stalls mid-body is still interrupted by the deadline.
+ */
+async function fetchWithTimeout(
+  rawUrl: string,
+  timeoutMs: number
+): Promise<{ response: UndiciResponse; cancel: () => void }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const cancel = () => clearTimeout(timer);
+
   try {
-    // Follow redirects manually so every hop is SSRF-checked
     let current = rawUrl;
     for (let hop = 0; hop < 4; hop++) {
-      const url = await assertSafeUrl(current);
+      // assertSafeUrl races its internal DNS lookup against our signal
+      const url = await assertSafeUrl(current, controller.signal);
       const res = await undiciFetch(url, {
         signal: controller.signal,
         headers: { "User-Agent": USER_AGENT, "Accept-Language": "ja,en;q=0.8" },
@@ -148,31 +232,41 @@ async function fetchWithTimeout(rawUrl: string): Promise<UndiciResponse> {
       });
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
-        if (!location) return res;
+        if (!location) return { response: res, cancel };
         current = new URL(location, url).href;
         continue;
       }
-      return res;
+      return { response: res, cancel };
     }
     throw new Error("Too many redirects");
-  } finally {
-    clearTimeout(timer);
+  } catch (err) {
+    cancel(); // disarm on error so timers don't leak
+    throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export async function fetchPageText(
   url: string
 ): Promise<{ title: string; text: string } | null> {
   try {
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) return null;
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.includes("html") && !contentType.includes("text")) return null;
-    const html = await res.text();
-    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    const title = titleMatch ? stripHtml(titleMatch[1]) : url;
-    const text = stripHtml(html).slice(0, MAX_PAGE_CHARS);
-    return { title, text };
+    const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS);
+    try {
+      if (!res.ok) return null;
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("html") && !contentType.includes("text")) return null;
+      // Body read is still covered by the active abort timer
+      const html = await res.text();
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = titleMatch ? stripHtml(titleMatch[1]) : url;
+      const text = stripHtml(html).slice(0, MAX_PAGE_CHARS);
+      return { title, text };
+    } finally {
+      cancel(); // disarm only after body has been fully consumed
+    }
   } catch (err) {
     logger.warn({ err, url }, "Failed to fetch page");
     return null;
@@ -181,32 +275,44 @@ export async function fetchPageText(
 
 /** Search the web via DuckDuckGo HTML endpoint (no API key required). */
 export async function searchWeb(query: string): Promise<SearchResult[]> {
+  const cached = getCachedResults(query);
+  if (cached) {
+    logger.debug({ query }, "Search cache hit");
+    return cached;
+  }
+
   try {
-    const res = await fetchWithTimeout(
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+    const { response: res, cancel } = await fetchWithTimeout(
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+      SEARCH_FETCH_TIMEOUT_MS
     );
-    if (!res.ok) {
-      logger.warn({ status: res.status }, "DuckDuckGo search failed");
-      return [];
+    try {
+      if (!res.ok) {
+        logger.warn({ status: res.status }, "DuckDuckGo search failed");
+        return [];
+      }
+      // Body read is still covered by the active abort timer
+      const html = await res.text();
+      const results: SearchResult[] = [];
+      const blockRe =
+        /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/g;
+      let m: RegExpExecArray | null;
+      while ((m = blockRe.exec(html)) !== null && results.length < 5) {
+        let url = m[1];
+        const uddg = url.match(/[?&]uddg=([^&]+)/);
+        if (uddg) url = decodeURIComponent(uddg[1]);
+        if (!/^https?:\/\//.test(url)) continue;
+        results.push({
+          title: stripHtml(m[2]),
+          url,
+          snippet: m[3] ? stripHtml(m[3]) : "",
+        });
+      }
+      setCachedResults(query, results);
+      return results;
+    } finally {
+      cancel();
     }
-    const html = await res.text();
-    const results: SearchResult[] = [];
-    const blockRe =
-      /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/g;
-    let m: RegExpExecArray | null;
-    while ((m = blockRe.exec(html)) !== null && results.length < 5) {
-      let url = m[1];
-      // DDG wraps result URLs: //duckduckgo.com/l/?uddg=<encoded>&...
-      const uddg = url.match(/[?&]uddg=([^&]+)/);
-      if (uddg) url = decodeURIComponent(uddg[1]);
-      if (!/^https?:\/\//.test(url)) continue;
-      results.push({
-        title: stripHtml(m[2]),
-        url,
-        snippet: m[3] ? stripHtml(m[3]) : "",
-      });
-    }
-    return results;
   } catch (err) {
     logger.warn({ err, query }, "Web search error");
     return [];
@@ -215,15 +321,22 @@ export async function searchWeb(query: string): Promise<SearchResult[]> {
 
 /**
  * Ask the model whether a web search is needed and, if so, for a query.
- * Model-independent: works via any OpenAI-compatible client.
+ * Uses an AbortController tied to DECIDE_TIMEOUT_MS so the upstream SDK
+ * request is actually cancelled (not just raced away) when the deadline fires.
+ *
+ * Returns `skippedDueToError: true` when the call failed or timed out so that
+ * callers can emit a user-visible warning instead of silently skipping search.
  */
 export async function decideSearch(
   client: OpenAI,
   model: string,
   provider: "openai" | "dashscope",
   userMessage: string
-): Promise<{ search: boolean; query: string }> {
+): Promise<{ search: boolean; query: string; skippedDueToError?: boolean }> {
   const today = new Date().toISOString().slice(0, 10);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DECIDE_TIMEOUT_MS);
+
   try {
     const opts: Parameters<typeof client.chat.completions.create>[0] = {
       model,
@@ -245,9 +358,14 @@ export async function decideSearch(
     } else {
       (opts as unknown as Record<string, unknown>).max_tokens = 200;
     }
+
+    // Pass the abort signal as a request option so the SDK cancels the upstream
+    // HTTP request when the timer fires (not just races away from it).
     const resp = (await client.chat.completions.create(
-      opts
+      opts,
+      { signal: controller.signal }
     )) as OpenAI.Chat.Completions.ChatCompletion;
+
     const text = resp.choices[0]?.message?.content ?? "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -257,17 +375,33 @@ export async function decideSearch(
         query: typeof parsed.query === "string" ? parsed.query.trim() : "",
       };
     }
+    return { search: false, query: "" };
   } catch (err) {
-    logger.warn({ err, model }, "Search decision failed; skipping search");
+    const isAbort =
+      (err as Error)?.name === "AbortError" ||
+      controller.signal.aborted ||
+      (err as Error)?.message?.includes("aborted");
+    if (isAbort) {
+      logger.warn({ model }, "Search decision timed out; skipping search");
+    } else {
+      logger.warn({ err, model }, "Search decision failed; skipping search");
+    }
+    return { search: false, query: "", skippedDueToError: true };
+  } finally {
+    clearTimeout(timer); // always disarm; abort already fired if it needed to
   }
-  return { search: false, query: "" };
 }
 
 /**
  * Build web context for a user message:
- * - fetches any URLs pasted by the user
+ * - fetches any URLs pasted by the user (with per-page end-to-end timeout)
  * - runs a web search when the decision step says it is needed
- * `onStatus` is called with progress events for SSE streaming.
+ *
+ * URL fetching and search-decision are started in parallel (independent).
+ * All timeouts cover DNS + connect + headers + body so stalled sources cannot
+ * block the response indefinitely.
+ * `onStatus` is called with progress events for SSE streaming, including
+ * warnings when sources fail.
  */
 export async function buildWebContext(
   client: OpenAI,
@@ -280,29 +414,54 @@ export async function buildWebContext(
   const parts: string[] = [];
   let searched = false;
   let query: string | undefined;
+  let searchWarning: string | undefined;
 
-  // 1) Fetch URLs the user pasted directly
   const urls = extractUrls(userMessage);
+
   if (urls.length > 0) {
     onStatus({ status: "fetching", urls });
-    const pages = await Promise.all(urls.map((u) => fetchPageText(u)));
-    pages.forEach((page, i) => {
-      if (page) {
-        sources.push({ title: page.title, url: urls[i] });
-        parts.push(`【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`);
-      }
-    });
   }
 
-  // 2) Decide whether to search (skip when the message was mostly a URL request)
-  const decision = await decideSearch(client, model, provider, userMessage);
+  // Start URL fetching and search-decision in parallel — they are independent
+  const [urlPages, decision] = await Promise.all([
+    urls.length > 0
+      ? Promise.all(urls.map((u) => fetchPageText(u)))
+      : Promise.resolve([] as (Awaited<ReturnType<typeof fetchPageText>>)[]),
+    decideSearch(client, model, provider, userMessage),
+  ]);
+
+  // Process user-provided URL pages; notify when any fail
+  let urlFetchFailed = false;
+  urlPages.forEach((page, i) => {
+    if (page) {
+      sources.push({ title: page.title, url: urls[i] });
+      parts.push(`【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`);
+    } else if (urls[i]) {
+      urlFetchFailed = true;
+      logger.warn({ url: urls[i] }, "URL fetch failed; continuing without it");
+    }
+  });
+
+  if (urlFetchFailed) {
+    const warning = "一部のURLが読み込めませんでした（タイムアウトまたはアクセス不可）。読み込めた情報でお答えします。";
+    searchWarning = warning;
+    onStatus({ status: "search_warning", message: warning });
+  }
+
+  // Warn when the search decision itself failed or timed out
+  if (decision.skippedDueToError) {
+    const warning = "検索判定がタイムアウトしたため、Web検索をスキップしました。手元の知識でお答えします。";
+    searchWarning = warning;
+    onStatus({ status: "search_warning", message: warning });
+  }
+
+  // Web search
   if (decision.search) {
     searched = true;
     query = decision.query;
     onStatus({ status: "searching", query });
     const results = await searchWeb(decision.query);
     if (results.length > 0) {
-      // Fetch top 2 pages for deeper content
       const top = results.slice(0, 2);
       const pages = await Promise.all(top.map((r) => fetchPageText(r.url)));
       for (const r of results) {
@@ -312,12 +471,28 @@ export async function buildWebContext(
         .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   概要: ${r.snippet}`)
         .join("\n");
       parts.push(`【Web検索結果（クエリ: ${decision.query}）】\n${snippetBlock}`);
+
+      let pagesFetched = 0;
       pages.forEach((page, i) => {
         if (page) {
+          pagesFetched++;
           parts.push(`【ページ内容: ${top[i].url}】\n${page.text}`);
         }
       });
+
+      // Warn when any (not just all) of the selected pages failed to load
+      if (pagesFetched < top.length) {
+        const warning =
+          pagesFetched === 0
+            ? "ページ取得がすべてタイムアウトしたため、検索スニペットのみを参照しています。"
+            : "一部のページ取得がタイムアウトしたため、取得できた情報でお答えします。";
+        searchWarning = warning;
+        onStatus({ status: "search_warning", message: warning });
+      }
     } else {
+      const warning = "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
+      searchWarning = warning;
+      onStatus({ status: "search_warning", message: warning });
       parts.push(`【Web検索結果（クエリ: ${decision.query}）】\n検索結果が取得できませんでした。`);
     }
   }
@@ -327,5 +502,6 @@ export async function buildWebContext(
     query,
     sources,
     contextText: parts.join("\n\n"),
+    searchWarning,
   };
 }
