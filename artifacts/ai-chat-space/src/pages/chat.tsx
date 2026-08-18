@@ -42,10 +42,11 @@ async function streamMessage(
     const path = extra?.ephemeral
       ? `${BASE}/api/openai/ephemeral/messages`
       : `${BASE}/api/openai/conversations/${conversationId}/messages`;
+    const auditQuery = extra?.auditModel
+      ? `&auditModel=${encodeURIComponent(extra.auditModel)}&auditReasoning=${encodeURIComponent(loadSettings().auditReasoning)}`
+      : "";
     const res = await fetch(
-      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}${
-        extra?.auditModel ? `&auditModel=${encodeURIComponent(extra.auditModel)}` : ""
-      }`,
+      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}${auditQuery}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -343,7 +344,9 @@ export function ChatPage() {
       ? privateMessages.map((m) => ({ role: m.role, content: m.content }))
       : undefined;
 
-    await streamMessage(
+    // ストリーム開始を待たずに true を返し、入力欄をすぐクリアさせる。
+    // 完了・失敗は各コールバックと isStreaming で制御する。
+    void streamMessage(
       targetId ?? 0,
       finalContent,
       selectedModel,
@@ -572,9 +575,9 @@ export function ChatPage() {
         </div>
       )}
 
-      <div className="p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent pt-10">
+      <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background to-transparent">
         <div className="max-w-3xl mx-auto space-y-2">
-          <div className="flex items-center gap-2 px-1 flex-wrap">
+          <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0">
             <ModelSelector
               selectedModel={selectedModel}
               onSelect={setSelectedModel}
