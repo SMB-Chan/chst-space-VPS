@@ -20,6 +20,16 @@ import { Sparkles, X, Shield, Scale } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+function stripArtifactBlocks(content: string): string {
+  const cleaned = content
+    .replace(/```artifact\s*[^\n]*\n[\s\S]*?```/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  return cleaned.trim()
+    ? cleaned
+    : "ファイルを作成しました。下のカードからダウンロードできます。";
+}
+
 async function streamMessage(
   conversationId: number,
   content: string,
@@ -392,6 +402,7 @@ export function ChatPage() {
         setSearchStatus(null);
         if (isPrivate) {
           const now = new Date().toISOString();
+          const finalAssistantContent = stripArtifactBlocks(streamSnapshotRef.current.content);
           setPrivateMessages((prev) => [
             ...prev,
             {
@@ -405,7 +416,7 @@ export function ChatPage() {
               id: STREAMING_ASSISTANT_ID - prev.length - 1,
               conversationId: 0,
               role: "assistant",
-              content: streamSnapshotRef.current.content,
+              content: finalAssistantContent,
               sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
               artifacts: streamSnapshotRef.current.artifacts.length > 0 ? streamSnapshotRef.current.artifacts : null,
               modelId: selectedModel,
