@@ -51,9 +51,23 @@ export function Markdown({ content, className }: MarkdownProps) {
     // Escape HTML first? The challenge didn't specify strict XSS, but it's good practice.
     // For simplicity, we just split by regex and render spans.
     
-    const parts = text.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
+    const parts = text.split(/(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
     
     return parts.map((part, i) => {
+      const linkMatch = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+      if (linkMatch) {
+        return (
+          <a
+            key={i}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 break-all"
+          >
+            {linkMatch[1]}
+          </a>
+        );
+      }
       if (part.startsWith('**') && part.endsWith('**')) {
         return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
       }

@@ -21,7 +21,8 @@ async function streamMessage(
   model: string,
   onChunk: (text: string) => void,
   onDone: () => void,
-  onError: (err: Error) => void
+  onError: (err: Error) => void,
+  onStatus: (status: string | null, query?: string) => void
 ) {
   try {
     const res = await fetch(
@@ -51,7 +52,12 @@ async function streamMessage(
         if (line.startsWith("data: ")) {
           try {
             const parsed = JSON.parse(line.slice(6));
-            if (parsed.content) onChunk(parsed.content);
+            if (parsed.status === "searching") onStatus("searching", parsed.query);
+            if (parsed.status === "fetching") onStatus("fetching");
+            if (parsed.content) {
+              onStatus(null);
+              onChunk(parsed.content);
+            }
             if (parsed.error) onError(new Error(parsed.error));
             if (parsed.done) onDone();
           } catch {}
@@ -82,6 +88,7 @@ export function ChatPage() {
   const [streamingContent, setStreamingContent] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   const handleSend = async (content: string, fileData?: { name: string; content: string; isBase64: boolean }) => {
@@ -132,13 +139,18 @@ export function ChatPage() {
       },
       () => {
         setIsStreaming(false);
+        setSearchStatus(null);
         setOptimisticUserMessage(null);
         queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
       },
       (err) => {
         setIsStreaming(false);
+        setSearchStatus(null);
         setOptimisticUserMessage(null);
         setStreamError(err.message);
+      },
+      (status, query) => {
+        setSearchStatus(status ? { kind: status, query } : null);
       }
     );
   };
@@ -179,6 +191,17 @@ export function ChatPage() {
           />
         )}
       </div>
+
+      {searchStatus && (
+        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+            {searchStatus.kind === "searching"
+              ? `Webを検索中${searchStatus.query ? `: 「${searchStatus.query}」` : "..."}`
+              : "ページを読み込み中..."}
+          </div>
+        </div>
+      )}
 
       {streamError && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
