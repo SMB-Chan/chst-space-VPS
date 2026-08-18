@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Paperclip, Send, X, File as FileIcon, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { compressImageFile, formatBytes } from "@/lib/compress-image";
 
 interface MessageInputProps {
   // 戻り値がfalseの場合は送信がブロックされた（入力・添付は保持する）
@@ -34,7 +35,9 @@ function validateFile(file: File): string | null {
 export function MessageInput({ onSend, disabled }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [fileNote, setFileNote] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [compressing, setCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 送信処理中フラグ（二重送信防止）
@@ -48,26 +51,40 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
-    if (selected) {
-      const error = validateFile(selected);
-      if (error) {
-        setFileError(error);
-        setFile(null);
-      } else {
-        setFileError(null);
-        setFile(selected);
-        // Return focus to input after picking a file
-        setTimeout(() => textareaRef.current?.focus(), 10);
-      }
-    }
-    // reset so same file can be picked again if removed
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!selected) return;
+
+    const error = validateFile(selected);
+    if (error) {
+      setFileError(error);
+      setFile(null);
+      setFileNote(null);
+      return;
+    }
+
+    setFileError(null);
+    setCompressing(true);
+    try {
+      const { file: next, reduced } = await compressImageFile(selected);
+      setFile(next);
+      setFileNote(
+        reduced
+          ? `${formatBytes(selected.size)} → ${formatBytes(next.size)} に軽量化`
+          : null,
+      );
+    } catch {
+      setFile(selected);
+      setFileNote(null);
+    } finally {
+      setCompressing(false);
+      setTimeout(() => textareaRef.current?.focus(), 10);
+    }
   };
 
   const handleSubmit = async () => {
-    if ((!content.trim() && !file) || disabled) return;
+    if ((!content.trim() && !file) || disabled || compressing) return;
     // 実行中ガード（二重送信防止）
     if (isSendingRef.current) return;
     isSendingRef.current = true;
@@ -110,6 +127,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
 
       setContent("");
       setFile(null);
+      setFileNote(null);
       setFileError(null);
 
       // Reset textarea height
@@ -146,17 +164,26 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           </div>
         </div>
       )}
+      {compressing && (
+        <div className="px-4 pt-3 pb-1 text-xs text-muted-foreground">画像を軽量化しています...</div>
+      )}
       {file && (
         <div className="flex items-center gap-3 px-4 pt-3 pb-1">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-foreground max-w-[200px] animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-foreground max-w-full animate-in fade-in slide-in-from-bottom-2">
             {file.type.startsWith("image/") ? (
               <ImageIcon className="w-3.5 h-3.5 text-primary" />
             ) : (
               <FileIcon className="w-3.5 h-3.5 text-primary" />
             )}
             <span className="truncate font-medium">{file.name}</span>
+            {fileNote && (
+              <span className="text-muted-foreground shrink-0">{fileNote}</span>
+            )}
             <button 
-              onClick={() => setFile(null)}
+              onClick={() => {
+                setFile(null);
+                setFileNote(null);
+              }}
               className="ml-1 p-0.5 rounded-full hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="w-3 h-3" />
@@ -180,7 +207,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           size="icon" 
           onClick={() => fileInputRef.current?.click()}
           className="mb-1 w-10 h-10 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-full flex-shrink-0 transition-colors"
-          disabled={disabled}
+          disabled={disabled || compressing}
         >
           <Paperclip className="w-5 h-5" />
         </Button>
@@ -193,14 +220,14 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           placeholder="メッセージを入力..."
           className="flex-1 max-h-[200px] min-h-[44px] w-full resize-none bg-transparent py-3 px-1 text-base outline-none placeholder:text-muted-foreground/60 scrollbar-none font-sans"
           rows={1}
-          disabled={disabled}
+          disabled={disabled || compressing}
         />
         
         <Button 
           type="button"
           size="icon"
           onClick={handleSubmit}
-          disabled={(!content.trim() && !file) || disabled}
+          disabled={(!content.trim() && !file) || disabled || compressing}
           className={cn(
             "mb-1 w-10 h-10 rounded-full flex-shrink-0 transition-all duration-300",
             content.trim() || file 

@@ -5,12 +5,16 @@ import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch, type Response as UndiciResponse } from "undici";
 import type OpenAI from "openai";
 import { logger } from "./logger";
+import {
+  extractUrls,
+  parseSearchHtml,
+  inferSearchQuery,
+  stripHtml,
+  type SearchResult,
+} from "./search-parse";
 
-export interface SearchResult {
-  title: string;
-  url: string;
-  snippet: string;
-}
+export type { SearchResult };
+export { extractUrls, inferSearchQuery, parseSearchHtml };
 
 export interface WebContext {
   searched: boolean;
@@ -21,11 +25,11 @@ export interface WebContext {
 }
 
 /** Timeout covering ALL phases (DNS + connect + headers + body) for DDG search. */
-const SEARCH_FETCH_TIMEOUT_MS = 10_000;
+const SEARCH_FETCH_TIMEOUT_MS = 12_000;
 /** Shorter end-to-end timeout (DNS + connect + headers + body) for individual pages. */
-const PAGE_FETCH_TIMEOUT_MS = 5_000;
-/** Hard deadline for the search-decision LLM call. */
-const DECIDE_TIMEOUT_MS = 8_000;
+const PAGE_FETCH_TIMEOUT_MS = 6_000;
+/** Hard deadline for the search-decision LLM call. Heuristic covers timeouts. */
+const DECIDE_TIMEOUT_MS = 6_000;
 
 const MAX_PAGE_CHARS = 4000;
 const USER_AGENT =
@@ -72,26 +76,7 @@ function setCachedResults(query: string, results: SearchResult[]): void {
 // Helpers
 // ---------------------------------------------------------------------------
 
-export function extractUrls(text: string): string[] {
-  const matches = text.match(/https?:\/\/[^\s<>"')\]]+/g) ?? [];
-  return [...new Set(matches)].slice(0, 3);
-}
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 /**
  * SSRF guard: deny-by-default IP classification using ipaddr.js.
@@ -273,7 +258,20 @@ export async function fetchPageText(
   }
 }
 
-/** Search the web via DuckDuckGo HTML endpoint (no API key required). */
+async function searchWebOnce(url: string): Promise<SearchResult[]> {
+  const { response: res, cancel } = await fetchWithTimeout(url, SEARCH_FETCH_TIMEOUT_MS);
+  try {
+    if (!res.ok) {
+      logger.warn({ status: res.status, url }, "Search endpoint failed");
+      return [];
+    }
+    return parseSearchHtml(await res.text());
+  } finally {
+    cancel();
+  }
+}
+
+/** Search the web via DuckDuckGo HTML (no API key). Falls back to the lite page. */
 export async function searchWeb(query: string): Promise<SearchResult[]> {
   const cached = getCachedResults(query);
   if (cached) {
@@ -281,42 +279,23 @@ export async function searchWeb(query: string): Promise<SearchResult[]> {
     return cached;
   }
 
-  try {
-    const { response: res, cancel } = await fetchWithTimeout(
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-      SEARCH_FETCH_TIMEOUT_MS
-    );
+  const endpoints = [
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+  ];
+
+  for (const endpoint of endpoints) {
     try {
-      if (!res.ok) {
-        logger.warn({ status: res.status }, "DuckDuckGo search failed");
-        return [];
+      const results = await searchWebOnce(endpoint);
+      if (results.length > 0) {
+        setCachedResults(query, results);
+        return results;
       }
-      // Body read is still covered by the active abort timer
-      const html = await res.text();
-      const results: SearchResult[] = [];
-      const blockRe =
-        /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/g;
-      let m: RegExpExecArray | null;
-      while ((m = blockRe.exec(html)) !== null && results.length < 5) {
-        let url = m[1];
-        const uddg = url.match(/[?&]uddg=([^&]+)/);
-        if (uddg) url = decodeURIComponent(uddg[1]);
-        if (!/^https?:\/\//.test(url)) continue;
-        results.push({
-          title: stripHtml(m[2]),
-          url,
-          snippet: m[3] ? stripHtml(m[3]) : "",
-        });
-      }
-      setCachedResults(query, results);
-      return results;
-    } finally {
-      cancel();
+    } catch (err) {
+      logger.warn({ err, query, endpoint }, "Web search endpoint error");
     }
-  } catch (err) {
-    logger.warn({ err, query }, "Web search error");
-    return [];
   }
+  return [];
 }
 
 /**
@@ -332,7 +311,12 @@ export async function decideSearch(
   model: string,
   provider: "openai" | "dashscope",
   userMessage: string
-): Promise<{ search: boolean; query: string; skippedDueToError?: boolean }> {
+): Promise<{ search: boolean; query: string; skippedDueToError?: boolean; usedFallback?: boolean }> {
+  const inferred = inferSearchQuery(userMessage);
+  if (inferred.needed && inferred.query) {
+    return { search: true, query: inferred.query };
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DECIDE_TIMEOUT_MS);
@@ -384,9 +368,12 @@ export async function decideSearch(
       controller.signal.aborted ||
       (err as Error)?.message?.includes("aborted");
     if (isAbort) {
-      logger.warn({ model }, "Search decision timed out; skipping search");
+      logger.warn({ model }, "Search decision timed out; using heuristic fallback");
     } else {
-      logger.warn({ err, model }, "Search decision failed; skipping search");
+      logger.warn({ err, model }, "Search decision failed; using heuristic fallback");
+    }
+    if (inferred.query) {
+      return { search: true, query: inferred.query, usedFallback: true };
     }
     return { search: false, query: "", skippedDueToError: true };
   } finally {
@@ -450,9 +437,12 @@ export async function buildWebContext(
     onStatus({ status: "search_warning", message: warning });
   }
 
-  // Warn when the search decision itself failed or timed out
-  if (decision.skippedDueToError) {
-    const warning = "検索判定がタイムアウトしたため、Web検索をスキップしました。手元の知識でお答えします。";
+  if (decision.usedFallback) {
+    const warning = "検索判定が遅れたため、メッセージから検索クエリを作りました。";
+    searchWarning = warning;
+    onStatus({ status: "search_warning", message: warning });
+  } else if (decision.skippedDueToError) {
+    const warning = "検索判定に失敗したため、Web検索をスキップしました。手元の知識でお答えします。";
     searchWarning = warning;
     onStatus({ status: "search_warning", message: warning });
   }

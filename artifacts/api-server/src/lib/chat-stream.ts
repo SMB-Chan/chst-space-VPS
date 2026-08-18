@@ -1,7 +1,9 @@
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import type OpenAI from "openai";
 import {
   applyGenerationParams,
+  applySafeGenerationParams,
+  isUnsupportedGenerationParam,
   type ModelProvider,
   type ReasoningLevel,
 } from "./ai-clients";
@@ -20,7 +22,7 @@ export type ChatContentPart =
   | { type: "image_url"; image_url: { url: string } };
 
 export async function streamChatReply(args: {
-  req: Request;
+  req?: unknown;
   res: Response;
   client: OpenAI;
   provider: ModelProvider;
@@ -35,7 +37,6 @@ export async function streamChatReply(args: {
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
   const {
-    req,
     res,
     client,
     provider,
@@ -52,9 +53,11 @@ export async function streamChatReply(args: {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 
+  // req "close" fires when the POST body is finished — that is NOT a client
+  // disconnect. Watch the response socket instead.
   let clientGone = false;
-  req.on("close", () => {
-    clientGone = true;
+  res.on("close", () => {
+    if (!res.writableEnded) clientGone = true;
   });
 
   let fullResponse = "";
@@ -96,9 +99,19 @@ export async function streamChatReply(args: {
       reasoningLevel,
     );
 
-    const stream = (await client.chat.completions.create(streamOptions)) as AsyncIterable<{
-      choices?: { delta?: StreamDelta }[];
-    }>;
+    let stream: AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
+    try {
+      stream = (await client.chat.completions.create(streamOptions)) as AsyncIterable<{
+        choices?: { delta?: StreamDelta }[];
+      }>;
+    } catch (err) {
+      if (!isUnsupportedGenerationParam(err)) throw err;
+      logger.warn({ err, modelId }, "Retrying chat stream without extra generation params");
+      applySafeGenerationParams(streamOptions as unknown as Record<string, unknown>, provider);
+      stream = (await client.chat.completions.create(streamOptions)) as AsyncIterable<{
+        choices?: { delta?: StreamDelta }[];
+      }>;
+    }
 
     let fullReasoning = "";
     let emittedThinking = false;
@@ -160,7 +173,7 @@ export async function streamChatReply(args: {
     }
   }
 
-  if (!clientGone) {
+  if (!res.writableEnded) {
     res.end();
   }
 }

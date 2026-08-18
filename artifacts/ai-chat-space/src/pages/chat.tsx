@@ -71,6 +71,7 @@ async function streamMessage(
     let buffer = "";
     let doneCalled = false;
     let failed = false;
+    let receivedContent = false;
     const callDoneOnce = () => {
       if (!doneCalled && !failed) {
         doneCalled = true;
@@ -101,6 +102,7 @@ async function streamMessage(
         onReasoning(parsed.reasoning);
       }
       if (typeof parsed.content === "string" && parsed.content) {
+        receivedContent = true;
         onStatus("generating");
         onChunk(parsed.content);
       }
@@ -128,6 +130,11 @@ async function streamMessage(
       if (failed) break;
     }
     if (!failed && buffer.trim()) handleSseLine(buffer.trim());
+    if (!failed && !doneCalled && !receivedContent) {
+      failed = true;
+      onError(new Error("応答が空でした。もう一度お試しください。"));
+      return;
+    }
     if (!failed) callDoneOnce();
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return;
@@ -329,8 +336,14 @@ export function ChatPage() {
         setSearchStatus(null);
         setStreamingSources([]);
         setStreamingReasoning("");
-        setOptimisticUserMessage(null);
         setStreamError(err.message);
+        if (!isPrivate && targetId) {
+          void queryClient
+            .invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId) })
+            .finally(() => setOptimisticUserMessage(null));
+        } else {
+          setOptimisticUserMessage(null);
+        }
       },
       (status, query) => {
         setSearchStatus(status ? { kind: status, query } : null);
