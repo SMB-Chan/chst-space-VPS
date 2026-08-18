@@ -44,7 +44,8 @@ function PhaseDots() {
 function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(live);
   useEffect(() => {
-    if (live) setOpen(true);
+    // ライブ中は開き、終わったら畳んで本文を優先する（モバイルで推論が画面を占有しないように）
+    setOpen(live);
   }, [live]);
   if (!text && !live) return null;
   return (
@@ -60,7 +61,7 @@ function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
         <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
       </button>
       {open && text && (
-        <div className="px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground/90 whitespace-pre-wrap max-h-48 overflow-y-auto font-sans">
+        <div className="px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground/90 whitespace-pre-wrap max-h-40 md:max-h-48 overflow-y-auto font-sans break-words [overflow-wrap:anywhere]">
           {text}
         </div>
       )}
@@ -77,16 +78,25 @@ function AuditCard({
   modelId?: string | null;
   live?: boolean;
 }) {
+  const [open, setOpen] = useState(!!live);
+  useEffect(() => {
+    setOpen(!!live);
+  }, [live]);
   if (!content && !live) return null;
   return (
     <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-sky-300/90">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-sky-300/90 hover:bg-sky-500/10"
+      >
         <span className="font-medium">{live ? "監査中" : "点検メモ"}</span>
         {modelId ? <span className="opacity-70">{modelId}</span> : null}
         {live ? <PhaseDots /> : null}
-      </div>
-      {content ? (
-        <div className="px-3 pb-3 text-[13px] leading-relaxed">
+        <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
+      </button>
+      {open && content ? (
+        <div className="px-3 pb-3 text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]">
           <Markdown content={content} />
         </div>
       ) : null}
@@ -125,7 +135,9 @@ export function MessageFeed({
   streamingReasoning = "",
   streamingAudit = "",
 }: MessageFeedProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const { user } = useUser();
   const userInitial =
     user?.firstName?.[0] ??
@@ -133,8 +145,12 @@ export function MessageFeed({
     "U";
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (!stickToBottomRef.current) return;
+    bottomRef.current?.scrollIntoView({
+      behavior: streamingPhase ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [messages, streamingPhase]);
 
   if (isLoading) {
     return (
@@ -145,7 +161,16 @@ export function MessageFeed({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-32">
+    <div
+      ref={containerRef}
+      onScroll={() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+        stickToBottomRef.current = distance < 96;
+      }}
+      className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-[calc(8rem+env(safe-area-inset-bottom))]"
+    >
       <div className="max-w-3xl mx-auto space-y-12">
         {messages.map((message) => {
           const display = message as DisplayMessage;
@@ -191,7 +216,7 @@ export function MessageFeed({
             <div 
               key={message.id} 
               className={cn(
-                "flex gap-4 md:gap-6 group",
+                "flex gap-3 md:gap-6 group",
                 isUser ? "flex-row-reverse" : "flex-row"
               )}
             >
@@ -211,13 +236,13 @@ export function MessageFeed({
               </div>
               
               <div className={cn(
-                "flex flex-col gap-2 max-w-[85%] md:max-w-[75%]",
+                "flex flex-col gap-2 min-w-0 max-w-[88%] md:max-w-[75%]",
                 isUser ? "items-end" : "items-start"
               )}>
                 {attachedFile && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-muted-foreground shadow-sm">
-                    <Paperclip className="w-4 h-4 text-primary" />
-                    <span className="font-medium text-foreground truncate max-w-[200px]">{attachedFile.name}</span>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-muted-foreground shadow-sm max-w-full">
+                    <Paperclip className="w-4 h-4 text-primary shrink-0" />
+                    <span className="font-medium text-foreground truncate">{attachedFile.name}</span>
                   </div>
                 )}
                 
@@ -236,7 +261,7 @@ export function MessageFeed({
                   )
                 ) : (
                   <div className={cn(
-                    "px-5 py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm",
+                    "px-4 py-3 md:px-5 md:py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words [overflow-wrap:anywhere]",
                     isUser 
                       ? "bg-primary text-primary-foreground font-sans font-normal" 
                       : "bg-card border border-border font-serif text-foreground prose-p:leading-loose"

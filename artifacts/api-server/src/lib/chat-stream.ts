@@ -35,6 +35,7 @@ export async function streamChatReply(args: {
   provider: ModelProvider;
   modelId: string;
   reasoningLevel: ReasoningLevel;
+  auditReasoningLevel?: ReasoningLevel;
   userText: string;
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   auditModelId?: string;
@@ -51,6 +52,7 @@ export async function streamChatReply(args: {
     provider,
     modelId,
     reasoningLevel,
+    auditReasoningLevel = "off",
     userText,
     chatMessages,
     auditModelId,
@@ -151,7 +153,7 @@ export async function streamChatReply(args: {
             client: auditor.client,
             provider: auditor.provider,
             modelId: auditModelId,
-            reasoningLevel: "off",
+            reasoningLevel: auditReasoningLevel,
             messages: [
               { role: "system", content: AUDIT_SYSTEM_PROMPT },
               {

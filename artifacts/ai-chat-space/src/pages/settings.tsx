@@ -105,7 +105,15 @@ export function SettingsPage() {
               onSelect={(id) => setSettings(saveSettings({ auditModelId: id }))}
               disabled={!settings.auditEnabled}
             />
+            <ReasoningSelector
+              value={settings.auditReasoning}
+              onSelect={(level) => setSettings(saveSettings({ auditReasoning: level }))}
+              disabled={!settings.auditEnabled}
+            />
           </div>
+          <p className="text-[11px] text-muted-foreground/80">
+            監査の推論は既定でオフです。深く点検させたい場合だけ上げてください。
+          </p>
         </section>
 
         <section className="space-y-3">
