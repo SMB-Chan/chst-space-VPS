@@ -20,6 +20,14 @@ export interface OpenaiSource {
   url: string;
 }
 
+export interface OpenaiArtifact {
+  id: number;
+  filename: string;
+  mime: string;
+  size: number;
+  downloadUrl: string;
+}
+
 export interface OpenaiMessage {
   id: number;
   conversationId: number;
@@ -27,6 +35,9 @@ export interface OpenaiMessage {
   content: string;
   modelId?: string | null;
   sources?: OpenaiSource[] | null;
+  artifacts?: OpenaiArtifact[] | null;
+  auditContent?: string | null;
+  auditModelId?: string | null;
   createdAt: string;
 }
 
@@ -48,4 +59,3 @@ export interface OpenaiConversationWithMessages {
 export interface OpenaiError {
   error: string;
 }
-
