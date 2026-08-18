@@ -10,6 +10,8 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./lib/json-limits";
+import { publicHttpError } from "./lib/public-error";
 
 const app: Express = express();
 
@@ -37,10 +39,10 @@ app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 app.use(cors({ credentials: true, origin: true }));
 // Image attachments need a large body; everything else stays small so
 // unauthenticated requests cannot force a 25MB parse.
-app.use("/api/openai/conversations/:id/messages", express.json({ limit: "25mb" }));
-app.use("/api/openai/conversations/:id/messages", express.urlencoded({ extended: true, limit: "25mb" }));
-app.use(express.json({ limit: "256kb" }));
-app.use(express.urlencoded({ extended: true, limit: "256kb" }));
+app.use([...LARGE_JSON_PATHS], express.json({ limit: LARGE_JSON_LIMIT }));
+app.use([...LARGE_JSON_PATHS], express.urlencoded({ extended: true, limit: LARGE_JSON_LIMIT }));
+app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));
 
 // Resolve the publishable key from the incoming request host so the same
 // server can serve multiple Clerk custom domains. Falls back to
@@ -59,19 +61,7 @@ app.use("/api", router);
 // JSON形式のグローバルエラーハンドラ（413等のExpressエラーを含む）
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error & { status?: number; statusCode?: number; type?: string }, _req: Request, res: Response, _next: NextFunction) => {
-  const status = (err as { status?: number; statusCode?: number }).status
-    ?? (err as { status?: number; statusCode?: number }).statusCode
-    ?? 500;
-
-  let message: string;
-  if (status === 413 || (err as { type?: string }).type === "entity.too.large") {
-    message = "ファイルが大きすぎます。15MB以下の画像を添付してください。";
-  } else if (status === 400) {
-    message = `リクエストが不正です: ${err.message}`;
-  } else {
-    message = err.message || "サーバーエラーが発生しました。";
-  }
-
+  const { status, message } = publicHttpError(err);
   logger.error({ err, status }, "Unhandled request error");
   res.status(status).json({ error: message });
 });

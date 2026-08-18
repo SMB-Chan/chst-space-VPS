@@ -58,6 +58,7 @@
 ## Gotchas
 
 - Token Plan の DashScope は専用エンドポイント必須。モデル ID は `/openai/models` とフロントのフォールバック一覧を揃える。
+- `messages` にカラムを足したら `pnpm --filter @workspace/db run push`。API 起動時にも欠けている監査カラム等を `ADD COLUMN IF NOT EXISTS` で補う。
 - 「二重送信」報告は、まず DB に 2 件あるのか表示が 2 件なのかを切り分ける。再取得完了を待ってからストリーミング状態をクリアする。
 - ローカルでは Vite が `/api` を `API_PROXY_TARGET`（デフォルト `http://127.0.0.1:5000`）へプロキシする。
 - `.env` はコミットしない。`.env.example` だけを更新する。
