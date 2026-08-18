@@ -89,7 +89,7 @@ export function SettingsPage() {
         <section className="space-y-3">
           <h2 className="text-sm font-medium text-foreground">中立監査モード</h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            回答のあと、別モデルが会話履歴なしで本文だけを批判的に点検します。使用中のモデルとは別の系統を指定してください。
+            回答のあと、別モデルが会話履歴なしで本文を点検します。使用中のモデルがその指摘を読んで最終報告を書き直し、それを本文として出します。監査モデルは別の系統を指定してください。
           </p>
           <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
             <span className="text-sm">監査を有効にする</span>

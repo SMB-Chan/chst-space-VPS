@@ -9,7 +9,14 @@ import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
 import { STREAMING_ASSISTANT_ID } from "@/lib/chat";
 
-export type StreamingPhase = "starting" | "searching" | "thinking" | "generating" | "auditing" | null;
+export type StreamingPhase =
+  | "starting"
+  | "searching"
+  | "thinking"
+  | "generating"
+  | "auditing"
+  | "revising"
+  | null;
 
 type DisplayMessage = OpenaiMessage & {
   auditContent?: string | null;
@@ -74,7 +81,7 @@ function AuditCard({
   return (
     <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 text-xs text-sky-300/90">
-        <span className="font-medium">{live ? "監査中" : "中立監査"}</span>
+        <span className="font-medium">{live ? "監査中" : "点検メモ"}</span>
         {modelId ? <span className="opacity-70">{modelId}</span> : null}
         {live ? <PhaseDots /> : null}
       </div>
@@ -96,7 +103,9 @@ function GenerationBadge({ phase }: { phase: StreamingPhase }) {
         ? "生成中"
         : phase === "auditing"
           ? "監査中"
-          : "準備中";
+          : phase === "revising"
+            ? "最終報告を作成中"
+            : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -237,7 +246,8 @@ export function MessageFeed({
                     ) : (
                       <>
                         <Markdown content={displayContent} />
-                        {message.id === STREAMING_ASSISTANT_ID && streamingPhase === "generating" && (
+                        {message.id === STREAMING_ASSISTANT_ID &&
+                          (streamingPhase === "generating" || streamingPhase === "revising") && (
                           <span
                             className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
                             aria-hidden
@@ -247,8 +257,11 @@ export function MessageFeed({
                     )}
                   </div>
                 )}
-                {!isUser && message.id === STREAMING_ASSISTANT_ID && displayContent && streamingPhase === "generating" && (
-                  <GenerationBadge phase="generating" />
+                {!isUser &&
+                  message.id === STREAMING_ASSISTANT_ID &&
+                  displayContent &&
+                  (streamingPhase === "generating" || streamingPhase === "revising") && (
+                  <GenerationBadge phase={streamingPhase} />
                 )}
 
                 {!isUser && sources && sources.length > 0 && (

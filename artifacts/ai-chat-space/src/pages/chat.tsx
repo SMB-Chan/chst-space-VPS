@@ -34,6 +34,7 @@ async function streamMessage(
   onSources: (sources: { title: string; url: string }[]) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
   onAudit: (text: string) => void,
+  onResetContent: () => void,
   signal?: AbortSignal,
   extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string },
 ) {
@@ -104,6 +105,10 @@ async function streamMessage(
       if (parsed.status === "thinking") onStatus("thinking");
       if (parsed.status === "generating") onStatus("generating");
       if (parsed.status === "auditing") onStatus("auditing");
+      if (parsed.status === "revising") {
+        onStatus("revising");
+        if (parsed.resetContent) onResetContent();
+      }
       if (typeof parsed.audit === "string" && parsed.audit) {
         onStatus("auditing");
         onAudit(parsed.audit);
@@ -120,7 +125,11 @@ async function streamMessage(
       }
       if (typeof parsed.content === "string" && parsed.content) {
         receivedContent = true;
-        onStatus("generating");
+        if (parsed.status === "revising") {
+          onStatus("revising");
+        } else {
+          onStatus("generating");
+        }
         onChunk(parsed.content);
       }
       if (typeof parsed.error === "string" && parsed.error) {
@@ -405,6 +414,10 @@ export function ChatPage() {
         streamSnapshotRef.current.audit += chunk;
         setStreamingAudit((prev) => prev + chunk);
       },
+      () => {
+        streamSnapshotRef.current.content = "";
+        setStreamingContent("");
+      },
       controller.signal,
       {
         ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
@@ -482,6 +495,8 @@ export function ChatPage() {
               isStreaming
                 ? searchStatus?.kind === "thinking"
                   ? "thinking"
+                  : searchStatus?.kind === "revising"
+                    ? "revising"
                   : searchStatus?.kind === "auditing"
                     ? "auditing"
                   : searchStatus?.kind === "searching" || searchStatus?.kind === "fetching"
