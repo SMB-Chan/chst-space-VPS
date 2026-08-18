@@ -15,7 +15,11 @@ import {
   type StreamDelta,
 } from "./stream-delta";
 import { getClientForModel } from "./ai-clients";
-import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
+import {
+  AUDIT_SYSTEM_PROMPT,
+  buildAuditUserMessage,
+  buildRevisionUserMessage,
+} from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { logger } from "./logger";
@@ -170,6 +174,62 @@ export async function streamChatReply(args: {
               `data: ${JSON.stringify({
                 status: "search_warning",
                 message: "監査モデルの実行に失敗しました。本文の回答のみ表示します。",
+              })}\n\n`,
+            );
+          }
+        }
+      }
+
+      if (audit?.content && !clientGone) {
+        const draft = fullResponse;
+        let replacedDraft = false;
+        try {
+          res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
+          const revised = await streamModelText({
+            client,
+            provider,
+            modelId,
+            reasoningLevel,
+            messages: [
+              ...chatMessages,
+              { role: "assistant", content: fullResponse },
+              {
+                role: "user",
+                content: buildRevisionUserMessage({
+                  question: userText,
+                  draft: fullResponse,
+                  audit: audit.content,
+                }),
+              },
+            ],
+            onDelta: (added, kind) => {
+              if (clientGone) return;
+              if (kind === "reasoning") {
+                res.write(`data: ${JSON.stringify({ status: "thinking", reasoning: added })}\n\n`);
+                return;
+              }
+              if (!replacedDraft) {
+                replacedDraft = true;
+                res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
+              }
+              res.write(`data: ${JSON.stringify({ content: added, status: "revising" })}\n\n`);
+            },
+            shouldStop: () => clientGone,
+          });
+          if (revised.trim() && !clientGone) {
+            fullResponse = revised.trim();
+          }
+        } catch (err) {
+          logger.warn({ err, modelId }, "Revision pass failed; keeping draft answer");
+          if (!clientGone) {
+            if (replacedDraft) {
+              res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
+              res.write(`data: ${JSON.stringify({ content: draft, status: "generating" })}\n\n`);
+            }
+            res.write(
+              `data: ${JSON.stringify({
+                status: "search_warning",
+                message: "最終報告の作成に失敗したので、初稿を表示します。",
               })}\n\n`,
             );
           }
