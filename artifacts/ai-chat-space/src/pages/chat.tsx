@@ -14,9 +14,9 @@ import { ModelSelector, useAvailableModels } from "@/components/chat/model-selec
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
 import { type ReasoningLevel } from "@/lib/reasoning";
-import { loadSettings } from "@/lib/settings";
+import { loadSettings, pickAuditModel, saveSettings, subscribeSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { Sparkles, X, Shield } from "lucide-react";
+import { Sparkles, X, Shield, Scale } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -32,15 +32,19 @@ async function streamMessage(
   onStatus: (status: string | null, query?: string) => void,
   onSearchWarning: (message: string) => void,
   onSources: (sources: { title: string; url: string }[]) => void,
+  onSkills: (skills: { id: string; label: string }[]) => void,
+  onAudit: (text: string) => void,
   signal?: AbortSignal,
-  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[] },
+  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string },
 ) {
   try {
     const path = extra?.ephemeral
       ? `${BASE}/api/openai/ephemeral/messages`
       : `${BASE}/api/openai/conversations/${conversationId}/messages`;
     const res = await fetch(
-      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}`,
+      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}${
+        extra?.auditModel ? `&auditModel=${encodeURIComponent(extra.auditModel)}` : ""
+      }`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,10 +91,23 @@ async function streamMessage(
       } catch {
         return;
       }
+      if (parsed.status === "skill" && Array.isArray(parsed.skills)) {
+        onSkills(
+          parsed.skills.filter(
+            (s): s is { id: string; label: string } =>
+              !!s && typeof s === "object" && typeof (s as { id?: unknown }).id === "string" && typeof (s as { label?: unknown }).label === "string",
+          ),
+        );
+      }
       if (parsed.status === "searching") onStatus("searching", parsed.query as string | undefined);
       if (parsed.status === "fetching") onStatus("fetching");
       if (parsed.status === "thinking") onStatus("thinking");
       if (parsed.status === "generating") onStatus("generating");
+      if (parsed.status === "auditing") onStatus("auditing");
+      if (typeof parsed.audit === "string" && parsed.audit) {
+        onStatus("auditing");
+        onAudit(parsed.audit);
+      }
       if (parsed.status === "search_warning" && typeof parsed.message === "string") {
         onSearchWarning(parsed.message);
       }
@@ -161,7 +178,11 @@ export function ChatPage() {
   const [selectedModel, setSelectedModel] = useState(initialSettings.defaultModel);
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(initialSettings.defaultReasoning);
   const [privateMessages, setPrivateMessages] = useState<OpenaiMessage[]>([]);
-  const streamSnapshotRef = useRef({ content: "", sources: [] as { title: string; url: string }[] });
+  const streamSnapshotRef = useRef({
+    content: "",
+    sources: [] as { title: string; url: string }[],
+    audit: "",
+  });
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
   const [streamingReasoning, setStreamingReasoning] = useState<string>("");
@@ -170,6 +191,15 @@ export function ChatPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
+  const [activeSkills, setActiveSkills] = useState<{ id: string; label: string }[]>([]);
+  const [auditEnabled, setAuditEnabled] = useState(initialSettings.auditEnabled);
+  const [auditModelId, setAuditModelId] = useState(initialSettings.auditModelId);
+  const [streamingAudit, setStreamingAudit] = useState("");
+  const resolvedAuditModel = auditEnabled
+    ? pickAuditModel(selectedModel, models, auditModelId)
+    : undefined;
+  const auditModel =
+    resolvedAuditModel && resolvedAuditModel !== selectedModel ? resolvedAuditModel : undefined;
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   useEffect(() => {
@@ -195,6 +225,8 @@ export function ChatPage() {
     setStreamError(null);
     setSearchStatus(null);
     setSearchWarning(null);
+    setActiveSkills([]);
+    setStreamingAudit("");
   }, [conversationId]);
 
   const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
@@ -205,6 +237,11 @@ export function ChatPage() {
   useEffect(() => {
     if (!isPrivate) setPrivateMessages([]);
   }, [isPrivate]);
+
+  useEffect(() => subscribeSettings((s) => {
+    setAuditEnabled(s.auditEnabled);
+    setAuditModelId(s.auditModelId);
+  }), []);
 
   // Restore the last used model when opening an existing conversation
   useEffect(() => {
@@ -264,6 +301,8 @@ export function ChatPage() {
     sendingToRef.current = targetId ?? 0;
     setStreamError(null);
     setSearchWarning(null);
+    setActiveSkills([]);
+    setStreamingAudit("");
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
       conversationId: targetId ?? 0,
@@ -277,7 +316,7 @@ export function ChatPage() {
     setStreamingReasoning("");
     setStreamingSources([]);
     setSearchStatus({ kind: "starting" });
-    streamSnapshotRef.current = { content: "", sources: [] };
+    streamSnapshotRef.current = { content: "", sources: [], audit: "" };
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -319,8 +358,10 @@ export function ChatPage() {
               content: streamSnapshotRef.current.content,
               sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
               modelId: selectedModel,
+              auditContent: streamSnapshotRef.current.audit || null,
+              auditModelId: streamSnapshotRef.current.audit ? auditModel : null,
               createdAt: now,
-            },
+            } as OpenaiMessage,
           ]);
         } else {
           await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
@@ -329,6 +370,7 @@ export function ChatPage() {
         setStreamingContent("");
         setStreamingReasoning("");
         setStreamingSources([]);
+        setStreamingAudit("");
         setOptimisticUserMessage(null);
       },
       (err) => {
@@ -336,6 +378,7 @@ export function ChatPage() {
         setSearchStatus(null);
         setStreamingSources([]);
         setStreamingReasoning("");
+        setStreamingAudit("");
         setStreamError(err.message);
         if (!isPrivate && targetId) {
           void queryClient
@@ -355,8 +398,18 @@ export function ChatPage() {
         streamSnapshotRef.current.sources = sources;
         setStreamingSources(sources);
       },
+      (skills) => {
+        setActiveSkills(skills);
+      },
+      (chunk) => {
+        streamSnapshotRef.current.audit += chunk;
+        setStreamingAudit((prev) => prev + chunk);
+      },
       controller.signal,
-      isPrivate ? { ephemeral: true, history: privateHistory } : undefined,
+      {
+        ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
+        ...(auditModel ? { auditModel } : {}),
+      },
     );
     return true;
   };
@@ -429,6 +482,8 @@ export function ChatPage() {
               isStreaming
                 ? searchStatus?.kind === "thinking"
                   ? "thinking"
+                  : searchStatus?.kind === "auditing"
+                    ? "auditing"
                   : searchStatus?.kind === "searching" || searchStatus?.kind === "fetching"
                     ? "searching"
                     : streamingContent
@@ -437,9 +492,26 @@ export function ChatPage() {
                 : null
             }
             streamingReasoning={streamingReasoning}
+            streamingAudit={streamingAudit}
           />
         )}
       </div>
+
+      {activeSkills.length > 0 && (
+        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300">
+            <span className="text-xs uppercase tracking-wider opacity-80">自動スキル</span>
+            {activeSkills.map((skill) => (
+              <span
+                key={skill.id}
+                className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-medium"
+              >
+                {skill.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {searchStatus && (searchStatus.kind === "searching" || searchStatus.kind === "fetching") && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
@@ -492,6 +564,26 @@ export function ChatPage() {
                 disabled={isStreaming || createConversation.isPending}
               />
             )}
+            <button
+              type="button"
+              disabled={isStreaming || createConversation.isPending}
+              onClick={() => {
+                const next = !auditEnabled;
+                setAuditEnabled(next);
+                saveSettings({ auditEnabled: next });
+              }}
+              className={cn(
+                "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center",
+                auditEnabled
+                  ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
+                  : "text-muted-foreground border-border/50 hover:text-foreground",
+                (isStreaming || createConversation.isPending) && "opacity-50",
+              )}
+              title={auditModel ? `監査: ${auditModel}` : "監査モード"}
+            >
+              <Scale className="w-3 h-3" />
+              監査{auditEnabled ? " ON" : ""}
+            </button>
           </div>
           <MessageInput
             onSend={handleSend}

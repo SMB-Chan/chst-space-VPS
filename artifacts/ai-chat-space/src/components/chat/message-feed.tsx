@@ -9,13 +9,19 @@ import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
 import { STREAMING_ASSISTANT_ID } from "@/lib/chat";
 
-export type StreamingPhase = "starting" | "searching" | "thinking" | "generating" | null;
+export type StreamingPhase = "starting" | "searching" | "thinking" | "generating" | "auditing" | null;
+
+type DisplayMessage = OpenaiMessage & {
+  auditContent?: string | null;
+  auditModelId?: string | null;
+};
 
 interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
   streamingPhase?: StreamingPhase;
   streamingReasoning?: string;
+  streamingAudit?: string;
 }
 
 function PhaseDots() {
@@ -55,10 +61,42 @@ function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
   );
 }
 
+function AuditCard({
+  content,
+  modelId,
+  live,
+}: {
+  content: string;
+  modelId?: string | null;
+  live?: boolean;
+}) {
+  if (!content && !live) return null;
+  return (
+    <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-sky-300/90">
+        <span className="font-medium">{live ? "監査中" : "中立監査"}</span>
+        {modelId ? <span className="opacity-70">{modelId}</span> : null}
+        {live ? <PhaseDots /> : null}
+      </div>
+      {content ? (
+        <div className="px-3 pb-3 text-[13px] leading-relaxed">
+          <Markdown content={content} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function GenerationBadge({ phase }: { phase: StreamingPhase }) {
   if (!phase || phase === "searching") return null;
   const label =
-    phase === "thinking" ? "推論中" : phase === "generating" ? "生成中" : "準備中";
+    phase === "thinking"
+      ? "推論中"
+      : phase === "generating"
+        ? "生成中"
+        : phase === "auditing"
+          ? "監査中"
+          : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -76,6 +114,7 @@ export function MessageFeed({
   isLoading,
   streamingPhase = null,
   streamingReasoning = "",
+  streamingAudit = "",
 }: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { user } = useUser();
@@ -100,6 +139,7 @@ export function MessageFeed({
     <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-32">
       <div className="max-w-3xl mx-auto space-y-12">
         {messages.map((message) => {
+          const display = message as DisplayMessage;
           const isUser = message.role === "user";
           
           // Parse file attachment if present
@@ -215,6 +255,14 @@ export function MessageFeed({
                   <div className="w-full px-1">
                     <SourceCards sources={sources} />
                   </div>
+                )}
+
+                {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (
+                  <AuditCard
+                    content={message.id === STREAMING_ASSISTANT_ID ? streamingAudit || display.auditContent || "" : display.auditContent || ""}
+                    modelId={display.auditModelId}
+                    live={message.id === STREAMING_ASSISTANT_ID && streamingPhase === "auditing"}
+                  />
                 )}
 
                 {!isUser && message.modelId && (

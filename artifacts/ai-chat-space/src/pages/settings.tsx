@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
-import { loadSettings, saveSettings } from "@/lib/settings";
+import { loadSettings, pickAuditModel, saveSettings } from "@/lib/settings";
+import { Switch } from "@/components/ui/switch";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListOpenaiConversationsQueryKey } from "@workspace/api-client-react";
@@ -81,6 +82,28 @@ export function SettingsPage() {
             <ReasoningSelector
               value={settings.defaultReasoning}
               onSelect={(level) => setSettings(saveSettings({ defaultReasoning: level }))}
+            />
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-foreground">中立監査モード</h2>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            回答のあと、別モデルが会話履歴なしで本文だけを批判的に点検します。使用中のモデルとは別の系統を指定してください。
+          </p>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+            <span className="text-sm">監査を有効にする</span>
+            <Switch
+              checked={settings.auditEnabled}
+              onCheckedChange={(checked) => setSettings(saveSettings({ auditEnabled: checked }))}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">監査モデル</span>
+            <ModelSelector
+              selectedModel={pickAuditModel(settings.defaultModel, models, settings.auditModelId)}
+              onSelect={(id) => setSettings(saveSettings({ auditModelId: id }))}
+              disabled={!settings.auditEnabled}
             />
           </div>
         </section>
