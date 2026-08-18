@@ -58,9 +58,9 @@ export function ChatLayout({ children }: ChatLayoutProps) {
   const deleteConversation = useDeleteOpenaiConversation();
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
-  // Once we know if it's mobile, set the initial state once
+  // Wait until the viewport is known so phones don't flash an open drawer.
   useEffect(() => {
-    if (sidebarOpen === undefined) {
+    if (sidebarOpen === undefined && isMobile !== undefined) {
       setSidebarOpen(!isMobile);
     }
   }, [isMobile, sidebarOpen]);

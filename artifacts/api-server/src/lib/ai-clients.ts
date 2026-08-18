@@ -17,9 +17,10 @@ export const openaiClient = new OpenAI({
 // DashScope (Alibaba Cloud) — OpenAI-compatible endpoint
 let dashscopeClient: OpenAI | null = null;
 
+// Token Plan requires the region endpoint. The generic intl URL rejects these keys.
 const DASHSCOPE_BASE_URL =
   process.env.DASHSCOPE_BASE_URL ??
-  "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+  "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
 
 if (process.env.DASHSCOPE_API_KEY) {
   dashscopeClient = new OpenAI({

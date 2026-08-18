@@ -55,46 +55,64 @@ async function streamMessage(
       throw new Error(errorMessage);
     }
 
-    const reader = res.body!.getReader();
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("応答ストリームを開けませんでした。");
     const decoder = new TextDecoder();
     let buffer = "";
-    // onDoneが二重実行されないようフラグで管理
     let doneCalled = false;
+    let failed = false;
     const callDoneOnce = () => {
-      if (!doneCalled) {
+      if (!doneCalled && !failed) {
         doneCalled = true;
         onDone();
       }
     };
 
+    const handleSseLine = (line: string) => {
+      if (!line.startsWith("data: ")) return;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      if (parsed.status === "searching") onStatus("searching", parsed.query as string | undefined);
+      if (parsed.status === "fetching") onStatus("fetching");
+      if (parsed.status === "search_warning" && typeof parsed.message === "string") {
+        onSearchWarning(parsed.message);
+      }
+      if (Array.isArray(parsed.sources)) {
+        onSources(parsed.sources as { title: string; url: string }[]);
+      }
+      if (typeof parsed.content === "string" && parsed.content) {
+        onStatus(null);
+        onChunk(parsed.content);
+      }
+      if (typeof parsed.error === "string" && parsed.error) {
+        failed = true;
+        onError(new Error(parsed.error));
+        return;
+      }
+      if (parsed.done) callDoneOnce();
+    };
+
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const parsed = JSON.parse(line.slice(6));
-            if (parsed.status === "searching") onStatus("searching", parsed.query);
-            if (parsed.status === "fetching") onStatus("fetching");
-            if (parsed.status === "search_warning" && parsed.message) {
-              onSearchWarning(parsed.message);
-            }
-            if (parsed.sources) onSources(parsed.sources);
-            if (parsed.content) {
-              onStatus(null);
-              onChunk(parsed.content);
-            }
-            if (parsed.error) onError(new Error(parsed.error));
-            if (parsed.done) callDoneOnce();
-          } catch {}
-        }
+        handleSseLine(line);
+        if (failed) break;
       }
+      if (failed) break;
     }
-    // ストリーム終端でもdoneが来なかった場合に呼ぶ
-    callDoneOnce();
+    if (!failed && buffer.trim()) handleSseLine(buffer.trim());
+    if (!failed) callDoneOnce();
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return;
     if (err instanceof Error && err.name === "AbortError") return;
@@ -113,15 +131,41 @@ export function ChatPage() {
   const models = useAvailableModels();
   const greeting = timeGreeting();
   const abortRef = useRef<AbortController | null>(null);
+  const sendingToRef = useRef<number | null>(null);
 
   const [selectedModel, setSelectedModel] = useState("gpt-5.6-terra");
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
+  const [streamingContent, setStreamingContent] = useState<string>("");
+  const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
+  const [searchWarning, setSearchWarning] = useState<string | null>(null);
+  const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
   }, []);
+
+  // Drop in-flight stream state when switching threads.
+  // Skip the reset when we just created this conversation and started sending to it.
+  useEffect(() => {
+    if (sendingToRef.current != null && sendingToRef.current === conversationId) {
+      sendingToRef.current = null;
+      return;
+    }
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    setStreamingContent("");
+    setStreamingSources([]);
+    setOptimisticUserMessage(null);
+    setStreamError(null);
+    setSearchStatus(null);
+    setSearchWarning(null);
+  }, [conversationId]);
 
   const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
     conversationId as number,
@@ -140,14 +184,6 @@ export function ChatPage() {
   }, [conversation, modelRestoredForConv, models]);
 
   const createConversation = useCreateOpenaiConversation();
-
-  const [streamingContent, setStreamingContent] = useState<string>("");
-  const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamError, setStreamError] = useState<string | null>(null);
-  const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
-  const [searchWarning, setSearchWarning] = useState<string | null>(null);
-  const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   // 戻り値: false = 送信ブロック（入力・添付は保持される）
   const handleSend = async (content: string, fileData?: { name: string; content: string; isBase64: boolean }): Promise<boolean> => {
@@ -191,6 +227,7 @@ export function ChatPage() {
 
     if (!targetId) return false;
 
+    sendingToRef.current = targetId;
     setStreamError(null);
     setSearchWarning(null);
     setOptimisticUserMessage({

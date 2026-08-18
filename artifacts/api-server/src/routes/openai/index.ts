@@ -20,6 +20,20 @@ import { buildWebContext } from "../../lib/web-search";
 import { and, desc, eq } from "drizzle-orm";
 import { requireAuth } from "../../middlewares/requireAuth";
 
+function publicAiError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : "";
+  if (/api[_ ]?key|unauthorized|401|invalid_api_key/i.test(msg)) {
+    return "AI プロバイダの認証に失敗しました。";
+  }
+  if (/timeout|ETIMEDOUT|aborted/i.test(msg)) {
+    return "応答がタイムアウトしました。もう一度お試しください。";
+  }
+  if (/rate limit|429|quota/i.test(msg)) {
+    return "利用制限に達しました。しばらくしてから再試行してください。";
+  }
+  return "応答の生成に失敗しました。もう一度お試しください。";
+}
+
 function parseStoredSources(raw: string | null): unknown {
   if (!raw) return null;
   try {
@@ -197,6 +211,11 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
 
   const conversationId = params.data.id;
   const userContent = body.data.content;
+  const MAX_CONTENT_CHARS = 20 * 1024 * 1024;
+  if (userContent.length > MAX_CONTENT_CHARS) {
+    res.status(413).json({ error: "メッセージが大きすぎます。15MB以下の画像を添付してください。" });
+    return;
+  }
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
 
   // Resolve client for the requested model
@@ -345,9 +364,8 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     }
   } catch (err) {
     logger.error({ err, modelId }, "Error streaming AI response");
-    const msg = err instanceof Error ? err.message : "AI response failed";
     if (!clientGone) {
-      res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: publicAiError(err) })}\n\n`);
     }
   }
 
