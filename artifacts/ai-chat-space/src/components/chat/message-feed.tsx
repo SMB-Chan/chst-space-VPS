@@ -1,19 +1,82 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { OpenaiMessage } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 import { SourceCards } from "./source-cards";
-import { Loader2, Paperclip, Bot } from "lucide-react";
+import { Loader2, Paperclip, Bot, Brain, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
+import { STREAMING_ASSISTANT_ID } from "@/lib/chat";
+
+export type StreamingPhase = "starting" | "searching" | "thinking" | "generating" | null;
 
 interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
+  streamingPhase?: StreamingPhase;
+  streamingReasoning?: string;
 }
 
-export function MessageFeed({ messages, isLoading }: MessageFeedProps) {
+function PhaseDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-hidden>
+      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.3s]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
+    </span>
+  );
+}
+
+function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (live) setOpen(true);
+  }, [live]);
+  if (!text && !live) return null;
+  return (
+    <div className="w-full rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-300/90 hover:bg-violet-500/10"
+      >
+        <Brain className={cn("w-3.5 h-3.5", live && "animate-pulse")} />
+        <span className="font-medium">{live ? "推論中" : "推論過程"}</span>
+        {live && <PhaseDots />}
+        <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
+      </button>
+      {open && text && (
+        <div className="px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground/90 whitespace-pre-wrap max-h-48 overflow-y-auto font-sans">
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GenerationBadge({ phase }: { phase: StreamingPhase }) {
+  if (!phase || phase === "searching") return null;
+  const label =
+    phase === "thinking" ? "推論中" : phase === "generating" ? "生成中" : "準備中";
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
+      <span className="relative flex h-2 w-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+      </span>
+      <span>{label}</span>
+      <PhaseDots />
+    </div>
+  );
+}
+
+export function MessageFeed({
+  messages,
+  isLoading,
+  streamingPhase = null,
+  streamingReasoning = "",
+}: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { user } = useUser();
   const userInitial =
@@ -109,18 +172,44 @@ export function MessageFeed({ messages, isLoading }: MessageFeedProps) {
                   </div>
                 )}
                 
-                <div className={cn(
-                  "px-5 py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm",
-                  isUser 
-                    ? "bg-primary text-primary-foreground font-sans font-normal" 
-                    : "bg-card border border-border font-serif text-foreground prose-p:leading-loose"
-                )}>
-                  {isUser ? (
-                    <div className="whitespace-pre-wrap">{displayContent}</div>
-                  ) : (
-                    <Markdown content={displayContent} />
-                  )}
-                </div>
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && (
+                  <ReasoningPanel
+                    text={streamingReasoning}
+                    live={streamingPhase === "thinking"}
+                  />
+                )}
+
+                {(!isUser && message.id === STREAMING_ASSISTANT_ID && !displayContent) ? (
+                  streamingReasoning || streamingPhase === "thinking" ? null : (
+                    <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
+                      <GenerationBadge phase={streamingPhase} />
+                    </div>
+                  )
+                ) : (
+                  <div className={cn(
+                    "px-5 py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm",
+                    isUser 
+                      ? "bg-primary text-primary-foreground font-sans font-normal" 
+                      : "bg-card border border-border font-serif text-foreground prose-p:leading-loose"
+                  )}>
+                    {isUser ? (
+                      <div className="whitespace-pre-wrap">{displayContent}</div>
+                    ) : (
+                      <>
+                        <Markdown content={displayContent} />
+                        {message.id === STREAMING_ASSISTANT_ID && streamingPhase === "generating" && (
+                          <span
+                            className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
+                            aria-hidden
+                          />
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && displayContent && streamingPhase === "generating" && (
+                  <GenerationBadge phase="generating" />
+                )}
 
                 {!isUser && sources && sources.length > 0 && (
                   <div className="w-full px-1">

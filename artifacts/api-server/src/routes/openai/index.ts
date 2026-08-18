@@ -6,7 +6,16 @@ import {
   AVAILABLE_MODELS,
   modelSupportsVision,
   getModelLabel,
+  parseReasoningLevel,
+  applyGenerationParams,
 } from "../../lib/ai-clients";
+import {
+  mergeStreamDelta,
+  splitThinkTags,
+  readReasoningDelta,
+  readContentDelta,
+  type StreamDelta,
+} from "../../lib/stream-delta";
 import {
   CreateOpenaiConversationBody,
   GetOpenaiConversationParams,
@@ -217,6 +226,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     return;
   }
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
+  const reasoningLevel = parseReasoningLevel(req.query.reasoning);
 
   // Resolve client for the requested model
   let aiClient: ReturnType<typeof getClientForModel>;
@@ -320,25 +330,54 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
       messages: chatMessages,
       stream: true,
     };
-
-    // OpenAI models require max_completion_tokens; DashScope (OpenAI-compatible) uses max_tokens
-    if (aiClient.provider === "openai") {
-      (streamOptions as unknown as Record<string, unknown>).max_completion_tokens = 8192;
-    } else {
-      (streamOptions as unknown as Record<string, unknown>).max_tokens = 8192;
-    }
+    applyGenerationParams(
+      streamOptions as unknown as Record<string, unknown>,
+      modelId,
+      aiClient.provider,
+      reasoningLevel,
+    );
 
     const stream = (await aiClient.client.chat.completions.create(
       streamOptions
-    )) as AsyncIterable<{ choices: { delta?: { content?: string | null } }[] }>;
+    )) as AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
+
+    let fullReasoning = "";
+    let emittedThinking = false;
 
     for await (const chunk of stream) {
       if (clientGone) break;
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) {
-        fullResponse += content;
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      const delta = chunk.choices?.[0]?.delta;
+      const reasoningDelta = readReasoningDelta(delta);
+      if (reasoningDelta) {
+        const merged = mergeStreamDelta(fullReasoning, reasoningDelta);
+        const added = merged.slice(fullReasoning.length);
+        fullReasoning = merged;
+        if (added && !clientGone) {
+          if (!emittedThinking) {
+            res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
+            emittedThinking = true;
+          }
+          res.write(`data: ${JSON.stringify({ reasoning: added })}\n\n`);
+        }
       }
+
+      const contentDelta = readContentDelta(delta);
+      if (contentDelta) {
+        const merged = mergeStreamDelta(fullResponse, contentDelta);
+        const added = merged.slice(fullResponse.length);
+        fullResponse = merged;
+        if (added && !clientGone) {
+          res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
+        }
+      }
+    }
+
+    const split = splitThinkTags(fullResponse);
+    if (split.reasoning) {
+      fullReasoning = fullReasoning
+        ? mergeStreamDelta(fullReasoning, split.reasoning)
+        : split.reasoning;
+      fullResponse = split.content;
     }
 
     if (!fullResponse.trim()) {

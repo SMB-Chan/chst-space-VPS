@@ -11,11 +11,10 @@ import {
 import { MessageFeed } from "@/components/chat/message-feed";
 import { MessageInput } from "@/components/chat/message-input";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
-import { conversationTitle, timeGreeting } from "@/lib/chat";
+import { ReasoningSelector } from "@/components/chat/reasoning-selector";
+import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
+import { type ReasoningLevel } from "@/lib/reasoning";
 import { Sparkles, X } from "lucide-react";
-
-const OPTIMISTIC_USER_ID = -1;
-const STREAMING_ASSISTANT_ID = -2;
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -23,7 +22,9 @@ async function streamMessage(
   conversationId: number,
   content: string,
   model: string,
+  reasoning: ReasoningLevel,
   onChunk: (text: string) => void,
+  onReasoning: (text: string) => void,
   onDone: () => void,
   onError: (err: Error) => void,
   onStatus: (status: string | null, query?: string) => void,
@@ -33,7 +34,7 @@ async function streamMessage(
 ) {
   try {
     const res = await fetch(
-      `${BASE}/api/openai/conversations/${conversationId}/messages?model=${encodeURIComponent(model)}`,
+      `${BASE}/api/openai/conversations/${conversationId}/messages?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -78,14 +79,20 @@ async function streamMessage(
       }
       if (parsed.status === "searching") onStatus("searching", parsed.query as string | undefined);
       if (parsed.status === "fetching") onStatus("fetching");
+      if (parsed.status === "thinking") onStatus("thinking");
+      if (parsed.status === "generating") onStatus("generating");
       if (parsed.status === "search_warning" && typeof parsed.message === "string") {
         onSearchWarning(parsed.message);
       }
       if (Array.isArray(parsed.sources)) {
         onSources(parsed.sources as { title: string; url: string }[]);
       }
+      if (typeof parsed.reasoning === "string" && parsed.reasoning) {
+        onStatus("thinking");
+        onReasoning(parsed.reasoning);
+      }
       if (typeof parsed.content === "string" && parsed.content) {
-        onStatus(null);
+        onStatus("generating");
         onChunk(parsed.content);
       }
       if (typeof parsed.error === "string" && parsed.error) {
@@ -134,8 +141,10 @@ export function ChatPage() {
   const sendingToRef = useRef<number | null>(null);
 
   const [selectedModel, setSelectedModel] = useState("gpt-5.6-terra");
+  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("medium");
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
+  const [streamingReasoning, setStreamingReasoning] = useState<string>("");
   const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -160,6 +169,7 @@ export function ChatPage() {
     abortRef.current = null;
     setIsStreaming(false);
     setStreamingContent("");
+    setStreamingReasoning("");
     setStreamingSources([]);
     setOptimisticUserMessage(null);
     setStreamError(null);
@@ -240,7 +250,9 @@ export function ChatPage() {
 
     setIsStreaming(true);
     setStreamingContent("");
+    setStreamingReasoning("");
     setStreamingSources([]);
+    setSearchStatus({ kind: "starting" });
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -250,8 +262,12 @@ export function ChatPage() {
       targetId,
       finalContent,
       selectedModel,
+      reasoningLevel,
       (chunk) => {
         setStreamingContent((prev) => prev + chunk);
+      },
+      (chunk) => {
+        setStreamingReasoning((prev) => prev + chunk);
       },
       async () => {
         setSearchStatus(null);
@@ -260,6 +276,7 @@ export function ChatPage() {
         await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
         setIsStreaming(false);
         setStreamingContent("");
+        setStreamingReasoning("");
         setStreamingSources([]);
         setOptimisticUserMessage(null);
       },
@@ -267,6 +284,7 @@ export function ChatPage() {
         setIsStreaming(false);
         setSearchStatus(null);
         setStreamingSources([]);
+        setStreamingReasoning("");
         setOptimisticUserMessage(null);
         setStreamError(err.message);
       },
@@ -337,11 +355,23 @@ export function ChatPage() {
           <MessageFeed
             messages={allMessages}
             isLoading={isLoading && !isStreaming && allMessages.length === 0}
+            streamingPhase={
+              isStreaming
+                ? searchStatus?.kind === "thinking"
+                  ? "thinking"
+                  : searchStatus?.kind === "searching" || searchStatus?.kind === "fetching"
+                    ? "searching"
+                    : streamingContent
+                      ? "generating"
+                      : "starting"
+                : null
+            }
+            streamingReasoning={streamingReasoning}
           />
         )}
       </div>
 
-      {searchStatus && (
+      {searchStatus && (searchStatus.kind === "searching" || searchStatus.kind === "fetching") && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-muted-foreground">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
@@ -379,12 +409,19 @@ export function ChatPage() {
 
       <div className="p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent pt-10">
         <div className="max-w-3xl mx-auto space-y-2">
-          <div className="flex items-center gap-2 px-1">
+          <div className="flex items-center gap-2 px-1 flex-wrap">
             <ModelSelector
               selectedModel={selectedModel}
               onSelect={setSelectedModel}
               disabled={isStreaming || createConversation.isPending}
             />
+            {(models.find((m) => m.id === selectedModel)?.supportsReasoning ?? true) && (
+              <ReasoningSelector
+                value={reasoningLevel}
+                onSelect={setReasoningLevel}
+                disabled={isStreaming || createConversation.isPending}
+              />
+            )}
           </div>
           <MessageInput
             onSend={handleSend}

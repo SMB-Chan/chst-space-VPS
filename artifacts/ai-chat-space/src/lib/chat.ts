@@ -1,3 +1,6 @@
+export const OPTIMISTIC_USER_ID = -1;
+export const STREAMING_ASSISTANT_ID = -2;
+
 const TITLE_MAX_CHARS = 24;
 
 /** Build a sidebar title that works for Japanese (no spaces) and English. */

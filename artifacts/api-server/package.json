@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:ssrf": "node ./scripts/ssrf-guard.test.mjs"
+    "test:ssrf": "node ./scripts/ssrf-guard.test.mjs",
+    "test:stream-delta": "node ./scripts/stream-delta.test.mjs"
   },
   "dependencies": {
     "@clerk/express": "^2.1.57",

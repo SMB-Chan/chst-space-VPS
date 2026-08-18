@@ -19,17 +19,18 @@ export interface ModelInfo {
   provider: "openai" | "dashscope";
   description: string;
   supportsVision: boolean;
+  supportsReasoning?: boolean;
 }
 
 const MODELS: ModelInfo[] = [
-  { id: "gpt-5.6-terra",   label: "GPT-5.6 Terra",   provider: "openai", description: "高性能・汎用", supportsVision: true },
-  { id: "gpt-5.6-luna",    label: "GPT-5.6 Luna",    provider: "openai", description: "高速・低コスト", supportsVision: true },
-  { id: "o4-mini",         label: "o4-mini",          provider: "openai", description: "高度な推論", supportsVision: true },
-  { id: "qwen3.8-max",     label: "Qwen3.8 Max",     provider: "dashscope", description: "Alibaba最高性能", supportsVision: true },
-  { id: "qwen3.7-plus",    label: "Qwen3.7 Plus",    provider: "dashscope", description: "高速・バランス", supportsVision: true },
-  { id: "qwen3.6-flash",   label: "Qwen3.6 Flash",   provider: "dashscope", description: "最速・低コスト", supportsVision: true },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "dashscope", description: "推論特化・画像非対応", supportsVision: false },
-  { id: "glm-5.2",         label: "GLM-5.2",         provider: "dashscope", description: "汎用・画像非対応", supportsVision: false },
+  { id: "gpt-5.6-terra",   label: "GPT-5.6 Terra",   provider: "openai", description: "高性能・汎用", supportsVision: true, supportsReasoning: true },
+  { id: "gpt-5.6-luna",    label: "GPT-5.6 Luna",    provider: "openai", description: "高速・低コスト", supportsVision: true, supportsReasoning: true },
+  { id: "o4-mini",         label: "o4-mini",          provider: "openai", description: "高度な推論", supportsVision: true, supportsReasoning: true },
+  { id: "qwen3.8-max",     label: "Qwen3.8 Max",     provider: "dashscope", description: "Alibaba最高性能", supportsVision: true, supportsReasoning: true },
+  { id: "qwen3.7-plus",    label: "Qwen3.7 Plus",    provider: "dashscope", description: "高速・バランス", supportsVision: true, supportsReasoning: true },
+  { id: "qwen3.6-flash",   label: "Qwen3.6 Flash",   provider: "dashscope", description: "最速・低コスト", supportsVision: true, supportsReasoning: true },
+  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "dashscope", description: "推論特化・画像非対応", supportsVision: false, supportsReasoning: true },
+  { id: "glm-5.2",         label: "GLM-5.2",         provider: "dashscope", description: "汎用・画像非対応", supportsVision: false, supportsReasoning: true },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {
