@@ -23,6 +23,43 @@ type DisplayMessage = OpenaiMessage & {
   auditModelId?: string | null;
 };
 
+type AttachmentChip = { kind: "image" | "file"; name: string };
+
+const ATTACHMENTS_V1_PREFIX = "CS_ATTACHMENTS_V1:";
+
+function parseUserDisplay(content: string): { displayContent: string; attachments: AttachmentChip[] } {
+  if (content.startsWith(ATTACHMENTS_V1_PREFIX)) {
+    try {
+      const parsed = JSON.parse(content.slice(ATTACHMENTS_V1_PREFIX.length)) as {
+        question?: unknown;
+        attachments?: unknown;
+      };
+      const displayContent = typeof parsed.question === "string" ? parsed.question : "";
+      const raw = Array.isArray(parsed.attachments) ? parsed.attachments : [];
+      const attachments = raw.flatMap((item): AttachmentChip[] => {
+        if (!item || typeof item !== "object") return [];
+        const rec = item as { kind?: unknown; type?: unknown; name?: unknown; isBase64?: unknown };
+        if (typeof rec.name !== "string") return [];
+        const isImage = rec.kind === "image" || rec.type === "image" || rec.isBase64 === true;
+        return [{ kind: isImage ? "image" : "file", name: rec.name }];
+      });
+      return { displayContent, attachments };
+    } catch {
+      return { displayContent: content, attachments: [] };
+    }
+  }
+
+  // Legacy single-attachment format
+  const fileMatch = content.match(/^\[(File|Image):\s([^\]]+)\]\n\n(.*?)\n\n---\n\nUser question:\s(.*)$/s);
+  if (fileMatch) {
+    return {
+      displayContent: fileMatch[4],
+      attachments: [{ kind: fileMatch[1] === "Image" ? "image" : "file", name: fileMatch[2] }],
+    };
+  }
+  return { displayContent: content, attachments: [] };
+}
+
 interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
@@ -175,19 +212,9 @@ export function MessageFeed({
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
-          
-          // Parse file attachment if present
-          let displayContent = message.content;
-          let attachedFile = null;
-          
-          const fileMatch = displayContent.match(/^\[(File|Image):\s([^\]]+)\]\n\n(.*?)\n\n---\n\nUser question:\s(.*)$/s);
-          if (fileMatch) {
-            attachedFile = {
-              type: fileMatch[1],
-              name: fileMatch[2],
-            };
-            displayContent = fileMatch[4]; // just show the question
-          }
+          const parsedUser = isUser ? parseUserDisplay(message.content) : null;
+          let displayContent = parsedUser?.displayContent ?? message.content;
+          const attachments = parsedUser?.attachments ?? [];
 
           // For assistant messages: prefer DB-persisted sources; fall back to parsing
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
@@ -239,10 +266,17 @@ export function MessageFeed({
                 "flex flex-col gap-2 min-w-0 max-w-[88%] md:max-w-[75%]",
                 isUser ? "items-end" : "items-start"
               )}>
-                {attachedFile && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-muted-foreground shadow-sm max-w-full">
-                    <Paperclip className="w-4 h-4 text-primary shrink-0" />
-                    <span className="font-medium text-foreground truncate">{attachedFile.name}</span>
+                {isUser && attachments.length > 0 && (
+                  <div className="flex flex-wrap justify-end gap-2 max-w-full">
+                    {attachments.map((attachment, index) => (
+                      <div
+                        key={`${attachment.name}-${index}`}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-muted-foreground shadow-sm max-w-full"
+                      >
+                        <Paperclip className="w-4 h-4 text-primary shrink-0" />
+                        <span className="font-medium text-foreground truncate">{attachment.name}</span>
+                      </div>
+                    ))}
                   </div>
                 )}
                 
