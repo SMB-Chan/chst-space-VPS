@@ -19,25 +19,9 @@ import {
 import { logger } from "../../lib/logger";
 import { streamChatReply, type ChatContentPart } from "../../lib/chat-stream";
 import { normalizeConversationTitle } from "../../lib/conversation-title";
+import { publicAiError } from "../../lib/public-error";
 import { and, desc, eq } from "drizzle-orm";
 import { requireAuth } from "../../middlewares/requireAuth";
-
-function publicAiError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : "";
-  if (/api[_ ]?key|unauthorized|401|invalid_api_key/i.test(msg)) {
-    return "AI プロバイダの認証に失敗しました。";
-  }
-  if (/timeout|ETIMEDOUT|aborted/i.test(msg)) {
-    return "応答がタイムアウトしました。もう一度お試しください。";
-  }
-  if (/rate limit|429|quota/i.test(msg)) {
-    return "利用制限に達しました。しばらくしてから再試行してください。";
-  }
-  if (/unsupported parameter|unknown parameter|invalid.?request/i.test(msg)) {
-    return "このモデルでは使えない設定がありました。別のモデルか推論オフで再試行してください。";
-  }
-  return "応答の生成に失敗しました。もう一度お試しください。";
-}
 
 function parseStoredSources(raw: string | null): unknown {
   if (!raw) return null;
@@ -291,12 +275,17 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     return;
   }
 
-  // Save user message
-  await db.insert(messages).values({
-    conversationId,
-    role: "user",
-    content: userContent,
-  });
+  try {
+    await db.insert(messages).values({
+      conversationId,
+      role: "user",
+      content: userContent,
+    });
+  } catch (err) {
+    logger.error({ err, conversationId }, "Failed to save user message");
+    res.status(500).json({ error: publicAiError(err) });
+    return;
+  }
 
   // Load full history for context
   const history = await db
