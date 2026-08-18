@@ -33,6 +33,9 @@ function publicAiError(err: unknown): string {
   if (/rate limit|429|quota/i.test(msg)) {
     return "利用制限に達しました。しばらくしてから再試行してください。";
   }
+  if (/unsupported parameter|unknown parameter|invalid.?request/i.test(msg)) {
+    return "このモデルでは使えない設定がありました。別のモデルか推論オフで再試行してください。";
+  }
   return "応答の生成に失敗しました。もう一度お試しください。";
 }
 

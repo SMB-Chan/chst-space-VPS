@@ -86,10 +86,10 @@ export function applyGenerationParams(
 ): void {
   if (provider === "openai") {
     opts.max_completion_tokens = 8192;
-    const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
-    if (model?.reasoning === "openai") {
-      // o-series rejects "none"; treat off as the cheapest effort.
-      opts.reasoning_effort = modelId.startsWith("o") && level === "off" ? "low" : level === "off" ? "none" : level;
+    // Only o-series reliably accepts reasoning_effort on the Replit proxy.
+    // Sending it to gpt-5.6-* returns 400 Unsupported parameter.
+    if (modelId.startsWith("o")) {
+      opts.reasoning_effort = level === "off" ? "low" : level;
     }
     return;
   }
@@ -100,11 +100,39 @@ export function applyGenerationParams(
   if (model?.reasoning === "dashscope") {
     extra.enable_thinking = level !== "off";
     if (level !== "off") {
-      extra.thinking_budget = THINKING_BUDGET[level];
-      extra.reasoning_effort = level === "high" ? "xhigh" : level;
+      if (modelId.startsWith("qwen3.8")) {
+        extra.reasoning_effort = level === "high" ? "xhigh" : level;
+      } else {
+        extra.thinking_budget = THINKING_BUDGET[level];
+      }
     }
   }
   opts.extra_body = extra;
+}
+
+export function applySafeGenerationParams(
+  opts: Record<string, unknown>,
+  provider: ModelProvider,
+): void {
+  delete opts.reasoning_effort;
+  delete opts.extra_body;
+  if (provider === "openai") {
+    opts.max_completion_tokens = 8192;
+    delete opts.max_tokens;
+  } else {
+    opts.max_tokens = 8192;
+    delete opts.max_completion_tokens;
+    opts.extra_body = { incremental_output: true };
+  }
+}
+
+export function isUnsupportedGenerationParam(err: unknown): boolean {
+  const status = (err as { status?: number }).status;
+  const msg = err instanceof Error ? err.message : String(err);
+  if (status != null && status !== 400) return false;
+  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning_effort|enable_thinking|thinking_budget|incremental_output/i.test(
+    msg,
+  );
 }
 
 export function getClientForModel(modelId: string): { client: OpenAI; provider: ModelProvider } {
