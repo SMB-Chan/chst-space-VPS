@@ -36,40 +36,98 @@ function parseStoredSources(raw: string | null): unknown {
 
 const router: IRouter = Router();
 
-// Matches user messages created by the frontend when an image is attached:
+// v1 envelope for multi-attachment user messages. The message body stays a
+// string in DB, but attachments/question are JSON so separators in file text
+// cannot break parsing.
+const ATTACHMENTS_V1_PREFIX = "CS_ATTACHMENTS_V1:";
+
+// Legacy single-image format:
 // "[Image: name]\n\n<data URL>\n\n---\n\nUser question: <question>"
 const IMAGE_MESSAGE_RE =
   /^\[Image:\s([^\]]+)\]\n\n(data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=\s]+?)\n\n---\n\nUser question:\s([\s\S]*)$/;
 
+interface ParsedAttachment {
+  kind: "image" | "file";
+  name: string;
+  content: string;
+  isBase64: boolean;
+}
+
 interface ParsedUserContent {
   text: string;
-  imageName?: string;
-  imageDataUrl?: string;
+  attachments: ParsedAttachment[];
+}
+
+function parseAttachmentsV1(content: string): ParsedUserContent | null {
+  if (!content.startsWith(ATTACHMENTS_V1_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(content.slice(ATTACHMENTS_V1_PREFIX.length)) as {
+      question?: unknown;
+      attachments?: unknown;
+    };
+    const text = typeof parsed.question === "string" ? parsed.question : "";
+    const raw = Array.isArray(parsed.attachments) ? parsed.attachments : [];
+    const attachments = raw.flatMap((item): ParsedAttachment[] => {
+      if (!item || typeof item !== "object") return [];
+      const rec = item as { kind?: unknown; type?: unknown; name?: unknown; content?: unknown; isBase64?: unknown };
+      if (typeof rec.name !== "string" || typeof rec.content !== "string") return [];
+      const isImage = rec.kind === "image" || rec.type === "image" || rec.isBase64 === true;
+      return [{
+        kind: isImage ? "image" : "file",
+        name: rec.name,
+        content: rec.content,
+        isBase64: isImage,
+      }];
+    });
+    return { text, attachments };
+  } catch (err) {
+    logger.warn({ err }, "Ignoring malformed attachments v1 payload");
+    return { text: content, attachments: [] };
+  }
 }
 
 function parseUserContent(content: string): ParsedUserContent {
+  const v1 = parseAttachmentsV1(content);
+  if (v1) return v1;
   const m = content.match(IMAGE_MESSAGE_RE);
-  if (!m) return { text: content };
-  return { imageName: m[1], imageDataUrl: m[2].trim(), text: m[3] };
+  if (!m) return { text: content, attachments: [] };
+  return {
+    text: m[3],
+    attachments: [{ kind: "image", name: m[1], content: m[2].trim(), isBase64: true }],
+  };
 }
 
 // Convert a stored user message into the payload sent to the model.
 // Vision-capable models get structured content (text + image parts);
-// non-vision models get the question text with a placeholder so history
-// containing images does not break them.
+// non-vision models get text with image placeholders so history containing
+// images does not break them. Text attachments are inlined for all models.
 function toModelContent(
   content: string,
   visionCapable: boolean
 ): string | ChatContentPart[] {
   const parsed = parseUserContent(content);
-  if (!parsed.imageDataUrl) return content;
-  if (!visionCapable) {
-    return `[添付画像: ${parsed.imageName}（このモデルでは画像は読み取れません）]\n\n${parsed.text}`;
+  if (parsed.attachments.length === 0) return content;
+
+  const textBlocks: string[] = [parsed.text];
+  for (const attachment of parsed.attachments) {
+    if (attachment.kind === "image") {
+      if (!visionCapable) {
+        textBlocks.push(`[添付画像: ${attachment.name}（このモデルでは画像は読み取れません）]`);
+      }
+    } else {
+      textBlocks.push(`[添付ファイル: ${attachment.name}]\n${attachment.content}`);
+    }
   }
-  return [
-    { type: "text", text: parsed.text },
-    { type: "image_url", image_url: { url: parsed.imageDataUrl } },
-  ];
+  const text = textBlocks.filter((block) => block.trim().length > 0).join("\n\n");
+
+  if (!visionCapable) return text;
+  const parts: ChatContentPart[] = [{ type: "text", text }];
+  for (const attachment of parsed.attachments) {
+    if (attachment.kind === "image") {
+      parts.push({ type: "image_url", image_url: { url: attachment.content } });
+    }
+  }
+  return parts;
 }
 
 // List available models (no auth required — static metadata)
@@ -236,7 +294,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   const userContent = body.data.content;
   const MAX_CONTENT_CHARS = 20 * 1024 * 1024;
   if (userContent.length > MAX_CONTENT_CHARS) {
-    res.status(413).json({ error: "メッセージが大きすぎます。15MB以下の画像を添付してください。" });
+    res.status(413).json({ error: "メッセージが大きすぎます。添付は合計20MB以下にしてください。" });
     return;
   }
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
@@ -259,7 +317,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   // Reject image attachments up front when the selected model cannot see them
   const visionCapable = modelSupportsVision(modelId);
   const parsedNewMessage = parseUserContent(userContent);
-  if (parsedNewMessage.imageDataUrl && !visionCapable) {
+  if (parsedNewMessage.attachments.some((a) => a.kind === "image") && !visionCapable) {
     res.status(400).json({
       error: `${getModelLabel(modelId)} は画像を読み取れません。画像を送る場合は GPT-5.6 Terra / Luna、o4-mini、または Qwen のモデルを選択してください。`,
     });
@@ -295,9 +353,8 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     .where(eq(messages.conversationId, conversationId))
     .orderBy(messages.createdAt);
 
-  // User messages may contain an attached image (as a data URL). For
-  // vision-capable models, convert those to structured multimodal content;
-  // assistant/system messages stay plain strings.
+  // User messages may contain attachments. For vision-capable models, convert
+  // images to structured multimodal content; assistant/system messages stay plain strings.
   const chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
     history.map((m) =>
       m.role === "user"
@@ -346,7 +403,7 @@ router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
   }
   const userContent = body.data.content;
   if (userContent.length > MAX_CONTENT_CHARS) {
-    res.status(413).json({ error: "メッセージが大きすぎます。15MB以下の画像を添付してください。" });
+    res.status(413).json({ error: "メッセージが大きすぎます。添付は合計20MB以下にしてください。" });
     return;
   }
 
@@ -368,7 +425,7 @@ router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
 
   const visionCapable = modelSupportsVision(modelId);
   const parsedNewMessage = parseUserContent(userContent);
-  if (parsedNewMessage.imageDataUrl && !visionCapable) {
+  if (parsedNewMessage.attachments.some((a) => a.kind === "image") && !visionCapable) {
     res.status(400).json({
       error: `${getModelLabel(modelId)} は画像を読み取れません。画像を送る場合は GPT-5.6 Terra / Luna、o4-mini、または Qwen のモデルを選択してください。`,
     });

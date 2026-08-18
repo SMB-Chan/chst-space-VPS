@@ -9,7 +9,7 @@ import {
   OpenaiMessage
 } from "@workspace/api-client-react";
 import { MessageFeed } from "@/components/chat/message-feed";
-import { MessageInput } from "@/components/chat/message-input";
+import { MessageInput, type OutgoingAttachment } from "@/components/chat/message-input";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
@@ -275,12 +275,13 @@ export function ChatPage() {
   const createConversation = useCreateOpenaiConversation();
 
   // 戻り値: false = 送信ブロック（入力・添付は保持される）
-  const handleSend = async (content: string, fileData?: { name: string; content: string; isBase64: boolean }): Promise<boolean> => {
+  const handleSend = async (content: string, files?: OutgoingAttachment[]): Promise<boolean> => {
     let finalContent = content;
 
-    if (fileData) {
+    if (files && files.length > 0) {
       // 選択中モデルが画像非対応なら、送信前に分かりやすいエラーを表示する
-      if (fileData.isBase64) {
+      const hasImage = files.some((file) => file.isBase64);
+      if (hasImage) {
         const model = models.find((m) => m.id === selectedModel);
         if (model && !model.supportsVision) {
           setStreamError(
@@ -289,11 +290,15 @@ export function ChatPage() {
           return false;
         }
       }
-      if (fileData.isBase64) {
-        finalContent = `[Image: ${fileData.name}]\n\n${fileData.content}\n\n---\n\nUser question: ${content}`;
-      } else {
-        finalContent = `[File: ${fileData.name}]\n\n${fileData.content}\n\n---\n\nUser question: ${content}`;
-      }
+      finalContent = `CS_ATTACHMENTS_V1:${JSON.stringify({
+        question: content,
+        attachments: files.map((file) => ({
+          kind: file.isBase64 ? "image" : "file",
+          name: file.name,
+          content: file.content,
+          isBase64: file.isBase64,
+        })),
+      })}`;
     }
 
     let targetId = conversationId;
