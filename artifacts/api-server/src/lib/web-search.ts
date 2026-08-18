@@ -357,6 +357,8 @@ export async function decideSearch(
       (opts as unknown as Record<string, unknown>).max_completion_tokens = 200;
     } else {
       (opts as unknown as Record<string, unknown>).max_tokens = 200;
+      // Search decision must stay a cheap JSON call — never inherit default thinking.
+      (opts as unknown as Record<string, unknown>).extra_body = { enable_thinking: false };
     }
 
     // Pass the abort signal as a request option so the SDK cancels the upstream

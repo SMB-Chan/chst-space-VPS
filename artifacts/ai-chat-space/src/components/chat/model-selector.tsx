@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronDown, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -10,23 +11,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 export interface ModelInfo {
   id: string;
   label: string;
   provider: "openai" | "dashscope";
   description: string;
   supportsVision: boolean;
+  supportsReasoning?: boolean;
 }
 
 const MODELS: ModelInfo[] = [
-  { id: "gpt-5.6-terra",   label: "GPT-5.6 Terra",   provider: "openai", description: "高性能・汎用", supportsVision: true },
-  { id: "gpt-5.6-luna",    label: "GPT-5.6 Luna",    provider: "openai", description: "高速・低コスト", supportsVision: true },
-  { id: "o4-mini",         label: "o4-mini",          provider: "openai", description: "高度な推論", supportsVision: true },
-  { id: "qwen3.8-max",     label: "Qwen3.8 Max",     provider: "dashscope", description: "Alibaba最高性能", supportsVision: true },
-  { id: "qwen3.7-plus",    label: "Qwen3.7 Plus",    provider: "dashscope", description: "高速・バランス", supportsVision: true },
-  { id: "qwen3.6-flash",   label: "Qwen3.6 Flash",   provider: "dashscope", description: "最速・低コスト", supportsVision: true },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "dashscope", description: "推論特化・画像非対応", supportsVision: false },
-  { id: "glm-5.2",         label: "GLM-5.2",         provider: "dashscope", description: "汎用・画像非対応", supportsVision: false },
+  { id: "gpt-5.6-terra",   label: "GPT-5.6 Terra",   provider: "openai", description: "高性能・汎用", supportsVision: true, supportsReasoning: true },
+  { id: "gpt-5.6-luna",    label: "GPT-5.6 Luna",    provider: "openai", description: "高速・低コスト", supportsVision: true, supportsReasoning: true },
+  { id: "o4-mini",         label: "o4-mini",          provider: "openai", description: "高度な推論", supportsVision: true, supportsReasoning: true },
+  { id: "qwen3.8-max",     label: "Qwen3.8 Max",     provider: "dashscope", description: "Alibaba最高性能", supportsVision: true, supportsReasoning: true },
+  { id: "qwen3.7-plus",    label: "Qwen3.7 Plus",    provider: "dashscope", description: "高速・バランス", supportsVision: true, supportsReasoning: true },
+  { id: "qwen3.6-flash",   label: "Qwen3.6 Flash",   provider: "dashscope", description: "最速・低コスト", supportsVision: true, supportsReasoning: true },
+  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "dashscope", description: "推論特化・画像非対応", supportsVision: false, supportsReasoning: true },
+  { id: "glm-5.2",         label: "GLM-5.2",         provider: "dashscope", description: "汎用・画像非対応", supportsVision: false, supportsReasoning: true },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -40,11 +44,52 @@ interface ModelSelectorProps {
   disabled?: boolean;
 }
 
-export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelectorProps) {
-  const current = MODELS.find((m) => m.id === selectedModel) ?? MODELS[0];
+function isModelInfo(value: unknown): value is ModelInfo {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.label === "string" &&
+    (v.provider === "openai" || v.provider === "dashscope") &&
+    typeof v.description === "string" &&
+    typeof v.supportsVision === "boolean"
+  );
+}
 
-  const openaiModels = MODELS.filter((m) => m.provider === "openai");
-  const qwenModels = MODELS.filter((m) => m.provider === "dashscope");
+/** Live list from the API, falling back to the bundled catalog if the request fails. */
+export function useAvailableModels(): ModelInfo[] {
+  const [models, setModels] = useState<ModelInfo[]>(MODELS);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE}/api/openai/models`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        const parsed = data.filter(isModelInfo);
+        if (parsed.length > 0) setModels(parsed);
+      })
+      .catch(() => {
+        /* keep fallback catalog */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return models;
+}
+
+export function getModelLabel(modelId: string, models: ModelInfo[] = MODELS): string {
+  return models.find((m) => m.id === modelId)?.label ?? modelId;
+}
+
+export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelectorProps) {
+  const models = useAvailableModels();
+  const current = models.find((m) => m.id === selectedModel) ?? models[0] ?? MODELS[0];
+
+  const openaiModels = models.filter((m) => m.provider === "openai");
+  const qwenModels = models.filter((m) => m.provider === "dashscope");
 
   return (
     <DropdownMenu>

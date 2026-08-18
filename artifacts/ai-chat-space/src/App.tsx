@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { ClerkProvider, SignIn, SignUp, Show, useClerk } from '@clerk/react';
+import { ClerkProvider, SignIn, SignUp, Show, useAuth, useClerk } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
 import { shadcn } from '@clerk/themes';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -10,6 +10,7 @@ import NotFound from '@/pages/not-found';
 import { ChatLayout } from '@/components/layout/chat-layout';
 import { ChatPage } from '@/pages/chat';
 import { HomePage } from '@/pages/home';
+import { SettingsPage } from '@/pages/settings';
 import {
   Redirect,
   Route,
@@ -40,8 +41,26 @@ function stripBase(path: string): string {
     : path;
 }
 
-if (!clerkPubKey) {
-  throw new Error('Missing VITE_CLERK_PUBLISHABLE_KEY in .env file');
+function MissingClerkKey() {
+  return (
+    <div className="min-h-[100dvh] flex items-center justify-center bg-background px-6 text-center">
+      <div className="max-w-md space-y-3">
+        <h1 className="text-xl font-serif text-foreground">セットアップが必要です</h1>
+        <p className="text-sm text-muted-foreground">
+          <code className="text-foreground">VITE_CLERK_PUBLISHABLE_KEY</code> が設定されていません。
+          <code className="text-foreground">.env.example</code> をコピーしてキーを入れてください。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AuthLoading() {
+  return (
+    <div className="min-h-[100dvh] flex items-center justify-center bg-background">
+      <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+    </div>
+  );
 }
 
 // Dark theme appearance matching the app (bg-background / bg-card / amber primary)
@@ -135,6 +154,8 @@ function ClerkQueryClientCacheInvalidator() {
 }
 
 function HomeRedirect() {
+  const { isLoaded } = useAuth();
+  if (!isLoaded) return <AuthLoading />;
   return (
     <>
       <Show when="signed-in">
@@ -148,6 +169,8 @@ function HomeRedirect() {
 }
 
 function ProtectedChat({ children }: { children: ReactNode }) {
+  const { isLoaded } = useAuth();
+  if (!isLoaded) return <AuthLoading />;
   return (
     <>
       <Show when="signed-in">
@@ -177,6 +200,16 @@ function Router() {
       <Route path="/chat">
         <ProtectedChat>
           <ChatPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/private">
+        <ProtectedChat>
+          <ChatPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/settings">
+        <ProtectedChat>
+          <SettingsPage />
         </ProtectedChat>
       </Route>
       <Route path="/conversations/:id">
@@ -232,6 +265,10 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
+
+  if (!clerkPubKey) {
+    return <MissingClerkKey />;
+  }
 
   return (
     <WouterRouter base={basePath}>

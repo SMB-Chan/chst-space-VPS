@@ -81,6 +81,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenaiError"
+    patch:
+      operationId: updateOpenaiConversation
+      tags: [openai]
+      summary: Rename a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenaiConversationInput"
+      responses:
+        "200":
+          description: Updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiConversation"
+        "400":
+          description: Invalid title
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
     delete:
       operationId: deleteOpenaiConversation
       tags: [openai]

@@ -1,13 +1,13 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   useListOpenaiConversations,
   useDeleteOpenaiConversation,
+  useUpdateOpenaiConversation,
   getListOpenaiConversationsQueryKey,
 } from "@workspace/api-client-react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  MessageSquare,
   Plus,
   Trash2,
   MoreVertical,
@@ -15,8 +15,12 @@ import {
   PanelLeftOpen,
   Command,
   Loader2,
+  Settings,
+  Shield,
+  Pencil,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { ja } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +29,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
 import { LogOut } from "lucide-react";
 
@@ -43,12 +58,24 @@ export function ChatLayout({ children }: ChatLayoutProps) {
   const params = useParams();
   const queryClient = useQueryClient();
 
-  const { data: conversations, isLoading } = useListOpenaiConversations();
+  const { data: conversations, isLoading, isError, refetch } = useListOpenaiConversations();
   const deleteConversation = useDeleteOpenaiConversation();
+  const updateConversation = useUpdateOpenaiConversation();
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // Once we know if it's mobile, set the initial state once
   useEffect(() => {
-    if (sidebarOpen === undefined) {
+    if (renamingId != null) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [renamingId]);
+
+  // Wait until the viewport is known so phones don't flash an open drawer.
+  useEffect(() => {
+    if (sidebarOpen === undefined && isMobile !== undefined) {
       setSidebarOpen(!isMobile);
     }
   }, [isMobile, sidebarOpen]);
@@ -63,22 +90,39 @@ export function ChatLayout({ children }: ChatLayoutProps) {
     if (isMobile) setSidebarOpen(false);
   }, [setLocation, isMobile]);
 
-  const handleDelete = useCallback(
-    (e: React.MouseEvent, id: number) => {
-      e.preventDefault();
-      e.stopPropagation();
-      deleteConversation.mutate(
-        { id },
-        {
-          onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
-            if (activeId === id) setLocation("/chat");
-          },
-        }
-      );
-    },
-    [activeId, deleteConversation, queryClient, setLocation]
-  );
+  const commitRename = useCallback(() => {
+    if (renamingId == null) return;
+    const title = normalizeConversationTitle(renameDraft);
+    if (!title) {
+      setRenamingId(null);
+      return;
+    }
+    const id = renamingId;
+    setRenamingId(null);
+    updateConversation.mutate(
+      { id, data: { title } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+        },
+      },
+    );
+  }, [renamingId, renameDraft, updateConversation, queryClient]);
+
+  const confirmDelete = useCallback(() => {
+    if (pendingDeleteId == null) return;
+    const id = pendingDeleteId;
+    setPendingDeleteId(null);
+    deleteConversation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+          if (activeId === id) setLocation("/chat");
+        },
+      }
+    );
+  }, [pendingDeleteId, activeId, deleteConversation, queryClient, setLocation]);
 
   const open = sidebarOpen ?? false;
 
@@ -119,33 +163,77 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           </Button>
         </div>
 
-        <div className="p-3 flex-shrink-0">
+        <div className="p-3 flex-shrink-0 space-y-1">
           <Button
             onClick={handleNewChat}
             className="w-full justify-start gap-2 h-10 bg-sidebar-accent/50 text-sidebar-foreground hover:bg-sidebar-accent hover:text-primary transition-colors"
             variant="ghost"
           >
             <Plus className="w-4 h-4" />
-            New Thread
+            新しい会話
+          </Button>
+          <Button
+            onClick={() => {
+              setLocation("/private");
+              if (isMobile) setSidebarOpen(false);
+            }}
+            className={cn(
+              "w-full justify-start gap-2 h-10 text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
+              location === "/private" && "bg-violet-500/15 text-violet-200 hover:bg-violet-500/20",
+            )}
+            variant="ghost"
+          >
+            <Shield className="w-4 h-4" />
+            プライベート
           </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
           <div className="px-2 py-2 text-xs font-medium text-sidebar-foreground/40 uppercase tracking-wider">
-            History {conversations && `(${conversations.length})`}
+            履歴 {conversations && `(${conversations.length})`}
           </div>
 
           {isLoading ? (
             <div className="px-2 py-4 flex justify-center">
               <Loader2 className="w-4 h-4 animate-spin text-sidebar-foreground/20" />
             </div>
+          ) : isError ? (
+            <div className="px-2 py-4 text-sm text-sidebar-foreground/60 text-center space-y-2">
+              <p>履歴を読み込めませんでした。</p>
+              <Button variant="ghost" size="sm" onClick={() => refetch()}>
+                再試行
+              </Button>
+            </div>
           ) : conversations?.length === 0 ? (
             <div className="px-2 py-4 text-sm text-sidebar-foreground/40 text-center">
-              No conversations yet.
+              まだ会話はありません
             </div>
           ) : (
             conversations?.map((conv) => (
               <div key={conv.id} className="relative group">
+                {renamingId === conv.id ? (
+                  <div className="px-2 py-1.5">
+                    <input
+                      ref={renameInputRef}
+                      value={renameDraft}
+                      maxLength={CONVERSATION_TITLE_MAX}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitRename();
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setRenamingId(null);
+                        }
+                      }}
+                      className="w-full h-8 rounded-md bg-background border border-border px-2 text-sm text-foreground outline-none focus:border-primary/60"
+                      aria-label="会話名"
+                    />
+                  </div>
+                ) : (
                 <Link
                   href={`/conversations/${conv.id}`}
                   onClick={() => isMobile && setSidebarOpen(false)}
@@ -156,13 +244,17 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                       : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                   )}
                 >
-                  <div className="font-medium truncate pr-6">{conv.title || "Untitled"}</div>
+                  <div className="font-medium truncate pr-6">{conv.title || "無題"}</div>
                   <div className="text-xs opacity-60">
-                    {formatDistanceToNow(new Date(conv.createdAt), { addSuffix: true })}
+                    {formatDistanceToNow(new Date(conv.createdAt), { addSuffix: true, locale: ja })}
                   </div>
                 </Link>
+                )}
 
-                <div className="absolute right-2 top-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className={cn(
+                  "absolute right-2 top-2.5 transition-opacity",
+                  isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                )}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -175,11 +267,27 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-40">
                       <DropdownMenuItem
-                        onClick={(e) => handleDelete(e, conv.id)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setRenameDraft(conv.title || "");
+                          setRenamingId(conv.id);
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4 mr-2" />
+                        名前を変更
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setPendingDeleteId(conv.id);
+                        }}
                         className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
-                        Delete thread
+                        削除
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -196,6 +304,21 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               {user?.primaryEmailAddress?.emailAddress ?? ""}
             </div>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="設定"
+            className={cn(
+              "w-8 h-8 text-sidebar-foreground/60 hover:text-sidebar-foreground",
+              location === "/settings" && "text-foreground",
+            )}
+            onClick={() => {
+              setLocation("/settings");
+              if (isMobile) setSidebarOpen(false);
+            }}
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -225,6 +348,31 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         )}
         {children}
       </div>
+
+      <AlertDialog
+        open={pendingDeleteId != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>この会話を削除しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              削除するとメッセージは元に戻せません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              削除する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

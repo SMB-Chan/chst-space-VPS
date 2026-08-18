@@ -27,6 +27,11 @@ node_modules
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# env (never commit secrets)
+.env
+.env.*
+!.env.example
+
 # misc
 /.sass-cache
 /connect.lock
@@ -47,3 +52,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# generated test bundles
+.ssrf-test-bundle.mjs
