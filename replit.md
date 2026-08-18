@@ -10,6 +10,7 @@
 - `pnpm run build` — 型チェック + 全パッケージのビルド
 - `pnpm --filter @workspace/api-spec run codegen` — OpenAPI からフック / Zod を再生成
 - `pnpm --filter @workspace/db run push` — DB スキーマ反映（開発のみ）
+- `pnpm run test` — Vitest（API + フロントの単体テスト）
 - `pnpm --filter @workspace/api-server run test:ssrf` — SSRF ガードの単体テスト
 - 必須 env: `DATABASE_URL`, Clerk キー, `AI_INTEGRATIONS_OPENAI_*`。任意: `DASHSCOPE_API_KEY`
 - 一覧は `.env.example` を参照
@@ -28,6 +29,7 @@
 
 - `artifacts/ai-chat-space` — チャット UI
 - `artifacts/api-server` — Express API（会話 CRUD + SSE ストリーム + Web 検索前段）
+- Replit 付属の `mockup-sandbox` は未使用のため削除済み
 - `lib/db/src/schema` — `conversations` / `messages`（ソースオブトゥルース）
 - `lib/api-spec/openapi.yaml` — API 契約
 - `artifacts/api-server/src/lib/ai-clients.ts` — モデル一覧とプロバイダ解決

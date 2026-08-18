@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   useListOpenaiConversations,
   useDeleteOpenaiConversation,
+  useUpdateOpenaiConversation,
   getListOpenaiConversationsQueryKey,
 } from "@workspace/api-client-react";
 import { Link, useLocation, useParams } from "wouter";
@@ -16,6 +17,7 @@ import {
   Loader2,
   Settings,
   Shield,
+  Pencil,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ja } from "date-fns/locale";
@@ -38,6 +40,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
 import { LogOut } from "lucide-react";
 
@@ -57,7 +60,18 @@ export function ChatLayout({ children }: ChatLayoutProps) {
 
   const { data: conversations, isLoading, isError, refetch } = useListOpenaiConversations();
   const deleteConversation = useDeleteOpenaiConversation();
+  const updateConversation = useUpdateOpenaiConversation();
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renamingId != null) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [renamingId]);
 
   // Wait until the viewport is known so phones don't flash an open drawer.
   useEffect(() => {
@@ -75,6 +89,25 @@ export function ChatLayout({ children }: ChatLayoutProps) {
     setLocation("/chat");
     if (isMobile) setSidebarOpen(false);
   }, [setLocation, isMobile]);
+
+  const commitRename = useCallback(() => {
+    if (renamingId == null) return;
+    const title = normalizeConversationTitle(renameDraft);
+    if (!title) {
+      setRenamingId(null);
+      return;
+    }
+    const id = renamingId;
+    setRenamingId(null);
+    updateConversation.mutate(
+      { id, data: { title } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+        },
+      },
+    );
+  }, [renamingId, renameDraft, updateConversation, queryClient]);
 
   const confirmDelete = useCallback(() => {
     if (pendingDeleteId == null) return;
@@ -178,6 +211,29 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           ) : (
             conversations?.map((conv) => (
               <div key={conv.id} className="relative group">
+                {renamingId === conv.id ? (
+                  <div className="px-2 py-1.5">
+                    <input
+                      ref={renameInputRef}
+                      value={renameDraft}
+                      maxLength={CONVERSATION_TITLE_MAX}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitRename();
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setRenamingId(null);
+                        }
+                      }}
+                      className="w-full h-8 rounded-md bg-background border border-border px-2 text-sm text-foreground outline-none focus:border-primary/60"
+                      aria-label="会話名"
+                    />
+                  </div>
+                ) : (
                 <Link
                   href={`/conversations/${conv.id}`}
                   onClick={() => isMobile && setSidebarOpen(false)}
@@ -193,6 +249,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                     {formatDistanceToNow(new Date(conv.createdAt), { addSuffix: true, locale: ja })}
                   </div>
                 </Link>
+                )}
 
                 <div className={cn(
                   "absolute right-2 top-2.5 transition-opacity",
@@ -209,6 +266,18 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setRenameDraft(conv.title || "");
+                          setRenamingId(conv.id);
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4 mr-2" />
+                        名前を変更
+                      </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={(e) => {
                           e.preventDefault();

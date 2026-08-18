@@ -2,6 +2,16 @@ export const OPTIMISTIC_USER_ID = -1;
 export const STREAMING_ASSISTANT_ID = -2;
 
 const TITLE_MAX_CHARS = 24;
+export const CONVERSATION_TITLE_MAX = 80;
+
+/** Trim, collapse whitespace, and cap length. Returns null when empty. */
+export function normalizeConversationTitle(raw: string): string | null {
+  const title = raw.replace(/\s+/g, " ").trim();
+  if (!title) return null;
+  return title.length > CONVERSATION_TITLE_MAX
+    ? title.slice(0, CONVERSATION_TITLE_MAX)
+    : title;
+}
 
 /** Build a sidebar title that works for Japanese (no spaces) and English. */
 export function conversationTitle(text: string): string {

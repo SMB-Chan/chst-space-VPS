@@ -18,6 +18,7 @@ import {
 } from "@workspace/api-zod";
 import { logger } from "../../lib/logger";
 import { streamChatReply, type ChatContentPart } from "../../lib/chat-stream";
+import { normalizeConversationTitle } from "../../lib/conversation-title";
 import { and, desc, eq } from "drizzle-orm";
 import { requireAuth } from "../../middlewares/requireAuth";
 
@@ -116,9 +117,14 @@ router.post("/openai/conversations", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  const title = normalizeConversationTitle(parsed.data.title);
+  if (!title) {
+    res.status(400).json({ error: "タイトルを入力してください。" });
+    return;
+  }
   const [conv] = await db
     .insert(conversations)
-    .values({ title: parsed.data.title, userId: req.userId! })
+    .values({ title, userId: req.userId! })
     .returning();
   res.status(201).json(conv);
 });
@@ -149,6 +155,32 @@ router.get("/openai/conversations/:id", async (req, res): Promise<void> => {
     sources: parseStoredSources(m.sources),
   }));
   res.json({ ...conv, messages: parsedMsgs });
+});
+
+// Rename conversation
+router.patch("/openai/conversations/:id", async (req, res): Promise<void> => {
+  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const params = DeleteOpenaiConversationParams.safeParse({ id: rawId });
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const rawTitle = typeof req.body?.title === "string" ? req.body.title : "";
+  const title = normalizeConversationTitle(rawTitle);
+  if (!title) {
+    res.status(400).json({ error: "タイトルを入力してください。" });
+    return;
+  }
+  const [updated] = await db
+    .update(conversations)
+    .set({ title })
+    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)))
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Conversation not found" });
+    return;
+  }
+  res.json(updated);
 });
 
 // Delete conversation

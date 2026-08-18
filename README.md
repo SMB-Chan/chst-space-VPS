@@ -67,10 +67,13 @@ Vite は `/api` を `API_PROXY_TARGET`（未設定なら `http://127.0.0.1:5000`
 
 ```bash
 pnpm run typecheck
+pnpm run test
 pnpm run build
 pnpm --filter @workspace/api-spec run codegen   # OpenAPI からフック / Zod を再生成
 pnpm --filter @workspace/api-server run test:ssrf
 ```
+
+テストは Vitest です。`artifacts/api-server` と `artifacts/ai-chat-space` が対象です。
 
 ## 必要な環境変数
 
