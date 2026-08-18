@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { OpenaiMessage } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
@@ -87,6 +87,11 @@ export function MessageFeed({ messages, isLoading }: MessageFeedProps) {
                     <Markdown content={displayContent} />
                   )}
                 </div>
+                {!isUser && message.modelId && (
+                  <div className="text-[11px] text-muted-foreground/60 px-1 select-none">
+                    {message.modelId}
+                  </div>
+                )}
               </div>
             </div>
           );

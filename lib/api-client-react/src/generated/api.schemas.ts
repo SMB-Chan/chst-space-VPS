@@ -20,6 +20,7 @@ export interface OpenaiMessage {
   conversationId: number;
   role: string;
   content: string;
+  modelId?: string | null;
   createdAt: string;
 }
 

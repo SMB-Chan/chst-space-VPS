@@ -230,11 +230,12 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
       res.write(`data: ${JSON.stringify({ content: sourcesBlock })}\n\n`);
     }
 
-    // Save assistant message
+    // Save assistant message with the model that generated it
     await db.insert(messages).values({
       conversationId,
       role: "assistant",
       content: fullResponse,
+      modelId,
     });
 
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);

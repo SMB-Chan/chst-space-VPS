@@ -58,6 +58,7 @@ export const GetOpenaiConversationResponse = zod.object({
   "conversationId": zod.number().int(),
   "role": zod.string(),
   "content": zod.string(),
+  "modelId": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -85,6 +86,7 @@ export const ListOpenaiMessagesResponseItem = zod.object({
   "conversationId": zod.number().int(),
   "role": zod.string(),
   "content": zod.string(),
+  "modelId": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListOpenaiMessagesResponse = zod.array(ListOpenaiMessagesResponseItem)

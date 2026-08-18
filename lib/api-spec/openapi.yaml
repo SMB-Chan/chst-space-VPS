@@ -175,6 +175,9 @@ components:
           type: string
         content:
           type: string
+        modelId:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time

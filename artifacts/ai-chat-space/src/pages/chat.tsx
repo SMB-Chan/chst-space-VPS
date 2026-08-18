@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { 
@@ -77,11 +77,23 @@ export function ChatPage() {
   const queryClient = useQueryClient();
 
   const [selectedModel, setSelectedModel] = useState("gpt-5.6-terra");
+  const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
 
   const { data: conversation, isLoading } = useGetOpenaiConversation(
     conversationId as number,
     { query: { enabled: !!conversationId, queryKey: getGetOpenaiConversationQueryKey(conversationId as number) } }
   );
+
+  // Restore the last used model when opening an existing conversation
+  useEffect(() => {
+    if (!conversation || modelRestoredForConv === conversation.id) return;
+    const msgs = conversation.messages ?? [];
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.modelId);
+    if (lastAssistant?.modelId) {
+      setSelectedModel(lastAssistant.modelId);
+    }
+    setModelRestoredForConv(conversation.id);
+  }, [conversation, modelRestoredForConv]);
 
   const createConversation = useCreateOpenaiConversation();
 
