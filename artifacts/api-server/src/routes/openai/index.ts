@@ -241,6 +241,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   }
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
   const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+  const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
   const auditModelId =
     typeof req.query.auditModel === "string" && req.query.auditModel !== modelId
       ? req.query.auditModel
@@ -314,6 +315,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     provider: aiClient.provider,
     modelId,
     reasoningLevel,
+    auditReasoningLevel,
     userText: parsedNewMessage.text,
     chatMessages,
     auditModelId,
@@ -350,6 +352,7 @@ router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
 
   const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
   const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+  const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
   const auditModelId =
     typeof req.query.auditModel === "string" && req.query.auditModel !== modelId
       ? req.query.auditModel
@@ -402,6 +405,7 @@ router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
     provider: aiClient.provider,
     modelId,
     reasoningLevel,
+    auditReasoningLevel,
     userText: parsedNewMessage.text,
     chatMessages,
     auditModelId,
