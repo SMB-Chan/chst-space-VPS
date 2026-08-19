@@ -17,7 +17,7 @@
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
+- pnpm workspaces, Node.js 22+, TypeScript 5.9
 - フロント: Vite, React 19, wouter, TanStack Query, Clerk, Tailwind
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
@@ -38,7 +38,7 @@
 ## Architecture decisions
 
 - Web 検索は tool calling ではなく、応答前の独立ステップ（モデル非依存、キー不要）。
-- 画像は DB に文字列（data URL）で保存し、送信直前に multimodal content へ変換する。
+- 新規添付は本文と構造化JSONで分離し、DBでは互換形式に保存して、送信直前にmultimodal contentへ変換する。
 - OpenAI は `max_completion_tokens`、DashScope 互換は `max_tokens`。混在会話では切替必須。
 - DashScope Token Plan はリージョン共通 URL ではなく専用エンドポイントが必要。
 - 会話は `userId` で隔離。未認証は 401。

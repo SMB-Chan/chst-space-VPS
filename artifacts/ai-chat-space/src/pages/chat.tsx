@@ -17,6 +17,10 @@ import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTAN
 import { type ReasoningLevel } from "@/lib/reasoning";
 import { loadSettings, pickAuditModel, saveSettings, subscribeSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import {
+  compactAttachmentMessageForHistory,
+  serializeAttachmentMessage,
+} from "@/lib/attachments";
 import { Sparkles, X, Shield, Scale } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -50,7 +54,13 @@ async function streamMessage(
   onFile: (file: { id: number; filename: string; mimeType: string }) => void,
   artifactBlobUrlCache: React.MutableRefObject<Map<string, string>>,
   signal?: AbortSignal,
-  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string; fileFormat?: FileFormat },
+  extra?: {
+    ephemeral?: boolean;
+    history?: { role: "user" | "assistant"; content: string }[];
+    auditModel?: string;
+    fileFormat?: FileFormat;
+    attachments?: OutgoingAttachment[];
+  },
 ) {
   try {
     const path = extra?.ephemeral
@@ -68,6 +78,15 @@ async function streamMessage(
           content,
           modelId: model,
           ...(extra?.fileFormat ? { fileFormat: extra.fileFormat } : {}),
+          ...(extra?.attachments?.length
+            ? {
+                attachments: extra.attachments.map((attachment) => ({
+                  kind: attachment.isBase64 ? "image" : "file",
+                  name: attachment.name,
+                  content: attachment.content,
+                })),
+              }
+            : {}),
           ...(extra?.ephemeral && extra.history ? { history: extra.history } : {}),
         }),
         credentials: "include",
@@ -375,15 +394,7 @@ export function ChatPage() {
           return false;
         }
       }
-      finalContent = `CS_ATTACHMENTS_V1:${JSON.stringify({
-        question: content,
-        attachments: files.map((file) => ({
-          kind: file.isBase64 ? "image" : "file",
-          name: file.name,
-          content: file.content,
-          isBase64: file.isBase64,
-        })),
-      })}`;
+      finalContent = serializeAttachmentMessage(content, files);
     }
 
     let targetId = conversationId;
@@ -434,14 +445,22 @@ export function ChatPage() {
     abortRef.current = controller;
 
     const privateHistory = isPrivate
-      ? privateMessages.map((m) => ({ role: m.role, content: m.content }))
+      ? privateMessages.flatMap((message) => {
+          if (message.role !== "user" && message.role !== "assistant") return [];
+          return [{
+            role: message.role as "user" | "assistant",
+            content: message.role === "user"
+              ? compactAttachmentMessageForHistory(message.content)
+              : message.content,
+          }];
+        })
       : undefined;
 
     // ストリーム開始を待たずに true を返し、入力欄をすぐクリアさせる。
     // 完了・失敗は各コールバックと isStreaming で制御する。
     void streamMessage(
       targetId ?? 0,
-      finalContent,
+      content,
       selectedModel,
       reasoningLevel,
       (chunk) => {
@@ -547,6 +566,7 @@ export function ChatPage() {
         ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
         ...(auditModel ? { auditModel } : {}),
         ...(fileFormat ? { fileFormat } : {}),
+        ...(files && files.length > 0 ? { attachments: files } : {}),
       },
     );
     return true;
@@ -744,6 +764,7 @@ export function ChatPage() {
           <MessageInput
             onSend={handleSend}
             disabled={isStreaming || createConversation.isPending}
+            fileGenerationEnabled={!isPrivate}
           />
         </div>
       </div>

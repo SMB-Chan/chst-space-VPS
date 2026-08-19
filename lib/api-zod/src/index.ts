@@ -5,6 +5,13 @@ export * from "./generated/api";
 export type {
   HealthStatus,
   OpenaiArtifact,
+  OpenaiModelReasoning,
+  OpenaiModelProvider,
+  OpenaiModel,
+  OpenaiMessageInputFileFormat,
+  OpenaiMessageDeleteInput,
+  OpenaiAttachmentKind,
+  OpenaiAttachment,
   OpenaiConversation,
   OpenaiConversationInput,
   OpenaiConversationWithMessages,

@@ -5,14 +5,22 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OpenaiAttachment } from './openaiAttachment';
+import type { OpenaiMessageInputFileFormat } from './openaiMessageInputFileFormat';
 import type { OpenaiMessageInputHistoryItem } from './openaiMessageInputHistoryItem';
 
 export interface OpenaiMessageInput {
+  /** User question. May be empty when attachments are present; legacy CS_ATTACHMENTS_V1 envelopes remain accepted. */
   content: string;
   /** Model ID to use (overrides the query parameter) */
   modelId?: string;
+  /** @maxItems 5 */
+  attachments?: OpenaiAttachment[];
   /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
-  fileFormat?: string | null;
-  /** Conversation history for ephemeral/private mode */
+  fileFormat?: OpenaiMessageInputFileFormat;
+  /**
+     * Conversation history for ephemeral/private mode
+     * @maxItems 200
+     */
   history?: OpenaiMessageInputHistoryItem[];
 }

@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
 import { STREAMING_ASSISTANT_ID } from "@/lib/chat";
+import { parseAttachmentMessageForDisplay } from "@/lib/attachments";
 
 export type StreamingPhase =
   | "starting"
@@ -58,43 +59,6 @@ function normalizeAssetIds(value: unknown): number[] | null {
   } catch {
     return null;
   }
-}
-
-type AttachmentChip = { kind: "image" | "file"; name: string };
-
-const ATTACHMENTS_V1_PREFIX = "CS_ATTACHMENTS_V1:";
-
-function parseUserDisplay(content: string): { displayContent: string; attachments: AttachmentChip[] } {
-  if (content.startsWith(ATTACHMENTS_V1_PREFIX)) {
-    try {
-      const parsed = JSON.parse(content.slice(ATTACHMENTS_V1_PREFIX.length)) as {
-        question?: unknown;
-        attachments?: unknown;
-      };
-      const displayContent = typeof parsed.question === "string" ? parsed.question : "";
-      const raw = Array.isArray(parsed.attachments) ? parsed.attachments : [];
-      const attachments = raw.flatMap((item): AttachmentChip[] => {
-        if (!item || typeof item !== "object") return [];
-        const rec = item as { kind?: unknown; type?: unknown; name?: unknown; isBase64?: unknown };
-        if (typeof rec.name !== "string") return [];
-        const isImage = rec.kind === "image" || rec.type === "image" || rec.isBase64 === true;
-        return [{ kind: isImage ? "image" : "file", name: rec.name }];
-      });
-      return { displayContent, attachments };
-    } catch {
-      return { displayContent: content, attachments: [] };
-    }
-  }
-
-  // Legacy single-attachment format
-  const fileMatch = content.match(/^\[(File|Image):\s([^\]]+)\]\n\n(.*?)\n\n---\n\nUser question:\s(.*)$/s);
-  if (fileMatch) {
-    return {
-      displayContent: fileMatch[4],
-      attachments: [{ kind: fileMatch[1] === "Image" ? "image" : "file", name: fileMatch[2] }],
-    };
-  }
-  return { displayContent: content, attachments: [] };
 }
 
 function formatBytes(size: number): string {
@@ -295,7 +259,7 @@ export function MessageFeed({
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
-          const parsedUser = isUser ? parseUserDisplay(message.content) : null;
+          const parsedUser = isUser ? parseAttachmentMessageForDisplay(message.content) : null;
           let displayContent = parsedUser?.displayContent ?? message.content;
           const attachments = parsedUser?.attachments ?? [];
 

@@ -6,10 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface OpenaiConversationInput {
+export interface OpenaiMessageDeleteInput {
   /**
-     * @minLength 1
-     * @maxLength 80
+     * @minItems 1
+     * @maxItems 200
+     * @items.minimum 1
      */
-  title: string;
+  ids: number[];
 }

@@ -5,6 +5,7 @@ import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch, type Response as UndiciResponse } from "undici";
 import type OpenAI from "openai";
 import { logger } from "./logger";
+import { readResponseTextLimited } from "./bounded-body";
 import {
   extractUrls,
   parseSearchHtml,
@@ -40,6 +41,9 @@ const PAGE_FETCH_TIMEOUT_MS = 6_000;
 const DECIDE_TIMEOUT_MS = 6_000;
 
 const MAX_PAGE_CHARS = 4000;
+/** Maximum decompressed bytes accepted from a fetched page/search response. */
+export const MAX_PAGE_RESPONSE_BYTES = 1024 * 1024;
+export const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
@@ -139,6 +143,9 @@ async function assertSafeUrl(rawUrl: string, signal?: AbortSignal): Promise<URL>
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Blocked protocol: ${url.protocol}`);
   }
+  if (url.username || url.password) {
+    throw new Error("Blocked URL containing credentials");
+  }
   const host = url.hostname;
   if (isIP(host)) {
     if (isPrivateAddress(host)) throw new Error(`Blocked private address: ${host}`);
@@ -228,6 +235,12 @@ async function fetchWithTimeout(
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
         if (!location) return { response: res, cancel };
+        // Do not leave a redirect body pinned to the connection pool.
+        try {
+          await res.body?.cancel();
+        } catch {
+          // Following the validated redirect is still safe if cancellation races.
+        }
         current = new URL(location, url).href;
         continue;
       }
@@ -244,17 +257,32 @@ async function fetchWithTimeout(
 // Public API
 // ---------------------------------------------------------------------------
 
+async function discardResponseBody(response: UndiciResponse): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Best-effort cleanup for non-success/non-text responses.
+  }
+}
+
 export async function fetchPageText(
   url: string
 ): Promise<{ title: string; text: string } | null> {
   try {
     const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS);
     try {
-      if (!res.ok) return null;
+      if (!res.ok) {
+        await discardResponseBody(res);
+        return null;
+      }
       const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.includes("html") && !contentType.includes("text")) return null;
-      // Body read is still covered by the active abort timer
-      const html = await res.text();
+      if (!contentType.includes("html") && !contentType.includes("text")) {
+        await discardResponseBody(res);
+        return null;
+      }
+      // Body read is still covered by the active abort timer and is bounded
+      // before conversion to a JavaScript string.
+      const html = await readResponseTextLimited(res, MAX_PAGE_RESPONSE_BYTES);
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       const title = titleMatch ? stripHtml(titleMatch[1]) : url;
       const text = extractMainContent(html).slice(0, MAX_PAGE_CHARS);
@@ -273,9 +301,10 @@ async function searchWebOnce(url: string): Promise<SearchResult[]> {
   try {
     if (!res.ok) {
       logger.warn({ status: res.status, url }, "Search endpoint failed");
+      await discardResponseBody(res);
       return [];
     }
-    return parseSearchHtml(await res.text());
+    return parseSearchHtml(await readResponseTextLimited(res, MAX_SEARCH_RESPONSE_BYTES));
   } finally {
     cancel();
   }

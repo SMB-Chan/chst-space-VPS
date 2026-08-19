@@ -1,24 +1,38 @@
 ---
 name: 画像添付のマルチモーダル変換
-description: チャットの画像添付をAIモデルへ送る際の形式変換と、モデル別の画像対応可否の扱い
+description: 構造化添付、保存互換形式、サイズ制限、モデル別の画像対応可否
 ---
 
-## ルール
-画像添付はフロントで `[Image: 名前]\n\n<data URL>\n\n---\n\nUser question: <質問>` 形式の
-文字列としてDBに保存される。モデルへ送る直前にサーバー側で正規表現で分解し、
-vision対応モデルには `content` 配列（text + image_url パーツ）へ変換する。
-文字列のままbase64を送ると、OpenAI/Qwenともに画像として認識されない。
+## 現行プロトコル
 
-**Why:** 「Alibaba Cloudモデルが画像を読めない」という報告の原因は、
-base64データURLを通常テキストとして送信していたこと。structured contentに
-変換すれば Qwen3.x 系・GPT系・o4-mini はすべて画像を読める（Token Planエンドポイントで検証済み）。
-DeepSeek V4 Pro と GLM-5.2 は画像非対応（送信は通るが画像を無視して当てずっぽうで回答するため危険）。
+新規送信は本文と添付を分離する。フロントは次のJSONを送る。
 
-**How to apply:**
-- vision可否は `supportsVision` フラグでフロント（送信前ブロック＋エラー表示）と
-  サーバー（400応答）の両方で管理。モデル追加時は両方更新する。
-- 画像を含む質問をWeb検索判定に渡すときは、質問テキスト部分のみを渡す
-  （base64を検索パイプラインに流さない）。
-- DashScopeは極小画像（幅・高さ10px以下）を invalid_parameter_error で拒否する。
-  検証には10px超のテスト画像を使うこと。
-- 送信前ブロック時はUI側で入力・添付を保持する（onSendがfalseを返すプロトコル）。
+```json
+{
+  "content": "ユーザーの質問",
+  "attachments": [
+    { "kind": "image", "name": "sample.png", "content": "data:image/png;base64,..." },
+    { "kind": "file", "name": "notes.md", "content": "UTF-8 text" }
+  ]
+}
+```
+
+サーバーの `message-content.ts` が検証し、Vision対応モデルには `text` と
+`image_url` のstructured contentへ変換する。base64を通常テキストとしてモデルや
+Web検索判定へ流してはならない。
+
+DB・楽観的UIでは後方互換のため `CS_ATTACHMENTS_V1:` 形式を使う。旧
+`[Image: ...]` / `[File: ...]` 形式も読み取り専用で維持する。プロトコルを変更する際は、
+フロント送信、サーバーパーサー、履歴復元、表示パーサー、OpenAPI、生成型、テストを
+同時に更新する。
+
+## 制限と安全策
+
+- 画像: JPEG / PNG / GIF / WebP。SVGは受け付けない。
+- 最大5件、画像1件10MB、テキスト1件1MB、添付合計20MB、テキスト合計2MB。
+- 対象POSTだけ30MB JSON parserを使い、認証とAI利用量ガードを先に通す。
+- `kind` を正とし、互換フィールド `isBase64` と矛盾する入力は拒否する。base64の正規形とPNG/JPEG/GIF/WebPのシグネチャも照合する。
+- テキスト添付は信頼できないデータとして明示し、添付内の命令を上位指示として扱わない。
+- プライベートセッションの過去添付は、各ターンでbase64を再送し続けない。質問と名前だけを履歴へ残す。
+- vision可否はモデル一覧の `supportsVision` をフロント（送信前）とサーバー（400応答）の両方で確認する。
+- DashScopeは極小画像を拒否する場合があるため、検証画像は十分な寸法を持たせる。

@@ -53,6 +53,7 @@ export class ExternalCommandError extends Error {
 let cachedToolStatus: PreviewToolStatus | null = null;
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
+const MAX_COMMAND_STDERR_CHARS = 64 * 1024;
 
 function runCommand(
   command: string,
@@ -63,7 +64,9 @@ function runCommand(
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      // These tools communicate through files. Ignoring stdout avoids a child
+      // process deadlock if it unexpectedly writes more than the pipe buffer.
+      stdio: ["ignore", "ignore", "pipe"],
       timeout: timeoutMs,
     });
 
@@ -71,7 +74,9 @@ function runCommand(
     let killedByTimeout = false;
 
     proc.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+      if (stderr.length >= MAX_COMMAND_STDERR_CHARS) return;
+      const remaining = MAX_COMMAND_STDERR_CHARS - stderr.length;
+      stderr += chunk.toString("utf8").slice(0, remaining);
     });
 
     proc.on("error", (err) => {

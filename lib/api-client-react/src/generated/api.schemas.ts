@@ -9,6 +9,33 @@ export interface HealthStatus {
   status: string;
 }
 
+export type OpenaiModelProvider = typeof OpenaiModelProvider[keyof typeof OpenaiModelProvider];
+
+
+export const OpenaiModelProvider = {
+  openai: 'openai',
+  dashscope: 'dashscope',
+} as const;
+
+export type OpenaiModelReasoning = typeof OpenaiModelReasoning[keyof typeof OpenaiModelReasoning];
+
+
+export const OpenaiModelReasoning = {
+  none: 'none',
+  openai: 'openai',
+  dashscope: 'dashscope',
+} as const;
+
+export interface OpenaiModel {
+  id: string;
+  label: string;
+  provider: OpenaiModelProvider;
+  description: string;
+  supportsVision: boolean;
+  supportsReasoning: boolean;
+  reasoning: OpenaiModelReasoning;
+}
+
 export interface OpenaiConversation {
   id: number;
   title: string;
@@ -43,8 +70,46 @@ export interface OpenaiMessage {
 }
 
 export interface OpenaiConversationInput {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
   title: string;
 }
+
+export type OpenaiAttachmentKind = typeof OpenaiAttachmentKind[keyof typeof OpenaiAttachmentKind];
+
+
+export const OpenaiAttachmentKind = {
+  image: 'image',
+  file: 'file',
+} as const;
+
+export interface OpenaiAttachment {
+  kind: OpenaiAttachmentKind;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  name: string;
+  /** Data URL for images, UTF-8 text for text attachments */
+  content: string;
+  /** Compatibility hint; kind is authoritative */
+  isBase64?: boolean;
+}
+
+/**
+ * Optional target file format for generated downloads (pdf, docx, xlsx, pptx)
+ */
+export type OpenaiMessageInputFileFormat = typeof OpenaiMessageInputFileFormat[keyof typeof OpenaiMessageInputFileFormat];
+
+
+export const OpenaiMessageInputFileFormat = {
+  pdf: 'pdf',
+  docx: 'docx',
+  xlsx: 'xlsx',
+  pptx: 'pptx',
+} as const;
 
 export type OpenaiMessageInputHistoryItemRole = typeof OpenaiMessageInputHistoryItemRole[keyof typeof OpenaiMessageInputHistoryItemRole];
 
@@ -56,17 +121,35 @@ export const OpenaiMessageInputHistoryItemRole = {
 
 export type OpenaiMessageInputHistoryItem = {
   role: OpenaiMessageInputHistoryItemRole;
+  /** @minLength 1 */
   content: string;
+  /** @maxItems 5 */
+  attachments?: OpenaiAttachment[];
 };
 
 export interface OpenaiMessageInput {
+  /** User question. May be empty when attachments are present; legacy CS_ATTACHMENTS_V1 envelopes remain accepted. */
   content: string;
   /** Model ID to use (overrides the query parameter) */
   modelId?: string;
+  /** @maxItems 5 */
+  attachments?: OpenaiAttachment[];
   /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
-  fileFormat?: string | null;
-  /** Conversation history for ephemeral/private mode */
+  fileFormat?: OpenaiMessageInputFileFormat;
+  /**
+     * Conversation history for ephemeral/private mode
+     * @maxItems 200
+     */
   history?: OpenaiMessageInputHistoryItem[];
+}
+
+export interface OpenaiMessageDeleteInput {
+  /**
+     * @minItems 1
+     * @maxItems 200
+     * @items.minimum 1
+     */
+  ids: number[];
 }
 
 export interface OpenaiConversationWithMessages {
@@ -113,6 +196,33 @@ export type SendOpenaiMessageAuditReasoning = typeof SendOpenaiMessageAuditReaso
 
 
 export const SendOpenaiMessageAuditReasoning = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type SendOpenaiEphemeralMessageParams = {
+model?: string;
+reasoning?: SendOpenaiEphemeralMessageReasoning;
+auditModel?: string;
+auditReasoning?: SendOpenaiEphemeralMessageAuditReasoning;
+};
+
+export type SendOpenaiEphemeralMessageReasoning = typeof SendOpenaiEphemeralMessageReasoning[keyof typeof SendOpenaiEphemeralMessageReasoning];
+
+
+export const SendOpenaiEphemeralMessageReasoning = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type SendOpenaiEphemeralMessageAuditReasoning = typeof SendOpenaiEphemeralMessageAuditReasoning[keyof typeof SendOpenaiEphemeralMessageAuditReasoning];
+
+
+export const SendOpenaiEphemeralMessageAuditReasoning = {
   off: 'off',
   low: 'low',
   medium: 'medium',

@@ -26,7 +26,10 @@ import type {
   OpenaiConversationWithMessages,
   OpenaiError,
   OpenaiMessage,
+  OpenaiMessageDeleteInput,
   OpenaiMessageInput,
+  OpenaiModel,
+  SendOpenaiEphemeralMessageParams,
   SendOpenaiMessageParams
 } from './api.schemas';
 
@@ -123,6 +126,83 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListOpenaiModelsUrl = () => {
+
+
+
+
+  return `/api/openai/models`
+}
+
+/**
+ * @summary List available chat models
+ */
+export const listOpenaiModels = async ( options?: Parameters<typeof customFetch>[1]): Promise<OpenaiModel[]> => {
+
+  return customFetch<OpenaiModel[]>(getListOpenaiModelsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpenaiModelsQueryKey = () => {
+    return [
+    `/api/openai/models`
+    ] as const;
+    }
+
+
+export const getListOpenaiModelsQueryOptions = <TData = Awaited<ReturnType<typeof listOpenaiModels>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpenaiModelsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpenaiModels>>> = ({ signal }) => listOpenaiModels({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpenaiModels>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOpenaiModelsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpenaiModels>>>
+export type ListOpenaiModelsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List available chat models
+ */
+
+export function useListOpenaiModels<TData = Awaited<ReturnType<typeof listOpenaiModels>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOpenaiModelsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -807,6 +887,156 @@ export const useSendOpenaiMessage = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSendOpenaiMessageMutationOptions(options));
+    }
+
+export const getSendOpenaiEphemeralMessageUrl = (params?: SendOpenaiEphemeralMessageParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/openai/ephemeral/messages?${stringifiedParams}` : `/api/openai/ephemeral/messages`
+}
+
+/**
+ * @summary Send a private-session message without persisting the conversation
+ */
+export const sendOpenaiEphemeralMessage = async (openaiMessageInput: OpenaiMessageInput,
+    params?: SendOpenaiEphemeralMessageParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getSendOpenaiEphemeralMessageUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(openaiMessageInput)
+  }
+);}
+
+
+
+
+
+export const getSendOpenaiEphemeralMessageMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiEphemeralMessage>>, TError,{data: BodyType<OpenaiMessageInput>;params?: SendOpenaiEphemeralMessageParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiEphemeralMessage>>, TError,{data: BodyType<OpenaiMessageInput>;params?: SendOpenaiEphemeralMessageParams}, TContext> => {
+
+const mutationKey = ['sendOpenaiEphemeralMessage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendOpenaiEphemeralMessage>>, {data: BodyType<OpenaiMessageInput>;params?: SendOpenaiEphemeralMessageParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  sendOpenaiEphemeralMessage(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendOpenaiEphemeralMessageMutationResult = NonNullable<Awaited<ReturnType<typeof sendOpenaiEphemeralMessage>>>
+    export type SendOpenaiEphemeralMessageMutationBody = BodyType<OpenaiMessageInput>
+    export type SendOpenaiEphemeralMessageMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Send a private-session message without persisting the conversation
+ */
+export const useSendOpenaiEphemeralMessage = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiEphemeralMessage>>, TError,{data: BodyType<OpenaiMessageInput>;params?: SendOpenaiEphemeralMessageParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendOpenaiEphemeralMessage>>,
+        TError,
+        {data: BodyType<OpenaiMessageInput>;params?: SendOpenaiEphemeralMessageParams},
+        TContext
+      > => {
+      return useMutation(getSendOpenaiEphemeralMessageMutationOptions(options));
+    }
+
+export const getDeleteOpenaiMessagesUrl = () => {
+
+
+
+
+  return `/api/openai/messages`
+}
+
+/**
+ * @summary Delete owned messages by id
+ */
+export const deleteOpenaiMessages = async (openaiMessageDeleteInput: OpenaiMessageDeleteInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteOpenaiMessagesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(openaiMessageDeleteInput)
+  }
+);}
+
+
+
+
+
+export const getDeleteOpenaiMessagesMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOpenaiMessages>>, TError,{data: BodyType<OpenaiMessageDeleteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteOpenaiMessages>>, TError,{data: BodyType<OpenaiMessageDeleteInput>}, TContext> => {
+
+const mutationKey = ['deleteOpenaiMessages'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteOpenaiMessages>>, {data: BodyType<OpenaiMessageDeleteInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteOpenaiMessages(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteOpenaiMessagesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteOpenaiMessages>>>
+    export type DeleteOpenaiMessagesMutationBody = BodyType<OpenaiMessageDeleteInput>
+    export type DeleteOpenaiMessagesMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Delete owned messages by id
+ */
+export const useDeleteOpenaiMessages = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOpenaiMessages>>, TError,{data: BodyType<OpenaiMessageDeleteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteOpenaiMessages>>,
+        TError,
+        {data: BodyType<OpenaiMessageDeleteInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteOpenaiMessagesMutationOptions(options));
     }
 
 export const getGetOpenaiAssetUrl = (assetId: number,) => {

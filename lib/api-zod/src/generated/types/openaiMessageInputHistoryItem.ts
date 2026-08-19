@@ -5,9 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OpenaiAttachment } from './openaiAttachment';
 import type { OpenaiMessageInputHistoryItemRole } from './openaiMessageInputHistoryItemRole';
 
 export type OpenaiMessageInputHistoryItem = {
   role: OpenaiMessageInputHistoryItemRole;
+  /** @minLength 1 */
   content: string;
+  /** @maxItems 5 */
+  attachments?: OpenaiAttachment[];
 };

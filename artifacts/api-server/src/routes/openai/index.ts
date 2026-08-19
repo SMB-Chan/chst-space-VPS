@@ -2,7 +2,12 @@ import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { conversations, messages, artifacts, assets } from "@workspace/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { z } from "zod";
+import {
+  CreateOpenaiConversationBody,
+  DeleteOpenaiMessagesBody,
+  SendOpenaiMessageBody,
+  UpdateOpenaiConversationBody,
+} from "@workspace/api-zod";
 import { requireAuth, getUserId } from "../middleware";
 import {
   AVAILABLE_MODELS,
@@ -14,11 +19,18 @@ import {
 import { streamChatReply } from "../../lib/chat-stream";
 import { logger } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
+import { normalizeConversationTitle } from "../../lib/conversation-title";
+import {
+  UserMessageContentError,
+  fallbackHistoricalUserContent,
+  modelContentFor,
+  parseUserMessageContent,
+  type IncomingAttachment,
+  type ParsedUserMessageContent,
+} from "../../lib/message-content";
 
 const router = Router();
 
-const IMAGE_DATA_URL_REGEX = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\r\n]+)$/i;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB base64-decoded limit
 const MAX_ARTIFACTS_PER_MESSAGE = 3;
 const MAX_USER_ARTIFACT_BYTES = 50 * 1024 * 1024;
 
@@ -43,8 +55,8 @@ function publicAiError(err: unknown): string {
 
 function parsePositiveInt(raw: string | number | string[] | undefined): number | undefined {
   const first = Array.isArray(raw) ? raw[0] : raw;
-  const value = typeof first === "number" ? first : Number.parseInt(String(first ?? ""), 10);
-  return Number.isFinite(value) && value > 0 ? value : undefined;
+  const value = typeof first === "number" ? first : Number(String(first ?? ""));
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function parseStoredAssetIds(raw: string | null): number[] | null {
@@ -52,7 +64,9 @@ function parseStoredAssetIds(raw: string | null): number[] | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return null;
-    return parsed.filter((id): id is number => typeof id === "number");
+    return parsed.filter(
+      (id): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 0,
+    );
   } catch {
     logger.warn({ raw }, "Ignoring malformed message assetIds JSON");
     return null;
@@ -77,17 +91,47 @@ function parseStoredSources(raw: string | null): { title: string; url: string }[
   }
 }
 
-function extractImageDataUrl(content: string): { text: string; imageUrl?: string } {
-  const match = content.match(IMAGE_DATA_URL_REGEX);
-  if (!match) return { text: content };
-  const text = content.replace(IMAGE_DATA_URL_REGEX, "").trim();
-  return { text, imageUrl: match[0] };
-}
-
 function contentDisposition(filename: string): string {
   const fallback = filename.replace(/[^a-zA-Z0-9._-]+/g, "_") || "artifact.txt";
   const encoded = encodeURIComponent(filename).replace(/'/g, "%27");
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+async function getHydratedMessages(conversationId: number, userId: string) {
+  const messageRows = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(asc(messages.createdAt), asc(messages.id));
+  const artifactRows = await db
+    .select({
+      id: artifacts.id,
+      messageId: artifacts.messageId,
+      filename: artifacts.filename,
+      mime: artifacts.mime,
+      size: artifacts.size,
+    })
+    .from(artifacts)
+    .where(and(eq(artifacts.conversationId, conversationId), eq(artifacts.userId, userId)))
+    .orderBy(asc(artifacts.id));
+
+  return messageRows.map((message) => ({
+    ...message,
+    sources: parseStoredSources(message.sources),
+    assetIds: parseStoredAssetIds(message.assetIds),
+    artifacts: artifactRows
+      .filter((artifact) => artifact.messageId === message.id)
+      .map(({ messageId: _messageId, ...artifact }) => ({
+        ...artifact,
+        downloadUrl: `/api/openai/artifacts/${artifact.id}`,
+      })),
+  }));
+}
+
+function sendMessageContentError(res: Response, error: unknown): boolean {
+  if (!(error instanceof UserMessageContentError)) return false;
+  res.status(error.status).json({ error: error.publicMessage });
+  return true;
 }
 
 router.use("/openai/artifacts", requireAuth);
@@ -117,6 +161,10 @@ router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) 
     res.setHeader("Content-Length", String(artifact.size));
     res.setHeader("Content-Disposition", contentDisposition(artifact.filename));
     res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (artifact.mime.toLowerCase().startsWith("text/html")) {
+      res.setHeader("Content-Security-Policy", "sandbox");
+    }
     res.send(artifact.content);
   } catch (err) {
     logger.error({ err, artifactId }, "Failed to download artifact");
@@ -135,8 +183,7 @@ router.get("/openai/conversations", requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "Failed to list conversations");
-    res.status(500).json({ error: "Failed to list conversations" }
-    );
+    res.status(500).json({ error: "Failed to list conversations" });
   }
 });
 
@@ -157,35 +204,10 @@ router.get("/openai/conversations/:conversationId", requireAuth, async (req, res
       res.status(404).json({ error: "Conversation not found" });
       return;
     }
-    const messagesResult = await db
-      .select()
-      .from(messages)
-      .where(eq(messages.conversationId, conversation.id))
-      .orderBy(asc(messages.createdAt), asc(messages.id));
-    const artifactRows = await db
-      .select({
-        id: artifacts.id,
-        messageId: artifacts.messageId,
-        filename: artifacts.filename,
-        mime: artifacts.mime,
-        size: artifacts.size,
-      })
-      .from(artifacts)
-      .where(and(eq(artifacts.conversationId, conversation.id), eq(artifacts.userId, userId)))
-      .orderBy(asc(artifacts.id));
+    const messagesResult = await getHydratedMessages(conversation.id, userId);
     res.json({
       ...conversation,
-      messages: messagesResult.map((message) => ({
-        ...message,
-        sources: parseStoredSources(message.sources),
-        assetIds: parseStoredAssetIds(message.assetIds),
-        artifacts: artifactRows
-          .filter((artifact) => artifact.messageId === message.id)
-          .map(({ messageId: _messageId, ...artifact }) => ({
-            ...artifact,
-            downloadUrl: `/api/openai/artifacts/${artifact.id}`,
-          })),
-      })),
+      messages: messagesResult,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get conversation");
@@ -193,24 +215,61 @@ router.get("/openai/conversations/:conversationId", requireAuth, async (req, res
   }
 });
 
-const createConversationBody = z.object({ title: z.string().min(1).max(200) });
-
 router.post("/openai/conversations", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const parsed = createConversationBody.safeParse(req.body);
+    const parsed = CreateOpenaiConversationBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid request body" });
       return;
     }
+    const title = normalizeConversationTitle(parsed.data.title);
+    if (!title) {
+      res.status(400).json({ error: "会話名を入力してください" });
+      return;
+    }
     const [conversation] = await db
       .insert(conversations)
-      .values({ userId, title: parsed.data.title })
+      .values({ userId, title })
       .returning();
-    res.json(conversation);
+    res.status(201).json(conversation);
   } catch (err) {
     req.log.error({ err }, "Failed to create conversation");
     res.status(500).json({ error: "Failed to create conversation" });
+  }
+});
+
+router.patch("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    if (conversationId === undefined) {
+      res.status(400).json({ error: "Invalid conversation ID" });
+      return;
+    }
+    const parsed = UpdateOpenaiConversationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+    const title = normalizeConversationTitle(parsed.data.title);
+    if (!title) {
+      res.status(400).json({ error: "会話名を入力してください" });
+      return;
+    }
+    const [updated] = await db
+      .update(conversations)
+      .set({ title })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "Failed to update conversation");
+    res.status(500).json({ error: "Failed to update conversation" });
   }
 });
 
@@ -248,18 +307,34 @@ router.delete("/openai/conversations/:conversationId", requireAuth, async (req, 
   }
 });
 
-const historyMessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string(),
+router.get("/openai/conversations/:conversationId/messages", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    if (conversationId === undefined) {
+      res.status(400).json({ error: "Invalid conversation ID" });
+      return;
+    }
+    const [conversation] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .limit(1);
+    if (!conversation) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.json(await getHydratedMessages(conversationId, userId));
+  } catch (err) {
+    req.log.error({ err }, "Failed to list messages");
+    res.status(500).json({ error: "Failed to list messages" });
+  }
 });
 
-const sendMessageBody = z.object({
-  content: z.string().min(1).max(100_000),
-  modelId: z.string().optional(),
-  history: z.array(historyMessageSchema).max(200).optional(),
-});
-
-const REQUESTED_FILE_FORMATS = ["pdf", "docx", "xlsx", "pptx"] as const;
+// The OpenAPI-generated Zod schema is the transport contract. Attachment
+// byte/type validation remains in message-content.ts because it requires
+// decoded-size checks and compatibility parsing.
+const sendMessageBody = SendOpenaiMessageBody;
 
 router.post("/openai/conversations/:conversationId/messages", requireAuth, async (req, res) => {
   const userId = getUserId(req);
@@ -286,11 +361,25 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       return;
     }
 
-    const { text: newMessageText, imageUrl: newImageUrl } = extractImageDataUrl(parsed.data.content);
+    let newMessage: ParsedUserMessageContent;
+    try {
+      newMessage = parseUserMessageContent(
+        parsed.data.content,
+        parsed.data.attachments as IncomingAttachment[] | undefined,
+      );
+    } catch (error) {
+      if (sendMessageContentError(res, error)) return;
+      throw error;
+    }
+
     const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
-    const modelId =
-      parsed.data.modelId ||
-      (AVAILABLE_MODELS.some((m) => m.id === modelQuery) ? modelQuery : DEFAULT_MODEL);
+    const requestedModelId = parsed.data.modelId || modelQuery || DEFAULT_MODEL;
+    const modelDef = AVAILABLE_MODELS.find((model) => model.id === requestedModelId);
+    if (!modelDef) {
+      res.status(400).json({ error: `未対応のモデルです: ${requestedModelId}` });
+      return;
+    }
+    const modelId = modelDef.id;
     const reasoningLevel = parseReasoningLevel(req.query.reasoning);
     const auditModelQuery = typeof req.query.auditModel === "string" ? req.query.auditModel : "";
     const auditModelId =
@@ -299,26 +388,14 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         : undefined;
     const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
 
-    const requestedFileFormat =
-      typeof req.body?.fileFormat === "string" &&
-      (REQUESTED_FILE_FORMATS as readonly string[]).includes(req.body.fileFormat)
-        ? (req.body.fileFormat as FileFormat)
-        : undefined;
+    const requestedFileFormat = parsed.data.fileFormat as FileFormat | undefined;
 
-    const modelDef = AVAILABLE_MODELS.find((m) => m.id === modelId);
-    if (newImageUrl && modelDef && !VISION_MODEL_IDS.has(modelDef.id)) {
+    const supportsVision = VISION_MODEL_IDS.has(modelId);
+    if (newMessage.hasImages && !supportsVision) {
       res.status(400).json({
         error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
       });
       return;
-    }
-
-    if (newImageUrl) {
-      const approxBytes = Math.floor(newImageUrl.length * 0.75);
-      if (approxBytes > MAX_IMAGE_BYTES) {
-        res.status(413).json({ error: "画像が大きすぎます。10MB以下にしてください。" });
-        return;
-      }
     }
 
     const history = await db
@@ -329,30 +406,25 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
 
     const chatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
     for (const msg of history) {
-      const { text: msgText, imageUrl: msgImageUrl } = extractImageDataUrl(msg.content);
-      if (msgImageUrl && msg.role === "user") {
-        chatMessages.push({
-          role: "user",
-          content: [
-            { type: "text", text: msgText || "（画像）" },
-            { type: "image_url", image_url: { url: msgImageUrl } },
-          ],
-        });
+      if (msg.role === "user") {
+        try {
+          const parsedHistory = parseUserMessageContent(msg.content);
+          chatMessages.push({
+            role: "user",
+            content: modelContentFor(parsedHistory, supportsVision),
+          });
+        } catch (error) {
+          logger.warn(
+            { err: error, messageId: msg.id, conversationId },
+            "Historical attachment could not be reconstructed; omitting its payload",
+          );
+          chatMessages.push({ role: "user", content: fallbackHistoricalUserContent(msg.content) });
+        }
       } else {
-        chatMessages.push({ role: msg.role as "user" | "assistant", content: msgText });
+        chatMessages.push({ role: "assistant", content: msg.content });
       }
     }
-    if (newImageUrl) {
-      chatMessages.push({
-        role: "user",
-        content: [
-          { type: "text", text: newMessageText || "この画像について説明してください。" },
-          { type: "image_url", image_url: { url: newImageUrl } },
-        ],
-      });
-    } else {
-      chatMessages.push({ role: "user", content: newMessageText });
-    }
+    chatMessages.push({ role: "user", content: modelContentFor(newMessage, supportsVision) });
 
     const { client, provider } = getClientForModel(modelId);
 
@@ -364,7 +436,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       modelId,
       reasoningLevel,
       auditReasoningLevel,
-      userText: newMessageText,
+      userText: newMessage.question,
       chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
       auditModelId,
       conversationId,
@@ -372,7 +444,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       publicAiError,
       onComplete: async ({ content, sources, audit, artifacts: extractedArtifacts, assetIds }) => {
         const messageInserts: (typeof messages.$inferInsert)[] = [
-          { conversationId, role: "user", content: parsed.data.content },
+          { conversationId, role: "user", content: newMessage.storedContent },
           {
             conversationId,
             role: "assistant",
@@ -443,16 +515,17 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
 router.delete("/openai/messages", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const parsed = z.object({ ids: z.array(z.number().int()).min(1).max(200) }).safeParse(req.body);
+    const parsed = DeleteOpenaiMessagesBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid request body" });
       return;
     }
+    const requestedIds = [...new Set(parsed.data.ids)];
     const owned = await db
       .select({ id: messages.id })
       .from(messages)
       .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-      .where(and(inArray(messages.id, parsed.data.ids), eq(conversations.userId, userId)));
+      .where(and(inArray(messages.id, requestedIds), eq(conversations.userId, userId)));
     const ownedIds = owned.map((m) => m.id);
     if (ownedIds.length === 0) {
       res.status(404).json({ error: "Messages not found" });
@@ -474,11 +547,32 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
   }
 
   try {
-    const { text: newMessageText, imageUrl: newImageUrl } = extractImageDataUrl(parsed.data.content);
+    if (parsed.data.fileFormat) {
+      res.status(400).json({
+        error: "プライベートセッションではPDF・Officeファイル生成を利用できません。通常の会話で実行してください。",
+      });
+      return;
+    }
+
+    let newMessage: ParsedUserMessageContent;
+    try {
+      newMessage = parseUserMessageContent(
+        parsed.data.content,
+        parsed.data.attachments as IncomingAttachment[] | undefined,
+      );
+    } catch (error) {
+      if (sendMessageContentError(res, error)) return;
+      throw error;
+    }
+
     const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
-    const modelId =
-      parsed.data.modelId ||
-      (AVAILABLE_MODELS.some((m) => m.id === modelQuery) ? modelQuery : DEFAULT_MODEL);
+    const requestedModelId = parsed.data.modelId || modelQuery || DEFAULT_MODEL;
+    const modelDef = AVAILABLE_MODELS.find((model) => model.id === requestedModelId);
+    if (!modelDef) {
+      res.status(400).json({ error: `未対応のモデルです: ${requestedModelId}` });
+      return;
+    }
+    const modelId = modelDef.id;
     const reasoningLevel = parseReasoningLevel(req.query.reasoning);
     const auditModelQuery = typeof req.query.auditModel === "string" ? req.query.auditModel : "";
     const auditModelId =
@@ -487,37 +581,38 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
         : undefined;
     const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
 
-    const modelDef = AVAILABLE_MODELS.find((m) => m.id === modelId);
-    if (newImageUrl && modelDef && !VISION_MODEL_IDS.has(modelDef.id)) {
+    const supportsVision = VISION_MODEL_IDS.has(modelId);
+    if (newMessage.hasImages && !supportsVision) {
       res.status(400).json({
         error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
       });
       return;
     }
 
-    if (newImageUrl) {
-      const approxBytes = Math.floor(newImageUrl.length * 0.75);
-      if (approxBytes > MAX_IMAGE_BYTES) {
-        res.status(413).json({ error: "画像が大きすぎます。10MB以下にしてください。" });
-        return;
-      }
-    }
-
     const chatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
     for (const hist of parsed.data.history ?? []) {
-      chatMessages.push({ role: hist.role, content: hist.content });
+      if (hist.role === "user") {
+        try {
+          const parsedHistory = parseUserMessageContent(
+            hist.content,
+            hist.attachments as IncomingAttachment[] | undefined,
+          );
+          chatMessages.push({
+            role: "user",
+            content: modelContentFor(parsedHistory, supportsVision),
+          });
+        } catch (error) {
+          logger.warn(
+            { err: error },
+            "Private-session history attachment could not be reconstructed; omitting its payload",
+          );
+          chatMessages.push({ role: "user", content: fallbackHistoricalUserContent(hist.content) });
+        }
+      } else {
+        chatMessages.push({ role: "assistant", content: hist.content });
+      }
     }
-    if (newImageUrl) {
-      chatMessages.push({
-        role: "user",
-        content: [
-          { type: "text", text: newMessageText || "この画像について説明してください。" },
-          { type: "image_url", image_url: { url: newImageUrl } },
-        ],
-      });
-    } else {
-      chatMessages.push({ role: "user", content: newMessageText });
-    }
+    chatMessages.push({ role: "user", content: modelContentFor(newMessage, supportsVision) });
 
     const { client, provider } = getClientForModel(modelId);
     await streamChatReply({
@@ -528,7 +623,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       modelId,
       reasoningLevel,
       auditReasoningLevel,
-      userText: newMessageText,
+      userText: newMessage.question,
       chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
       auditModelId,
       includeArtifactContent: true,
@@ -589,6 +684,8 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
       `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
     );
     res.setHeader("Content-Length", String(buffer.length));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.end(buffer);
   } catch (err) {
     logger.error({ err, assetId }, "Failed to download asset");

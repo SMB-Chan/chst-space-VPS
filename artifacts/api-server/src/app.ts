@@ -13,6 +13,9 @@ import healthRouter from "./routes/health";
 import { logger } from "./lib/logger";
 import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
+import { requireAuth } from "./middlewares/requireAuth";
+import { aiUsageGuard } from "./middlewares/aiUsageGuard";
+import { isAllowedCorsOrigin, parseAllowedOrigins } from "./lib/cors-origins";
 
 const app: Express = express();
 
@@ -37,32 +40,22 @@ app.use(
 );
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-const frontendUrl = process.env.FRONTEND_URL;
+const allowedOrigins = parseAllowedOrigins(process.env.FRONTEND_URL);
+const allowAnyDevelopmentOrigin =
+  allowedOrigins.size === 0 && process.env.NODE_ENV !== "production";
 
 app.use(
   cors({
     credentials: true,
-    origin: frontendUrl
-      ? (origin, callback) => {
-          if (!origin || origin === frontendUrl) {
-            callback(null, true);
-          } else {
-            // Reflect no Access-Control-Allow-Origin instead of raising a 500.
-            callback(null, false);
-          }
-        }
-      : true,
+    origin: (origin, callback) => {
+      // In production, an omitted FRONTEND_URL now fails closed for
+      // cross-origin browser requests. Local development remains permissive.
+      callback(null, isAllowedCorsOrigin(origin, allowedOrigins, allowAnyDevelopmentOrigin));
+    },
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   }),
 );
-// Image attachments need a large body; everything else stays small so
-// unauthenticated requests cannot force a 25MB parse.
-app.use([...LARGE_JSON_PATHS], express.json({ limit: LARGE_JSON_LIMIT }));
-app.use([...LARGE_JSON_PATHS], express.urlencoded({ extended: true, limit: LARGE_JSON_LIMIT }));
-app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
-app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));
-
 // Health checks are mounted before Clerk so deployment probes never depend on auth.
 app.use("/api", healthRouter);
 
@@ -77,6 +70,18 @@ app.use(
     ),
   })),
 );
+
+// Attachment requests may carry base64 image data. Authenticate before the
+// expensive 30MB parser so anonymous clients cannot force large allocations.
+app.post(
+  [...LARGE_JSON_PATHS],
+  requireAuth,
+  aiUsageGuard,
+  express.json({ limit: LARGE_JSON_LIMIT }),
+  express.urlencoded({ extended: true, limit: LARGE_JSON_LIMIT }),
+);
+app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));
 
 app.use("/api", router);
 

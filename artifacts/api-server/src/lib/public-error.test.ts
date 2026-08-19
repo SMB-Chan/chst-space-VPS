@@ -42,7 +42,7 @@ describe("publicHttpError", () => {
     });
     expect(publicHttpError(err)).toEqual({
       status: 413,
-      message: "ファイルが大きすぎます。15MB以下の画像を添付してください。",
+      message: "リクエストが大きすぎます。添付は合計20MB以下にしてください。",
     });
   });
 

@@ -76,23 +76,43 @@ const LOW_QUALITY_DOMAINS = new Set([
   "2ch",
   "5ch",
   "matome",
-  "ameblo",
-  "blog.livedoor",
-  " plaza.rakuten",
+  "ameblo.jp",
+  "blog.livedoor.jp",
+  "plaza.rakuten.co.jp",
   "fc2.com",
 ]);
 
+function hostnameMatches(hostname: string, indicator: string): boolean {
+  const normalizedHost = hostname.toLowerCase().replace(/\.$/, "");
+  const normalizedIndicator = indicator.toLowerCase().trim().replace(/^\./, "");
+  if (!normalizedIndicator) return false;
+
+  // Entries containing a dot are domain suffixes.  Bare entries (e.g.
+  // "gov", "edu", "matome") are matched against complete hostname labels,
+  // never against the path/query string or an arbitrary substring.
+  if (normalizedIndicator.includes(".")) {
+    return normalizedHost === normalizedIndicator || normalizedHost.endsWith(`.${normalizedIndicator}`);
+  }
+  return normalizedHost.split(".").includes(normalizedIndicator);
+}
+
 function domainScore(url: string): number {
-  const lower = url.toLowerCase();
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return 0;
+  }
+
   let score = 0;
   for (const domain of AUTHORITY_DOMAINS) {
-    if (lower.includes(domain)) {
+    if (hostnameMatches(hostname, domain)) {
       score += 8;
       break;
     }
   }
   for (const domain of LOW_QUALITY_DOMAINS) {
-    if (lower.includes(domain)) {
+    if (hostnameMatches(hostname, domain)) {
       score -= 6;
       break;
     }
@@ -100,13 +120,16 @@ function domainScore(url: string): number {
   return score;
 }
 
-function recencyScore(text: string): number {
+function recencyScore(text: string, now = new Date()): number {
   const combined = `${text}`;
-  // Year 2024-2099
-  if (/\b20(2[4-9]|[3-9]\d)\b/.test(combined)) return 4;
-  // Japanese date patterns
-  if (/[0-9]{1,2}月[0-9]{1,2}日/.test(combined)) return 3;
-  // Relative time words
+  const currentYear = now.getUTCFullYear();
+  const previousYear = currentYear - 1;
+  const years = Array.from(combined.matchAll(/\b(20\d{2})\b/g), (match) => Number(match[1]));
+  if (years.includes(currentYear)) return 4;
+  if (years.includes(previousYear)) return 2;
+  // Japanese date patterns.  Without a year this is only a modest signal.
+  if (/[0-9]{1,2}月[0-9]{1,2}日/.test(combined)) return 2;
+  // Relative time words.
   if (/今週|先週|今月|先月|最近|昨日|今日|きょう|this week|last week|today|yesterday/i.test(combined)) {
     return 2;
   }

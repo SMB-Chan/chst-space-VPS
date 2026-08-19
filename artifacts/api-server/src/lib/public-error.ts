@@ -34,7 +34,7 @@ export function publicHttpError(err: unknown): { status: number; message: string
   const status = typed.status ?? typed.statusCode ?? 500;
 
   if (status === 413 || typed.type === "entity.too.large") {
-    return { status: 413, message: "ファイルが大きすぎます。15MB以下の画像を添付してください。" };
+    return { status: 413, message: "リクエストが大きすぎます。添付は合計20MB以下にしてください。" };
   }
   if (isDatabaseError(err)) {
     return { status: 500, message: "メッセージの保存に失敗しました。もう一度お試しください。" };

@@ -18,10 +18,28 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary List available chat models
+ */
+export const ListOpenaiModelsResponseItem = zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "provider": zod.enum(['openai', 'dashscope']),
+  "description": zod.string(),
+  "supportsVision": zod.boolean(),
+  "supportsReasoning": zod.boolean(),
+  "reasoning": zod.enum(['none', 'openai', 'dashscope'])
+})
+export const ListOpenaiModelsResponse = zod.array(ListOpenaiModelsResponseItem)
+
+
+/**
  * @summary Download a generated artifact
  */
+
+
+
 export const DownloadOpenaiArtifactParams = zod.object({
-  "id": zod.coerce.number().int()
+  "id": zod.coerce.number().int().min(1)
 })
 
 export const DownloadOpenaiArtifactResponse = zod.string()
@@ -41,8 +59,12 @@ export const ListOpenaiConversationsResponse = zod.array(ListOpenaiConversations
 /**
  * @summary Create a new conversation
  */
+export const createOpenaiConversationBodyTitleMax = 80;
+
+
+
 export const CreateOpenaiConversationBody = zod.object({
-  "title": zod.string()
+  "title": zod.string().min(1).max(createOpenaiConversationBodyTitleMax)
 })
 
 export const CreateOpenaiConversationResponse = zod.object({
@@ -61,8 +83,11 @@ export const WipeOpenaiConversationsResponse = zod.void()
 /**
  * @summary Get conversation with messages
  */
+
+
+
 export const GetOpenaiConversationParams = zod.object({
-  "id": zod.coerce.number().int()
+  "id": zod.coerce.number().int().min(1)
 })
 
 export const GetOpenaiConversationResponse = zod.object({
@@ -97,12 +122,19 @@ export const GetOpenaiConversationResponse = zod.object({
 /**
  * @summary Rename a conversation
  */
+
+
+
 export const UpdateOpenaiConversationParams = zod.object({
-  "id": zod.coerce.number().int()
+  "id": zod.coerce.number().int().min(1)
 })
 
+export const updateOpenaiConversationBodyTitleMax = 80;
+
+
+
 export const UpdateOpenaiConversationBody = zod.object({
-  "title": zod.string()
+  "title": zod.string().min(1).max(updateOpenaiConversationBodyTitleMax)
 })
 
 export const UpdateOpenaiConversationResponse = zod.object({
@@ -115,8 +147,11 @@ export const UpdateOpenaiConversationResponse = zod.object({
 /**
  * @summary Delete a conversation
  */
+
+
+
 export const DeleteOpenaiConversationParams = zod.object({
-  "id": zod.coerce.number().int()
+  "id": zod.coerce.number().int().min(1)
 })
 
 export const DeleteOpenaiConversationResponse = zod.void()
@@ -125,8 +160,11 @@ export const DeleteOpenaiConversationResponse = zod.void()
 /**
  * @summary List messages in a conversation
  */
+
+
+
 export const ListOpenaiMessagesParams = zod.object({
-  "id": zod.coerce.number().int()
+  "id": zod.coerce.number().int().min(1)
 })
 
 export const ListOpenaiMessagesResponseItem = zod.object({
@@ -157,8 +195,11 @@ export const ListOpenaiMessagesResponse = zod.array(ListOpenaiMessagesResponseIt
 /**
  * @summary Send a text message and receive a streaming text response
  */
+
+
+
 export const SendOpenaiMessageParams = zod.object({
-  "id": zod.coerce.number().int()
+  "id": zod.coerce.number().int().min(1)
 })
 
 export const SendOpenaiMessageQueryParams = zod.object({
@@ -168,24 +209,115 @@ export const SendOpenaiMessageQueryParams = zod.object({
   "auditReasoning": zod.enum(['off', 'low', 'medium', 'high']).optional().describe('Reasoning level for the audit model')
 })
 
+export const sendOpenaiMessageBodyAttachmentsItemNameMax = 255;
+
+export const sendOpenaiMessageBodyAttachmentsMax = 5;
+
+
+export const sendOpenaiMessageBodyHistoryItemAttachmentsItemNameMax = 255;
+
+export const sendOpenaiMessageBodyHistoryItemAttachmentsMax = 5;
+
+export const sendOpenaiMessageBodyHistoryMax = 200;
+
+
+
 export const SendOpenaiMessageBody = zod.object({
-  "content": zod.string(),
+  "content": zod.string().describe('User question. May be empty when attachments are present; legacy CS_ATTACHMENTS_V1 envelopes remain accepted.'),
   "modelId": zod.string().optional().describe('Model ID to use (overrides the query parameter)'),
-  "fileFormat": zod.string().nullish().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)'),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image', 'file']),
+  "name": zod.string().min(1).max(sendOpenaiMessageBodyAttachmentsItemNameMax),
+  "content": zod.string().describe('Data URL for images, UTF-8 text for text attachments'),
+  "isBase64": zod.boolean().optional().describe('Compatibility hint; kind is authoritative')
+})).max(sendOpenaiMessageBodyAttachmentsMax).optional(),
+  "fileFormat": zod.enum(['pdf', 'docx', 'xlsx', 'pptx']).optional().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)'),
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
-  "content": zod.string()
-})).optional().describe('Conversation history for ephemeral\/private mode')
+  "content": zod.string().min(1),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image', 'file']),
+  "name": zod.string().min(1).max(sendOpenaiMessageBodyHistoryItemAttachmentsItemNameMax),
+  "content": zod.string().describe('Data URL for images, UTF-8 text for text attachments'),
+  "isBase64": zod.boolean().optional().describe('Compatibility hint; kind is authoritative')
+})).max(sendOpenaiMessageBodyHistoryItemAttachmentsMax).optional()
+})).max(sendOpenaiMessageBodyHistoryMax).optional().describe('Conversation history for ephemeral\/private mode')
 })
 
 export const SendOpenaiMessageResponse = zod.unknown()
 
 
 /**
+ * @summary Send a private-session message without persisting the conversation
+ */
+export const SendOpenaiEphemeralMessageQueryParams = zod.object({
+  "model": zod.coerce.string().optional(),
+  "reasoning": zod.enum(['off', 'low', 'medium', 'high']).optional(),
+  "auditModel": zod.coerce.string().optional(),
+  "auditReasoning": zod.enum(['off', 'low', 'medium', 'high']).optional()
+})
+
+export const sendOpenaiEphemeralMessageBodyAttachmentsItemNameMax = 255;
+
+export const sendOpenaiEphemeralMessageBodyAttachmentsMax = 5;
+
+
+export const sendOpenaiEphemeralMessageBodyHistoryItemAttachmentsItemNameMax = 255;
+
+export const sendOpenaiEphemeralMessageBodyHistoryItemAttachmentsMax = 5;
+
+export const sendOpenaiEphemeralMessageBodyHistoryMax = 200;
+
+
+
+export const SendOpenaiEphemeralMessageBody = zod.object({
+  "content": zod.string().describe('User question. May be empty when attachments are present; legacy CS_ATTACHMENTS_V1 envelopes remain accepted.'),
+  "modelId": zod.string().optional().describe('Model ID to use (overrides the query parameter)'),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image', 'file']),
+  "name": zod.string().min(1).max(sendOpenaiEphemeralMessageBodyAttachmentsItemNameMax),
+  "content": zod.string().describe('Data URL for images, UTF-8 text for text attachments'),
+  "isBase64": zod.boolean().optional().describe('Compatibility hint; kind is authoritative')
+})).max(sendOpenaiEphemeralMessageBodyAttachmentsMax).optional(),
+  "fileFormat": zod.enum(['pdf', 'docx', 'xlsx', 'pptx']).optional().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)'),
+  "history": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().min(1),
+  "attachments": zod.array(zod.object({
+  "kind": zod.enum(['image', 'file']),
+  "name": zod.string().min(1).max(sendOpenaiEphemeralMessageBodyHistoryItemAttachmentsItemNameMax),
+  "content": zod.string().describe('Data URL for images, UTF-8 text for text attachments'),
+  "isBase64": zod.boolean().optional().describe('Compatibility hint; kind is authoritative')
+})).max(sendOpenaiEphemeralMessageBodyHistoryItemAttachmentsMax).optional()
+})).max(sendOpenaiEphemeralMessageBodyHistoryMax).optional().describe('Conversation history for ephemeral\/private mode')
+})
+
+export const SendOpenaiEphemeralMessageResponse = zod.unknown()
+
+
+/**
+ * @summary Delete owned messages by id
+ */
+
+export const deleteOpenaiMessagesBodyIdsMax = 200;
+
+
+
+export const DeleteOpenaiMessagesBody = zod.object({
+  "ids": zod.array(zod.number().int().min(1)).min(1).max(deleteOpenaiMessagesBodyIdsMax)
+})
+
+export const DeleteOpenaiMessagesResponse = zod.void()
+
+
+/**
  * @summary Download a generated asset
  */
+
+
+
 export const GetOpenaiAssetParams = zod.object({
-  "assetId": zod.coerce.number().int()
+  "assetId": zod.coerce.number().int().min(1)
 })
 
 export const GetOpenaiAssetResponse = zod.unknown()

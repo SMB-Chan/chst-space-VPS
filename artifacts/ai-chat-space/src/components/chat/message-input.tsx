@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Paperclip,
@@ -29,13 +29,16 @@ interface MessageInputProps {
     fileFormat?: FileFormat,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  fileGenerationEnabled?: boolean;
 }
 
 // 画像のみ対応（PDFなどバイナリは非対応）
-const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"];
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const ACCEPTED_TEXT_TYPES = ["text/plain", "text/markdown", "text/csv", "application/json"];
-const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB / file
-const MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // server-side message cap
+const MAX_IMAGE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_FILE_SIZE_BYTES = 1 * 1024 * 1024;
+const MAX_TOTAL_TEXT_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // decoded attachment cap
 const MAX_FILES = 5;
 
 type StagedFile = { file: File; note: string | null };
@@ -47,22 +50,33 @@ const FORMAT_BUTTONS: { format: FileFormat; label: string; icon: React.ElementTy
   { format: "pptx", label: "PPT", icon: Presentation },
 ];
 
+function isTextFile(file: Pick<File, "type" | "name">): boolean {
+  const lowerName = file.name.toLowerCase();
+  return ACCEPTED_TEXT_TYPES.includes(file.type) ||
+    lowerName.endsWith(".txt") || lowerName.endsWith(".md") ||
+    lowerName.endsWith(".csv") || lowerName.endsWith(".json");
+}
+
 function validateFile(file: File): string | null {
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    return `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。1件15MB以下のファイルを選択してください。`;
-  }
   const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
-  const isText = ACCEPTED_TEXT_TYPES.includes(file.type) ||
-    file.name.endsWith(".txt") || file.name.endsWith(".md") ||
-    file.name.endsWith(".csv") || file.name.endsWith(".json");
+  const isText = isTextFile(file);
   if (!isImage && !isText) {
-    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP・SVG）またはテキストファイル（TXT・MD・CSV・JSON）を添付してください。`;
+    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP）またはテキストファイル（TXT・MD・CSV・JSON）を添付してください。`;
+  }
+  const limit = isImage ? MAX_IMAGE_FILE_SIZE_BYTES : MAX_TEXT_FILE_SIZE_BYTES;
+  if (file.size > limit) {
+    const limitMb = limit / 1024 / 1024;
+    return `${file.name} は大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。${isImage ? "画像" : "テキストファイル"}は1件${limitMb}MB以下にしてください。`;
   }
   return null;
 }
 
 function totalSize(files: StagedFile[]): number {
   return files.reduce((sum, item) => sum + item.file.size, 0);
+}
+
+function totalTextSize(files: StagedFile[]): number {
+  return files.reduce((sum, item) => sum + (isTextFile(item.file) ? item.file.size : 0), 0);
 }
 
 function readOne(file: File): Promise<OutgoingAttachment> {
@@ -83,7 +97,11 @@ function readOne(file: File): Promise<OutgoingAttachment> {
   });
 }
 
-export function MessageInput({ onSend, disabled }: MessageInputProps) {
+export function MessageInput({
+  onSend,
+  disabled,
+  fileGenerationEnabled = true,
+}: MessageInputProps) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<StagedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -93,6 +111,10 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 送信処理中フラグ（二重送信防止）
   const isSendingRef = useRef(false);
+
+  useEffect(() => {
+    if (!fileGenerationEnabled) setFileFormat(null);
+  }, [fileGenerationEnabled]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // IME変換確定のEnterは無視する
@@ -135,11 +157,19 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
             errors.push(`添付の合計が20MBを超えます。${item.name} を追加できませんでした。`);
             continue;
           }
+          if (totalTextSize([...next, candidate]) > MAX_TOTAL_TEXT_SIZE_BYTES) {
+            errors.push(`テキスト添付の合計が2MBを超えます。${item.name} を追加できませんでした。`);
+            continue;
+          }
           next.push(candidate);
         } catch {
           const candidate = { file: item, note: null };
           if (totalSize([...next, candidate]) > MAX_TOTAL_SIZE_BYTES) {
             errors.push(`添付の合計が20MBを超えます。${item.name} を追加できませんでした。`);
+            continue;
+          }
+          if (totalTextSize([...next, candidate]) > MAX_TOTAL_TEXT_SIZE_BYTES) {
+            errors.push(`テキスト添付の合計が2MBを超えます。${item.name} を追加できませんでした。`);
             continue;
           }
           next.push(candidate);
@@ -246,29 +276,31 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
         </div>
       )}
 
-      <div className="flex items-center gap-1 px-3 pt-2 pb-0 flex-wrap">
-        {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
-          const active = fileFormat === format;
-          return (
-            <button
-              key={format}
-              type="button"
-              onClick={() => setFileFormat(active ? null : format)}
-              disabled={disabled || compressing}
-              className={cn(
-                "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
-                active
-                  ? "bg-primary/10 border-primary/40 text-primary"
-                  : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
-                (disabled || compressing) && "opacity-50 cursor-not-allowed",
-              )}
-            >
-              <Icon className="w-3 h-3" />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      {fileGenerationEnabled && (
+        <div className="flex items-center gap-1 px-3 pt-2 pb-0 flex-wrap">
+          {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
+            const active = fileFormat === format;
+            return (
+              <button
+                key={format}
+                type="button"
+                onClick={() => setFileFormat(active ? null : format)}
+                disabled={disabled || compressing}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                  active
+                    ? "bg-primary/10 border-primary/40 text-primary"
+                    : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
+                  (disabled || compressing) && "opacity-50 cursor-not-allowed",
+                )}
+              >
+                <Icon className="w-3 h-3" />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex items-end gap-2 px-2 py-2">
         <input
@@ -276,7 +308,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           ref={fileInputRef}
           onChange={handleFileChange}
           className="hidden"
-          accept="image/*,.txt,.md,.csv,.json"
+          accept="image/jpeg,image/png,image/gif,image/webp,.txt,.md,.csv,.json"
           multiple
         />
 

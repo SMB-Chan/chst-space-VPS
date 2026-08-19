@@ -26,6 +26,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /openai/models:
+    get:
+      operationId: listOpenaiModels
+      tags: [openai]
+      summary: List available chat models
+      responses:
+        "200":
+          description: Available models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpenaiModel"
   /openai/artifacts/{id}:
     get:
       operationId: downloadOpenaiArtifact
@@ -37,6 +51,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
       responses:
         "200":
           description: Artifact file
@@ -107,6 +122,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
       responses:
         "200":
           description: Conversation with messages
@@ -130,6 +146,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
       requestBody:
         required: true
         content:
@@ -165,6 +182,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
       responses:
         "204":
           description: Deleted
@@ -185,6 +203,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
       responses:
         "200":
           description: List of messages
@@ -204,6 +223,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
         - name: model
           in: query
           required: false
@@ -241,6 +261,71 @@ paths:
           description: SSE stream of assistant text chunks
           content:
             text/event-stream: {}
+  /openai/ephemeral/messages:
+    post:
+      operationId: sendOpenaiEphemeralMessage
+      tags: [openai]
+      summary: Send a private-session message without persisting the conversation
+      parameters:
+        - name: model
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: reasoning
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [off, low, medium, high]
+        - name: auditModel
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: auditReasoning
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [off, low, medium, high]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenaiMessageInput"
+      responses:
+        "200":
+          description: SSE stream of assistant text chunks
+          content:
+            text/event-stream: {}
+        "400":
+          description: Invalid message, attachment, model, or private-mode file request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+  /openai/messages:
+    delete:
+      operationId: deleteOpenaiMessages
+      tags: [openai]
+      summary: Delete owned messages by id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenaiMessageDeleteInput"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: No owned messages found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
   /openai/assets/{assetId}:
     get:
       operationId: getOpenaiAsset
@@ -252,6 +337,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
       responses:
         "200":
           description: Asset binary
@@ -281,6 +367,33 @@ components:
           type: string
       required:
         - status
+    OpenaiModel:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        provider:
+          type: string
+          enum: [openai, dashscope]
+        description:
+          type: string
+        supportsVision:
+          type: boolean
+        supportsReasoning:
+          type: boolean
+        reasoning:
+          type: string
+          enum: [none, openai, dashscope]
+      required:
+        - id
+        - label
+        - provider
+        - description
+        - supportsVision
+        - supportsReasoning
+        - reasoning
     OpenaiConversation:
       type: object
       properties:
@@ -373,22 +486,51 @@ components:
       properties:
         title:
           type: string
+          minLength: 1
+          maxLength: 80
       required:
         - title
+    OpenaiAttachment:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [image, file]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          description: Data URL for images, UTF-8 text for text attachments
+        isBase64:
+          type: boolean
+          description: Compatibility hint; kind is authoritative
+      required:
+        - kind
+        - name
+        - content
     OpenaiMessageInput:
       type: object
       properties:
         content:
           type: string
+          description: User question. May be empty when attachments are present; legacy CS_ATTACHMENTS_V1 envelopes remain accepted.
         modelId:
           type: string
           description: Model ID to use (overrides the query parameter)
+        attachments:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/OpenaiAttachment"
         fileFormat:
           type: string
           description: Optional target file format for generated downloads (pdf, docx, xlsx, pptx)
-          nullable: true
+          enum: [pdf, docx, xlsx, pptx]
         history:
           type: array
+          maxItems: 200
           description: Conversation history for ephemeral/private mode
           items:
             type: object
@@ -398,11 +540,29 @@ components:
                 enum: [user, assistant]
               content:
                 type: string
+                minLength: 1
+              attachments:
+                type: array
+                maxItems: 5
+                items:
+                  $ref: "#/components/schemas/OpenaiAttachment"
             required:
               - role
               - content
       required:
         - content
+    OpenaiMessageDeleteInput:
+      type: object
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: integer
+            minimum: 1
+      required:
+        - ids
     OpenaiConversationWithMessages:
       type: object
       properties:

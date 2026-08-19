@@ -59,10 +59,27 @@ describe("scoreSearchResult", () => {
     expect(scoreSearchResult(low, "ニュース")).toBeLessThan(scoreSearchResult(plain, "ニュース"));
   });
 
-  it("boosts recency signals", () => {
-    const recent = { title: "2025年の予測", url: "https://example.com", snippet: "" };
-    const old = { title: "予測", url: "https://example.com", snippet: "" };
+  it("boosts current-year recency signals", () => {
+    const currentYear = new Date().getUTCFullYear();
+    const recent = { title: `${currentYear}年の予測`, url: "https://example.com", snippet: "" };
+    const old = { title: "2018年の予測", url: "https://example.com", snippet: "" };
     expect(scoreSearchResult(recent, "予測")).toBeGreaterThan(scoreSearchResult(old, "予測"));
+  });
+
+  it("does not grant authority points for trusted text in a path or query", () => {
+    const spoofed = {
+      title: "Title",
+      url: "https://example.com/reuters.com/story?source=nhk.or.jp",
+      snippet: "",
+    };
+    const plain = { title: "Title", url: "https://example.com/story", snippet: "" };
+    expect(scoreSearchResult(spoofed, "ニュース")).toBe(scoreSearchResult(plain, "ニュース"));
+  });
+
+  it("recognizes trusted subdomains by hostname suffix", () => {
+    const auth = { title: "Title", url: "https://news.example.nhk.or.jp/story", snippet: "" };
+    const plain = { title: "Title", url: "https://example.com/story", snippet: "" };
+    expect(scoreSearchResult(auth, "ニュース")).toBeGreaterThan(scoreSearchResult(plain, "ニュース"));
   });
 });
 
