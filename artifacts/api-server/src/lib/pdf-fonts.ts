@@ -138,7 +138,10 @@ export async function embedFontForText(
     if (bytes) {
       const fontkit = await getFontkitInstance();
       pdfDoc.registerFontkit(fontkit as never);
-      const regular = await pdfDoc.embedFont(bytes, { subset: true });
+      // pdf-lib's subsetter does not reliably preserve all CJK glyphs (e.g.
+      // katakana and some kanji may become boxes), so embed the full font.
+      // The resulting PDF is larger but readable across all viewers.
+      const regular = await pdfDoc.embedFont(bytes, { subset: false });
       // Most candidate sets only ship a regular face; reuse it for bold and rely on size contrast.
       return { regular, bold: regular };
     }
