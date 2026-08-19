@@ -316,6 +316,20 @@ export function ChatPage() {
     setAuditModelId(s.auditModelId);
   }), []);
 
+  // Safety net: if streaming gets stuck for too long, force-reset the input.
+  const STREAMING_TIMEOUT_MS = 5 * 60 * 1000;
+  useEffect(() => {
+    if (!isStreaming) return;
+    const timer = setTimeout(() => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setIsStreaming(false);
+      setSearchStatus(null);
+      setStreamError("応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。");
+    }, STREAMING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [isStreaming]);
+
   // Restore the last used model when opening an existing conversation
   useEffect(() => {
     if (isPrivate || !conversation || modelRestoredForConv === conversation.id) return;
@@ -427,43 +441,46 @@ export function ChatPage() {
       },
       async () => {
         setSearchStatus(null);
-        if (isPrivate) {
-          const now = new Date().toISOString();
-          const finalAssistantContent = stripArtifactBlocks(streamSnapshotRef.current.content);
-          setPrivateMessages((prev) => [
-            ...prev,
-            {
-              id: OPTIMISTIC_USER_ID - prev.length - 1,
-              conversationId: 0,
-              role: "user",
-              content: finalContent,
-              createdAt: now,
-            },
-            {
-              id: STREAMING_ASSISTANT_ID - prev.length - 1,
-              conversationId: 0,
-              role: "assistant",
-              content: finalAssistantContent,
-              sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
-              artifacts: streamSnapshotRef.current.artifacts.length > 0 ? streamSnapshotRef.current.artifacts : null,
-              assetIds: streamingFiles.length > 0 ? streamingFiles.map((f) => f.id) : null,
-              modelId: selectedModel,
-              auditContent: streamSnapshotRef.current.audit || null,
-              auditModelId: streamSnapshotRef.current.audit ? auditModel : null,
-              createdAt: now,
-            } as OpenaiMessage,
-          ]);
-        } else {
-          await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
+        try {
+          if (isPrivate) {
+            const now = new Date().toISOString();
+            const finalAssistantContent = stripArtifactBlocks(streamSnapshotRef.current.content);
+            setPrivateMessages((prev) => [
+              ...prev,
+              {
+                id: OPTIMISTIC_USER_ID - prev.length - 1,
+                conversationId: 0,
+                role: "user",
+                content: finalContent,
+                createdAt: now,
+              },
+              {
+                id: STREAMING_ASSISTANT_ID - prev.length - 1,
+                conversationId: 0,
+                role: "assistant",
+                content: finalAssistantContent,
+                sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
+                artifacts: streamSnapshotRef.current.artifacts.length > 0 ? streamSnapshotRef.current.artifacts : null,
+                assetIds: streamingFiles.length > 0 ? streamingFiles.map((f) => f.id) : null,
+                modelId: selectedModel,
+                auditContent: streamSnapshotRef.current.audit || null,
+                auditModelId: streamSnapshotRef.current.audit ? auditModel : null,
+                createdAt: now,
+              } as OpenaiMessage,
+            ]);
+          } else {
+            await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
+          }
+        } finally {
+          setIsStreaming(false);
+          setStreamingContent("");
+          setStreamingReasoning("");
+          setStreamingSources([]);
+          setStreamingArtifacts([]);
+          setStreamingFiles([]);
+          setStreamingAudit("");
+          setOptimisticUserMessage(null);
         }
-        setIsStreaming(false);
-        setStreamingContent("");
-        setStreamingReasoning("");
-        setStreamingSources([]);
-        setStreamingArtifacts([]);
-        setStreamingFiles([]);
-        setStreamingAudit("");
-        setOptimisticUserMessage(null);
       },
       (err) => {
         setIsStreaming(false);
