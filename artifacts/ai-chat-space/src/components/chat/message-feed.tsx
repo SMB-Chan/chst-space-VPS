@@ -3,7 +3,7 @@ import { OpenaiMessage } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 import { SourceCards } from "./source-cards";
-import { Loader2, Paperclip, Bot, Brain, ChevronDown } from "lucide-react";
+import { Loader2, Paperclip, Bot, Brain, ChevronDown, FileText, Download } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -18,9 +18,19 @@ export type StreamingPhase =
   | "revising"
   | null;
 
+export type ChatArtifact = {
+  id?: number;
+  filename: string;
+  mime: string;
+  size: number;
+  downloadUrl?: string;
+  content?: string;
+};
+
 type DisplayMessage = OpenaiMessage & {
   auditContent?: string | null;
   auditModelId?: string | null;
+  artifacts?: ChatArtifact[] | null;
 };
 
 type AttachmentChip = { kind: "image" | "file"; name: string };
@@ -58,6 +68,12 @@ function parseUserDisplay(content: string): { displayContent: string; attachment
     };
   }
   return { displayContent: content, attachments: [] };
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 interface MessageFeedProps {
@@ -137,6 +153,33 @@ function AuditCard({
           <Markdown content={content} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
+  return (
+    <div className="w-full grid gap-2">
+      {artifacts.map((artifact, index) => (
+        <a
+          key={artifact.id ?? `${artifact.filename}-${index}`}
+          href={artifact.downloadUrl}
+          download={artifact.filename}
+          className={cn(
+            "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
+            artifact.downloadUrl ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-70 pointer-events-none",
+          )}
+        >
+          <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <FileText className="w-4.5 h-4.5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium truncate">{artifact.filename}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{artifact.mime} ・ {formatBytes(artifact.size)}</div>
+          </div>
+          <Download className="w-4 h-4 text-muted-foreground shrink-0" />
+        </a>
+      ))}
     </div>
   );
 }
@@ -327,6 +370,10 @@ export function MessageFeed({
                   <div className="w-full px-1">
                     <SourceCards sources={sources} />
                   </div>
+                )}
+
+                {!isUser && display.artifacts && display.artifacts.length > 0 && (
+                  <ArtifactCards artifacts={display.artifacts} />
                 )}
 
                 {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (

@@ -1,473 +1,473 @@
-import { Router, type IRouter } from "express";
-import type OpenAI from "openai";
-import { db, conversations, messages } from "@workspace/db";
+import { Router, type Request, type Response } from "express";
+import { db } from "@workspace/db";
+import { conversations, messages, artifacts } from "@workspace/db/schema";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
+import { requireAuth, getUserId } from "../middleware";
 import {
-  getClientForModel,
   AVAILABLE_MODELS,
-  modelSupportsVision,
-  getModelLabel,
+  DEFAULT_MODEL,
+  VISION_MODEL_IDS,
   parseReasoningLevel,
-} from "../../lib/ai-clients";
-import {
-  CreateOpenaiConversationBody,
-  GetOpenaiConversationParams,
-  DeleteOpenaiConversationParams,
-  ListOpenaiMessagesParams,
-  SendOpenaiMessageParams,
-  SendOpenaiMessageBody,
-} from "@workspace/api-zod";
-import { logger } from "../../lib/logger";
-import { streamChatReply, type ChatContentPart } from "../../lib/chat-stream";
-import { normalizeConversationTitle } from "../../lib/conversation-title";
-import { publicAiError } from "../../lib/public-error";
-import { and, desc, eq } from "drizzle-orm";
-import { requireAuth } from "../../middlewares/requireAuth";
+  getClientForModel,
+} from "../lib/ai-clients";
+import { ensureChatSchema } from "../lib/ensure-schema";
+import { streamChatReply } from "../lib/chat-stream";
+import { logger } from "../lib/logger";
 
-function parseStoredSources(raw: string | null): unknown {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    logger.warn({ raw }, "Ignoring malformed message sources JSON");
-    return null;
+const router = Router();
+
+const IMAGE_DATA_URL_REGEX = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\r\n]+)$/i;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB base64-decoded limit
+const MAX_ARTIFACTS_PER_MESSAGE = 3;
+const MAX_USER_ARTIFACT_BYTES = 50 * 1024 * 1024;
+
+function publicAiError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = raw.toLowerCase();
+  if (message.includes("429") || message.includes("quota") || message.includes("rate limit")) {
+    return "AIの利用上限に達しました。しばらく待ってから再試行してください。";
   }
-}
-
-const router: IRouter = Router();
-
-// v1 envelope for multi-attachment user messages. The message body stays a
-// string in DB, but attachments/question are JSON so separators in file text
-// cannot break parsing.
-const ATTACHMENTS_V1_PREFIX = "CS_ATTACHMENTS_V1:";
-
-// Legacy single-image format:
-// "[Image: name]\n\n<data URL>\n\n---\n\nUser question: <question>"
-const IMAGE_MESSAGE_RE =
-  /^\[Image:\s([^\]]+)\]\n\n(data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=\s]+?)\n\n---\n\nUser question:\s([\s\S]*)$/;
-
-interface ParsedAttachment {
-  kind: "image" | "file";
-  name: string;
-  content: string;
-  isBase64: boolean;
-}
-
-interface ParsedUserContent {
-  text: string;
-  attachments: ParsedAttachment[];
-}
-
-function parseAttachmentsV1(content: string): ParsedUserContent | null {
-  if (!content.startsWith(ATTACHMENTS_V1_PREFIX)) return null;
-  try {
-    const parsed = JSON.parse(content.slice(ATTACHMENTS_V1_PREFIX.length)) as {
-      question?: unknown;
-      attachments?: unknown;
-    };
-    const text = typeof parsed.question === "string" ? parsed.question : "";
-    const raw = Array.isArray(parsed.attachments) ? parsed.attachments : [];
-    const attachments = raw.flatMap((item): ParsedAttachment[] => {
-      if (!item || typeof item !== "object") return [];
-      const rec = item as { kind?: unknown; type?: unknown; name?: unknown; content?: unknown; isBase64?: unknown };
-      if (typeof rec.name !== "string" || typeof rec.content !== "string") return [];
-      const isImage = rec.kind === "image" || rec.type === "image" || rec.isBase64 === true;
-      return [{
-        kind: isImage ? "image" : "file",
-        name: rec.name,
-        content: rec.content,
-        isBase64: isImage,
-      }];
-    });
-    return { text, attachments };
-  } catch (err) {
-    logger.warn({ err }, "Ignoring malformed attachments v1 payload");
-    return { text: content, attachments: [] };
+  if (message.includes("timeout") || message.includes("timed out")) {
+    return "AIの応答がタイムアウトしました。再試行してください。";
   }
-}
-
-function parseUserContent(content: string): ParsedUserContent {
-  const v1 = parseAttachmentsV1(content);
-  if (v1) return v1;
-  const m = content.match(IMAGE_MESSAGE_RE);
-  if (!m) return { text: content, attachments: [] };
-  return {
-    text: m[3],
-    attachments: [{ kind: "image", name: m[1], content: m[2].trim(), isBase64: true }],
-  };
-}
-
-// Convert a stored user message into the payload sent to the model.
-// Vision-capable models get structured content (text + image parts);
-// non-vision models get text with image placeholders so history containing
-// images does not break them. Text attachments are inlined for all models.
-function toModelContent(
-  content: string,
-  visionCapable: boolean
-): string | ChatContentPart[] {
-  const parsed = parseUserContent(content);
-  if (parsed.attachments.length === 0) return content;
-
-  const textBlocks: string[] = [parsed.text];
-  for (const attachment of parsed.attachments) {
-    if (attachment.kind === "image") {
-      if (!visionCapable) {
-        textBlocks.push(`[添付画像: ${attachment.name}（このモデルでは画像は読み取れません）]`);
-      }
-    } else {
-      textBlocks.push(`[添付ファイル: ${attachment.name}]\n${attachment.content}`);
-    }
+  if (
+    message.includes("api key") ||
+    message.includes("unauthorized") ||
+    message.includes("authentication")
+  ) {
+    return "AI APIキーが無効です。Secretsを確認してください。";
   }
-  const text = textBlocks.filter((block) => block.trim().length > 0).join("\n\n");
-
-  if (!visionCapable) return text;
-  const parts: ChatContentPart[] = [{ type: "text", text }];
-  for (const attachment of parsed.attachments) {
-    if (attachment.kind === "image") {
-      parts.push({ type: "image_url", image_url: { url: attachment.content } });
-    }
-  }
-  return parts;
+  return "AIの応答中にエラーが発生しました。";
 }
 
-// List available models (no auth required — static metadata)
-router.get("/openai/models", async (_req, res): Promise<void> => {
+function extractImageDataUrl(content: string): { text: string; imageUrl?: string } {
+  const match = content.match(IMAGE_DATA_URL_REGEX);
+  if (!match) return { text: content };
+  const text = content.replace(IMAGE_DATA_URL_REGEX, "").trim();
+  return { text, imageUrl: match[0] };
+}
+
+function contentDisposition(filename: string): string {
+  const fallback = filename.replace(/[^a-zA-Z0-9._-]+/g, "_") || "artifact.txt";
+  const encoded = encodeURIComponent(filename).replace(/'/g, "%27");
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+router.use("/openai/artifacts", requireAuth);
+
+router.get("/openai/models", (_req, res) => {
   res.json(AVAILABLE_MODELS);
 });
 
-// All conversation/message routes require a signed-in user
-router.use("/openai/conversations", requireAuth);
-router.use("/openai/ephemeral", requireAuth);
-
-// Wipe every conversation owned by the current user
-router.delete("/openai/conversations", async (req, res): Promise<void> => {
-  await db.delete(conversations).where(eq(conversations.userId, req.userId!));
-  res.sendStatus(204);
-});
-
-// List all conversations owned by the current user
-router.get("/openai/conversations", async (req, res): Promise<void> => {
-  const rows = await db
-    .select()
-    .from(conversations)
-    .where(eq(conversations.userId, req.userId!))
-    .orderBy(desc(conversations.createdAt));
-  res.json(rows);
-});
-
-// Create a conversation
-router.post("/openai/conversations", async (req, res): Promise<void> => {
-  const parsed = CreateOpenaiConversationBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const artifactId = Number.parseInt(req.params.artifactId ?? "", 10);
+  if (!Number.isFinite(artifactId)) {
+    res.status(400).json({ error: "Invalid artifact id" });
     return;
   }
-  const title = normalizeConversationTitle(parsed.data.title);
-  if (!title) {
-    res.status(400).json({ error: "タイトルを入力してください。" });
-    return;
-  }
-  const [conv] = await db
-    .insert(conversations)
-    .values({ title, userId: req.userId! })
-    .returning();
-  res.status(201).json(conv);
-});
-
-// Get conversation with messages
-router.get("/openai/conversations/:id", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = GetOpenaiConversationParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [conv] = await db
-    .select()
-    .from(conversations)
-    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)));
-  if (!conv) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  const msgs = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, params.data.id))
-    .orderBy(messages.createdAt);
-  const parsedMsgs = msgs.map((m) => ({
-    ...m,
-    sources: parseStoredSources(m.sources),
-  }));
-  res.json({ ...conv, messages: parsedMsgs });
-});
-
-// Rename conversation
-router.patch("/openai/conversations/:id", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = DeleteOpenaiConversationParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const rawTitle = typeof req.body?.title === "string" ? req.body.title : "";
-  const title = normalizeConversationTitle(rawTitle);
-  if (!title) {
-    res.status(400).json({ error: "タイトルを入力してください。" });
-    return;
-  }
-  const [updated] = await db
-    .update(conversations)
-    .set({ title })
-    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)))
-    .returning();
-  if (!updated) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  res.json(updated);
-});
-
-// Delete conversation
-router.delete("/openai/conversations/:id", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = DeleteOpenaiConversationParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [deleted] = await db
-    .delete(conversations)
-    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)))
-    .returning();
-  if (!deleted) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  res.sendStatus(204);
-});
-
-// List messages in a conversation
-router.get("/openai/conversations/:id/messages", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = ListOpenaiMessagesParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const [owned] = await db
-    .select()
-    .from(conversations)
-    .where(and(eq(conversations.id, params.data.id), eq(conversations.userId, req.userId!)));
-  if (!owned) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-  const msgs = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, params.data.id))
-    .orderBy(messages.createdAt);
-  const parsedMsgs = msgs.map((m) => ({
-    ...m,
-    sources: parseStoredSources(m.sources),
-  }));
-  res.json(parsedMsgs);
-});
-
-// Send message — streaming SSE response
-// Accepts optional ?model= query param to select the AI model
-router.post("/openai/conversations/:id/messages", async (req, res): Promise<void> => {
-  const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const params = SendOpenaiMessageParams.safeParse({ id: rawId });
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-  const body = SendOpenaiMessageBody.safeParse(req.body);
-  if (!body.success) {
-    res.status(400).json({ error: body.error.message });
-    return;
-  }
-
-  const conversationId = params.data.id;
-  const userContent = body.data.content;
-  const MAX_CONTENT_CHARS = 20 * 1024 * 1024;
-  if (userContent.length > MAX_CONTENT_CHARS) {
-    res.status(413).json({ error: "メッセージが大きすぎます。添付は合計20MB以下にしてください。" });
-    return;
-  }
-  const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
-  const reasoningLevel = parseReasoningLevel(req.query.reasoning);
-  const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
-  const auditModelId =
-    typeof req.query.auditModel === "string" && req.query.auditModel !== modelId
-      ? req.query.auditModel
-      : undefined;
-
-  // Resolve client for the requested model
-  let aiClient: ReturnType<typeof getClientForModel>;
   try {
-    aiClient = getClientForModel(modelId);
+    await ensureChatSchema();
+    const [artifact] = await db
+      .select()
+      .from(artifacts)
+      .where(and(eq(artifacts.id, artifactId), eq(artifacts.userId, userId)))
+      .limit(1);
+    if (!artifact) {
+      res.status(404).json({ error: "ファイルが見つかりません" });
+      return;
+    }
+    res.setHeader("Content-Type", artifact.mime);
+    res.setHeader("Content-Length", String(artifact.size));
+    res.setHeader("Content-Disposition", contentDisposition(artifact.filename));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(artifact.content);
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
-    return;
+    logger.error({ err, artifactId }, "Failed to download artifact");
+    res.status(500).json({ error: "ファイルの取得に失敗しました" });
   }
+});
 
-  // Reject image attachments up front when the selected model cannot see them
-  const visionCapable = modelSupportsVision(modelId);
-  const parsedNewMessage = parseUserContent(userContent);
-  if (parsedNewMessage.attachments.some((a) => a.kind === "image") && !visionCapable) {
-    res.status(400).json({
-      error: `${getModelLabel(modelId)} は画像を読み取れません。画像を送る場合は GPT-5.6 Terra / Luna、o4-mini、または Qwen のモデルを選択してください。`,
-    });
-    return;
-  }
-
-  // Ensure conversation exists and belongs to the current user
-  const [conv] = await db
-    .select()
-    .from(conversations)
-    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, req.userId!)));
-  if (!conv) {
-    res.status(404).json({ error: "Conversation not found" });
-    return;
-  }
-
+router.get("/openai/conversations", requireAuth, async (req, res) => {
   try {
-    await db.insert(messages).values({
-      conversationId,
-      role: "user",
-      content: userContent,
-    });
+    const userId = getUserId(req);
+    await ensureChatSchema();
+    const result = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.userId, userId))
+      .orderBy(conversations.createdAt);
+    res.json(result);
   } catch (err) {
-    logger.error({ err, conversationId }, "Failed to save user message");
-    res.status(500).json({ error: publicAiError(err) });
-    return;
-  }
-
-  // Load full history for context
-  const history = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.conversationId, conversationId))
-    .orderBy(messages.createdAt);
-
-  // User messages may contain attachments. For vision-capable models, convert
-  // images to structured multimodal content; assistant/system messages stay plain strings.
-  const chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
-    history.map((m) =>
-      m.role === "user"
-        ? { role: "user" as const, content: toModelContent(m.content, visionCapable) }
-        : {
-            role: m.role as "assistant" | "system",
-            content: m.content,
-          }
+    req.log.error({ err }, "Failed to list conversations");
+    res.status(500).json({ error: "Failed to list conversations" }
     );
-
-  await streamChatReply({
-    req,
-    res,
-    client: aiClient.client,
-    provider: aiClient.provider,
-    modelId,
-    reasoningLevel,
-    auditReasoningLevel,
-    userText: parsedNewMessage.text,
-    chatMessages,
-    auditModelId,
-    publicAiError,
-    onComplete: async ({ content, sources, audit }) => {
-      await db.insert(messages).values({
-        conversationId,
-        role: "assistant",
-        content,
-        modelId,
-        sources: sources.length > 0 ? JSON.stringify(sources) : null,
-        auditContent: audit?.content ?? null,
-        auditModelId: audit?.modelId ?? null,
-      });
-    },
-  });
+  }
 });
 
-const MAX_CONTENT_CHARS = 20 * 1024 * 1024;
-const MAX_EPHEMERAL_HISTORY = 40;
-
-// Private session: stream a reply without writing to the database.
-router.post("/openai/ephemeral/messages", async (req, res): Promise<void> => {
-  const body = SendOpenaiMessageBody.safeParse(req.body);
-  if (!body.success) {
-    res.status(400).json({ error: body.error.message });
-    return;
-  }
-  const userContent = body.data.content;
-  if (userContent.length > MAX_CONTENT_CHARS) {
-    res.status(413).json({ error: "メッセージが大きすぎます。添付は合計20MB以下にしてください。" });
-    return;
-  }
-
-  const modelId = typeof req.query.model === "string" ? req.query.model : "gpt-5.6-terra";
-  const reasoningLevel = parseReasoningLevel(req.query.reasoning);
-  const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
-  const auditModelId =
-    typeof req.query.auditModel === "string" && req.query.auditModel !== modelId
-      ? req.query.auditModel
-      : undefined;
-
-  let aiClient: ReturnType<typeof getClientForModel>;
+router.get("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
   try {
-    aiClient = getClientForModel(modelId);
+    const userId = getUserId(req);
+    const conversationId = parseInt(req.params.conversationId ?? "", 10);
+    if (isNaN(conversationId)) {
+      res.status(400).json({ error: "Invalid conversation ID" });
+      return;
+    }
+    await ensureChatSchema();
+    const [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .limit(1);
+    if (!conversation) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    const messagesResult = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversation.id))
+      .orderBy(asc(messages.createdAt), asc(messages.id));
+    const artifactRows = await db
+      .select({
+        id: artifacts.id,
+        messageId: artifacts.messageId,
+        filename: artifacts.filename,
+        mime: artifacts.mime,
+        size: artifacts.size,
+      })
+      .from(artifacts)
+      .where(and(eq(artifacts.conversationId, conversation.id), eq(artifacts.userId, userId)))
+      .orderBy(asc(artifacts.id));
+    res.json({
+      ...conversation,
+      messages: messagesResult.map((message) => ({
+        ...message,
+        artifacts: artifactRows
+          .filter((artifact) => artifact.messageId === message.id)
+          .map(({ messageId: _messageId, ...artifact }) => ({
+            ...artifact,
+            downloadUrl: `/api/openai/artifacts/${artifact.id}`,
+          })),
+      })),
+    });
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    req.log.error({ err }, "Failed to get conversation");
+    res.status(500).json({ error: "Failed to get conversation" });
+  }
+});
+
+const createConversationBody = z.object({ title: z.string().min(1).max(200) });
+
+router.post("/openai/conversations", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const parsed = createConversationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+    await ensureChatSchema();
+    const [conversation] = await db
+      .insert(conversations)
+      .values({ userId, title: parsed.data.title })
+      .returning();
+    res.json(conversation);
+  } catch (err) {
+    req.log.error({ err }, "Failed to create conversation");
+    res.status(500).json({ error: "Failed to create conversation" });
+  }
+});
+
+router.delete("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const conversationId = parseInt(req.params.conversationId ?? "", 10);
+    if (isNaN(conversationId)) {
+      res.status(400).json({ error: "Invalid conversation ID" });
+      return;
+    }
+    await ensureChatSchema();
+    const [deleted] = await db
+      .delete(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .returning({ id: conversations.id });
+    if (!deleted) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete conversation");
+    res.status(500).json({ error: "Failed to delete conversation" });
+  }
+});
+
+const sendMessageBody = z.object({
+  content: z.string().min(1).max(100_000),
+  modelId: z.string().optional(),
+});
+
+router.post("/openai/conversations/:conversationId/messages", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const conversationId = parseInt(req.params.conversationId ?? "", 10);
+  if (isNaN(conversationId)) {
+    res.status(400).json({ error: "Invalid conversation ID" });
     return;
   }
 
-  const visionCapable = modelSupportsVision(modelId);
-  const parsedNewMessage = parseUserContent(userContent);
-  if (parsedNewMessage.attachments.some((a) => a.kind === "image") && !visionCapable) {
-    res.status(400).json({
-      error: `${getModelLabel(modelId)} は画像を読み取れません。画像を送る場合は GPT-5.6 Terra / Luna、o4-mini、または Qwen のモデルを選択してください。`,
-    });
+  const parsed = sendMessageBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
     return;
   }
 
-  const rawHistory = Array.isArray((req.body as { history?: unknown }).history)
-    ? ((req.body as { history: unknown[] }).history)
-    : [];
-  const prior = rawHistory
-    .slice(-MAX_EPHEMERAL_HISTORY)
-    .flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const rec = item as { role?: unknown; content?: unknown };
-      if ((rec.role !== "user" && rec.role !== "assistant") || typeof rec.content !== "string") {
-        return [];
+  try {
+    await ensureChatSchema();
+    const [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .limit(1);
+    if (!conversation) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+
+    const { text: newMessageText, imageUrl: newImageUrl } = extractImageDataUrl(parsed.data.content);
+    const modelId = parsed.data.modelId || DEFAULT_MODEL;
+    const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+    const auditModelQuery = typeof req.query.auditModel === "string" ? req.query.auditModel : "";
+    const auditModelId =
+      auditModelQuery && auditModelQuery !== modelId && AVAILABLE_MODELS.some((m) => m.id === auditModelQuery)
+        ? auditModelQuery
+        : undefined;
+    const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
+
+    const modelDef = AVAILABLE_MODELS.find((m) => m.id === modelId);
+    if (newImageUrl && modelDef && !VISION_MODEL_IDS.has(modelDef.id)) {
+      res.status(400).json({
+        error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
+      });
+      return;
+    }
+
+    if (newImageUrl) {
+      const approxBytes = Math.floor(newImageUrl.length * 0.75);
+      if (approxBytes > MAX_IMAGE_BYTES) {
+        res.status(413).json({ error: "画像が大きすぎます。10MB以下にしてください。" });
+        return;
       }
-      return [{ role: rec.role, content: rec.content }];
+    }
+
+    const history = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(asc(messages.createdAt), asc(messages.id));
+
+    const chatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
+    for (const msg of history) {
+      const { text: msgText, imageUrl: msgImageUrl } = extractImageDataUrl(msg.content);
+      if (msgImageUrl && msg.role === "user") {
+        chatMessages.push({
+          role: "user",
+          content: [
+            { type: "text", text: msgText || "（画像）" },
+            { type: "image_url", image_url: { url: msgImageUrl } },
+          ],
+        });
+      } else {
+        chatMessages.push({ role: msg.role as "user" | "assistant", content: msgText });
+      }
+    }
+    if (newImageUrl) {
+      chatMessages.push({
+        role: "user",
+        content: [
+          { type: "text", text: newMessageText || "この画像について説明してください。" },
+          { type: "image_url", image_url: { url: newImageUrl } },
+        ],
+      });
+    } else {
+      chatMessages.push({ role: "user", content: newMessageText });
+    }
+
+    const { client, provider } = getClientForModel(modelId);
+
+    await streamChatReply({
+      req,
+      res,
+      client,
+      provider,
+      modelId,
+      reasoningLevel,
+      auditReasoningLevel,
+      userText: newMessageText,
+      chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
+      auditModelId,
+      publicAiError,
+      onComplete: async ({ content, sources, audit, artifacts: extractedArtifacts }) => {
+        const messageInserts: (typeof messages.$inferInsert)[] = [
+          { conversationId, role: "user", content: parsed.data.content },
+          {
+            conversationId,
+            role: "assistant",
+            content,
+            modelId,
+            sources: sources.length ? sources : undefined,
+            auditContent: audit?.content,
+            auditModelId: audit?.modelId,
+          },
+        ];
+        const inserted = await db.insert(messages).values(messageInserts).returning();
+        const assistantMessage = inserted.find((m) => m.role === "assistant");
+        if (!extractedArtifacts?.length || !assistantMessage) return;
+
+        const existing = await db
+          .select({ size: artifacts.size })
+          .from(artifacts)
+          .where(eq(artifacts.userId, userId));
+        let usedBytes = existing.reduce((sum, row) => sum + row.size, 0);
+        const savedArtifacts: { id: number; filename: string; mime: string; size: number }[] = [];
+        for (const artifact of extractedArtifacts.slice(0, MAX_ARTIFACTS_PER_MESSAGE)) {
+          if (usedBytes + artifact.size > MAX_USER_ARTIFACT_BYTES) {
+            logger.warn({ userId, usedBytes, size: artifact.size }, "Skipping artifact beyond user quota");
+            continue;
+          }
+          const [row] = await db
+            .insert(artifacts)
+            .values({
+              conversationId,
+              messageId: assistantMessage.id,
+              userId,
+              filename: artifact.filename,
+              mime: artifact.mime,
+              size: artifact.size,
+              content: artifact.content,
+            })
+            .returning({
+              id: artifacts.id,
+              filename: artifacts.filename,
+              mime: artifacts.mime,
+              size: artifacts.size,
+            });
+          if (row) {
+            savedArtifacts.push(row);
+            usedBytes += row.size;
+          }
+        }
+        return { artifacts: savedArtifacts };
+      },
     });
+  } catch (err) {
+    logger.error({ err }, "Failed to send message");
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to send message" });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  }
+});
 
-  const chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    ...prior.map((m) =>
-      m.role === "user"
-        ? { role: "user" as const, content: toModelContent(m.content, visionCapable) }
-        : { role: "assistant" as const, content: m.content },
-    ),
-    { role: "user", content: toModelContent(userContent, visionCapable) },
-  ];
+router.delete("/openai/messages", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const parsed = z.object({ ids: z.array(z.number().int()).min(1).max(200) }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+    await ensureChatSchema();
+    const owned = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(and(inArray(messages.id, parsed.data.ids), eq(conversations.userId, userId)));
+    const ownedIds = owned.map((m) => m.id);
+    if (ownedIds.length === 0) {
+      res.status(404).json({ error: "Messages not found" });
+      return;
+    }
+    await db.delete(messages).where(inArray(messages.id, ownedIds));
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete messages");
+    res.status(500).json({ error: "Failed to delete messages" });
+  }
+});
 
-  await streamChatReply({
-    req,
-    res,
-    client: aiClient.client,
-    provider: aiClient.provider,
-    modelId,
-    reasoningLevel,
-    auditReasoningLevel,
-    userText: parsedNewMessage.text,
-    chatMessages,
-    auditModelId,
-    publicAiError,
-  });
+router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
+  const parsed = sendMessageBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  try {
+    const { text: newMessageText, imageUrl: newImageUrl } = extractImageDataUrl(parsed.data.content);
+    const modelId = parsed.data.modelId || DEFAULT_MODEL;
+    const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+    const auditModelQuery = typeof req.query.auditModel === "string" ? req.query.auditModel : "";
+    const auditModelId =
+      auditModelQuery && auditModelQuery !== modelId && AVAILABLE_MODELS.some((m) => m.id === auditModelQuery)
+        ? auditModelQuery
+        : undefined;
+    const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
+
+    const modelDef = AVAILABLE_MODELS.find((m) => m.id === modelId);
+    if (newImageUrl && modelDef && !VISION_MODEL_IDS.has(modelDef.id)) {
+      res.status(400).json({
+        error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
+      });
+      return;
+    }
+
+    if (newImageUrl) {
+      const approxBytes = Math.floor(newImageUrl.length * 0.75);
+      if (approxBytes > MAX_IMAGE_BYTES) {
+        res.status(413).json({ error: "画像が大きすぎます。10MB以下にしてください。" });
+        return;
+      }
+    }
+
+    const chatMessages: { role: "user"; content: unknown }[] = [];
+    if (newImageUrl) {
+      chatMessages.push({
+        role: "user",
+        content: [
+          { type: "text", text: newMessageText || "この画像について説明してください。" },
+          { type: "image_url", image_url: { url: newImageUrl } },
+        ],
+      });
+    } else {
+      chatMessages.push({ role: "user", content: newMessageText });
+    }
+
+    const { client, provider } = getClientForModel(modelId);
+    await streamChatReply({
+      req,
+      res,
+      client,
+      provider,
+      modelId,
+      reasoningLevel,
+      auditReasoningLevel,
+      userText: newMessageText,
+      chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
+      auditModelId,
+      includeArtifactContent: true,
+      publicAiError,
+    });
+  } catch (err) {
+    logger.error({ err }, "Failed to send ephemeral message");
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to send message" });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  }
 });
 
 export default router;

@@ -26,6 +26,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /openai/artifacts/{id}:
+    get:
+      operationId: downloadOpenaiArtifact
+      tags: [openai]
+      summary: Download a generated artifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Artifact file
+          content:
+            text/plain: {}
+            text/markdown: {}
+            text/csv: {}
+            application/json: {}
+            text/html: {}
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
   /openai/conversations:
     get:
       operationId: listOpenaiConversations
@@ -209,6 +235,25 @@ components:
       required:
         - title
         - url
+    OpenaiArtifact:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+        downloadUrl:
+          type: string
+      required:
+        - id
+        - filename
+        - mime
+        - size
+        - downloadUrl
     OpenaiMessage:
       type: object
       properties:
@@ -227,6 +272,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OpenaiSource'
+          nullable: true
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenaiArtifact'
+          nullable: true
+        auditContent:
+          type: string
+          nullable: true
+        auditModelId:
+          type: string
           nullable: true
         createdAt:
           type: string

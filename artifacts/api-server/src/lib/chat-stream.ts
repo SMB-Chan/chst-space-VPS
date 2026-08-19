@@ -22,11 +22,38 @@ import {
 } from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
+import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
 import { logger } from "./logger";
 
 export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
+
+export interface ArtifactSsePayload {
+  id?: number;
+  filename: string;
+  mime: string;
+  size: number;
+  downloadUrl?: string;
+  content?: string;
+}
+
+const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファイル（Markdown / text / CSV / JSON / HTML）を求めた場合だけ、回答とは別に次の fenced block でファイル内容を出してください。
+
+形式:
+\`\`\`artifact filename="example.md" mime="text/markdown"
+ファイル本文
+\`\`\`
+
+規則:
+- 対応するのは md / txt / csv / json / html のみ。PDF・Officeバイナリはこの形式で出さない。
+- artifact block は最大3件、各2MBまで。
+- artifact block の内容はユーザーに見せる本文ではなく、ダウンロードファイルとして保存される。
+- 通常の回答本文には artifact block を残さず、何を作ったかだけ短く書く。`;
+
+function wantsArtifact(userText: string): boolean {
+  return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html|pdf|excel|word|powerpoint)/i.test(userText);
+}
 
 export async function streamChatReply(args: {
   req?: unknown;
@@ -39,11 +66,13 @@ export async function streamChatReply(args: {
   userText: string;
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   auditModelId?: string;
+  includeArtifactContent?: boolean;
   onComplete?: (result: {
     content: string;
     sources: { title: string; url: string }[];
     audit?: { content: string; modelId: string };
-  }) => Promise<void>;
+    artifacts?: ExtractedArtifact[];
+  }) => Promise<{ artifacts?: { id: number; filename: string; mime: string; size: number }[] } | void>;
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
   const {
@@ -56,6 +85,7 @@ export async function streamChatReply(args: {
     userText,
     chatMessages,
     auditModelId,
+    includeArtifactContent = false,
     onComplete,
     publicAiError,
   } = args;
@@ -74,6 +104,10 @@ export async function streamChatReply(args: {
 
   let fullResponse = "";
   try {
+    if (wantsArtifact(userText)) {
+      chatMessages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
+    }
+
     const skills = matchSkills(userText);
     if (skills.length > 0 && !clientGone) {
       res.write(
@@ -248,9 +282,37 @@ export async function streamChatReply(args: {
         }
       }
 
-      if (onComplete) {
-        await onComplete({ content: fullResponse, sources: webContext.sources, audit });
+      const extracted = extractArtifacts(fullResponse);
+      if (extracted.artifacts.length > 0) {
+        fullResponse = extracted.content;
       }
+
+      const completion = onComplete
+        ? await onComplete({
+            content: fullResponse,
+            sources: webContext.sources,
+            audit,
+            artifacts: extracted.artifacts,
+          })
+        : undefined;
+
+      if (extracted.artifacts.length > 0 && !clientGone) {
+        const saved = completion?.artifacts ?? [];
+        const payload: ArtifactSsePayload[] = extracted.artifacts.map((artifact, index) => {
+          const persisted = saved[index];
+          const base: ArtifactSsePayload = {
+            id: persisted?.id,
+            filename: persisted?.filename ?? artifact.filename,
+            mime: persisted?.mime ?? artifact.mime,
+            size: persisted?.size ?? artifact.size,
+            downloadUrl: persisted ? `/api/openai/artifacts/${persisted.id}` : undefined,
+          };
+          if (includeArtifactContent) base.content = artifact.content;
+          return base;
+        });
+        res.write(`data: ${JSON.stringify({ artifacts: payload })}\n\n`);
+      }
+
       if (!clientGone) {
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       }
