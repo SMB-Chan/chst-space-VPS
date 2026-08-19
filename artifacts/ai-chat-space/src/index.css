@@ -191,6 +191,11 @@
     @apply bg-card/80 backdrop-blur-md border border-card-border;
   }
 
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
   /* Custom scrollbar for webkit */
   ::-webkit-scrollbar {
     width: 6px;

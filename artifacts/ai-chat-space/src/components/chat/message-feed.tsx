@@ -3,6 +3,7 @@ import { OpenaiMessage, getGetOpenaiAssetUrl } from "@workspace/api-client-react
 import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
+import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
 import { Loader2, Paperclip, Bot, Brain, ChevronDown, FileText, Download } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
@@ -388,6 +389,14 @@ export function MessageFeed({
                   displayContent &&
                   (streamingPhase === "generating" || streamingPhase === "revising") && (
                   <GenerationBadge phase={streamingPhase} />
+                )}
+
+                {!isUser &&
+                  message.id === STREAMING_ASSISTANT_ID &&
+                  (streamingPhase === "generating-file" ||
+                    streamingPhase === "reviewing-layout" ||
+                    streamingPhase === "revising-layout") && (
+                  <FileGenerationPanel phase={streamingPhase as FileGenerationPhase} />
                 )}
 
                 {!isUser && sources && sources.length > 0 && (
