@@ -23,3 +23,7 @@ timeoutMs = 20000
 
 [userenv.shared]
 DASHSCOPE_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+
+[nix]
+channel = "stable-25_05"
+packages = ["libreoffice", "ipaexfont"]

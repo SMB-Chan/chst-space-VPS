@@ -1,6 +1,14 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, beforeAll } from "vitest";
 import { renderFile, type FileFormat } from "./file-generation";
-import { arePreviewToolsAvailable, previewGeneratedFile } from "./file-preview";
+import {
+  arePreviewToolsAvailable,
+  getPreviewToolStatus,
+  previewGeneratedFile,
+  renderPdfToImages,
+} from "./file-preview";
 
 const SAMPLE_FILE_DATA = {
   title: "Preview Test",
@@ -42,6 +50,27 @@ describe("file-preview", () => {
   it("reports preview tool availability", async () => {
     const available = await arePreviewToolsAvailable();
     expect(typeof available).toBe("boolean");
+    const status = await getPreviewToolStatus();
+    expect(status.available).toBe(status.libreoffice && status.pdftocairo);
+  });
+
+  it("preserves external command diagnostics for an invalid PDF", async () => {
+    const status = await getPreviewToolStatus();
+    if (!status.pdftocairo) return;
+
+    const workDir = await mkdtemp(join(tmpdir(), "preview-command-error-"));
+    try {
+      await expect(
+        renderPdfToImages(Buffer.from("not a pdf"), workDir, { maxPages: 1 }),
+      ).rejects.toMatchObject({
+        name: "ExternalCommandError",
+        command: "pdftocairo",
+        exitCode: expect.any(Number),
+        stderr: expect.any(String),
+      });
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
   });
 
   for (const format of ["pdf", "docx", "xlsx", "pptx"] as FileFormat[]) {
@@ -65,6 +94,6 @@ describe("file-preview", () => {
         expect(image[2]).toBe(0x4e);
         expect(image[3]).toBe(0x47);
       }
-    });
+    }, 20_000);
   }
 });

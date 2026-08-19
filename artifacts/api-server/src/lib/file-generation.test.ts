@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   detectFileFormat,
   generateFilename,
+  inspectFileData,
   parseFileData,
   renderFile,
   type FileFormat,
@@ -82,6 +83,29 @@ describe("parseFileData", () => {
   it("returns null for invalid JSON", () => {
     expect(parseFileData("<file_data>not json</file_data>")).toBeNull();
   });
+
+  it("reports safe parse statuses without exposing model output", () => {
+    expect(inspectFileData("no block here").status).toBe("missing-file-data");
+    expect(inspectFileData("<file_data>not json</file_data>").status).toBe(
+      "invalid-json",
+    );
+    expect(inspectFileData("<file_data>[]</file_data>").status).toBe(
+      "invalid-shape",
+    );
+  });
+
+  it("ignores malformed fields while preserving usable content", () => {
+    const inspected = inspectFileData(
+      wrapFileData({
+        title: { unexpected: true },
+        content: "# Valid content",
+        sheets: "not-an-array",
+      }),
+    );
+    expect(inspected.status).toBe("parsed");
+    expect(inspected.data).toEqual({ content: "# Valid content" });
+    expect(inspected.ignoredFields).toEqual(["title", "sheets"]);
+  });
 });
 
 describe("renderFile", () => {
@@ -136,6 +160,24 @@ describe("renderFile", () => {
   it("falls back gracefully when file data is missing", async () => {
     const file = await renderFile("pdf", "Plain text without file_data block");
     expect(file.buffer.length).toBeGreaterThan(100);
+  });
+
+  it("renders safely when structured fields have malformed nested values", async () => {
+    const file = await renderFile(
+      "xlsx",
+      wrapFileData({
+        title: 42,
+        sheets: [
+          {
+            name: { invalid: true },
+            headers: ["Valid", { invalid: true }],
+            rows: [["value", { invalid: true }], "not-a-row"],
+          },
+        ],
+      }),
+    );
+    expect(file.buffer.length).toBeGreaterThan(100);
+    expect(file.filename).toMatch(/\.xlsx$/);
   });
 
   it("preserves previous data when the new output is incomplete", async () => {

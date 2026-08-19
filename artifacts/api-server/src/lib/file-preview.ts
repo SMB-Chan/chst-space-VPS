@@ -4,13 +4,53 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { logger } from "./logger";
 import type { FileFormat, GeneratedFile } from "./file-generation";
+import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 
 export interface PreviewOptions {
   /** Maximum number of pages/slides to render. */
   maxPages?: number;
+  diagnosticContext?: {
+    requestId?: string;
+    conversationId?: number;
+    attempt?: number;
+    iteration?: number;
+  };
 }
 
-let cachedToolsAvailable: boolean | null = null;
+export interface PreviewToolStatus {
+  libreoffice: boolean;
+  pdftocairo: boolean;
+  available: boolean;
+}
+
+export class ExternalCommandError extends Error {
+  readonly command: string;
+  readonly commandArgs: string[];
+  readonly exitCode: number | null;
+  readonly stderr: string;
+
+  constructor(args: {
+    command: string;
+    commandArgs: string[];
+    exitCode: number | null;
+    stderr?: string;
+    cause?: unknown;
+  }) {
+    const stderr = (args.stderr?.trim() || "(no stderr)").slice(0, 8_000);
+    const exitDescription =
+      args.exitCode === null ? "failed to start" : `exited with ${args.exitCode}`;
+    super(`${args.command} ${exitDescription}: ${stderr}`, {
+      cause: args.cause,
+    });
+    this.name = "ExternalCommandError";
+    this.command = args.command;
+    this.commandArgs = [...args.commandArgs];
+    this.exitCode = args.exitCode;
+    this.stderr = stderr;
+  }
+}
+
+let cachedToolStatus: PreviewToolStatus | null = null;
 
 function runCommand(command: string, args: string[], cwd?: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -25,14 +65,29 @@ function runCommand(command: string, args: string[], cwd?: string): Promise<void
     });
 
     proc.on("error", (err) => {
-      reject(new Error(`Failed to spawn ${command}: ${err.message}`));
+      reject(
+        new ExternalCommandError({
+          command,
+          commandArgs: args,
+          exitCode: null,
+          stderr: err.message,
+          cause: err,
+        }),
+      );
     });
 
     proc.on("close", (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`${command} exited with ${code}: ${stderr.trim() || "(no stderr)"}`));
+        reject(
+          new ExternalCommandError({
+            command,
+            commandArgs: args,
+            exitCode: code,
+            stderr,
+          }),
+        );
       }
     });
   });
@@ -51,16 +106,31 @@ async function commandExists(command: string): Promise<boolean> {
  * The result is cached after the first call.
  */
 export async function arePreviewToolsAvailable(): Promise<boolean> {
-  if (cachedToolsAvailable != null) return cachedToolsAvailable;
+  return (await getPreviewToolStatus()).available;
+}
+
+export async function getPreviewToolStatus(): Promise<PreviewToolStatus> {
+  if (cachedToolStatus) return cachedToolStatus;
   const [libreoffice, pdftocairo] = await Promise.all([
     commandExists("libreoffice"),
     commandExists("pdftocairo"),
   ]);
-  cachedToolsAvailable = libreoffice && pdftocairo;
-  if (!cachedToolsAvailable) {
-    logger.warn("Preview tools missing: libreoffice and/or pdftocairo not found");
+  cachedToolStatus = {
+    libreoffice,
+    pdftocairo,
+    available: libreoffice && pdftocairo,
+  };
+  if (!cachedToolStatus.available) {
+    logger.warn(
+      {
+        stage: "layout-preview-prerequisites",
+        libreoffice,
+        pdftocairo,
+      },
+      "File layout preview prerequisites are unavailable",
+    );
   }
-  return cachedToolsAvailable;
+  return cachedToolStatus;
 }
 
 export async function convertToPdf(
@@ -132,9 +202,63 @@ export async function previewGeneratedFile(
   options?: PreviewOptions,
 ): Promise<Buffer[]> {
   const workDir = await mkdtemp(join(tmpdir(), "chat-preview-"));
+  let stage =
+    file.format === "pdf"
+      ? "layout-preview-pdf-render"
+      : "layout-preview-office-conversion";
+  let stageStartedAt = Date.now();
+  const diagnosticContext = {
+    ...options?.diagnosticContext,
+    fileFormat: file.format,
+  };
   try {
-    const pdf = await convertToPdf(file.format, file.buffer, workDir);
-    return await renderPdfToImages(pdf, workDir, options);
+    let pdf: Buffer;
+    if (file.format === "pdf") {
+      pdf = file.buffer;
+    } else {
+      logger.info(
+        { ...diagnosticContext, stage },
+        "File layout preview Office conversion started",
+      );
+      pdf = await convertToPdf(file.format, file.buffer, workDir);
+      logger.info(
+        {
+          ...diagnosticContext,
+          stage,
+          elapsedMs: elapsedMs(stageStartedAt),
+        },
+        "File layout preview Office conversion completed",
+      );
+    }
+
+    stage = "layout-preview-pdf-render";
+    stageStartedAt = Date.now();
+    logger.info(
+      { ...diagnosticContext, stage },
+      "File layout preview PDF rendering started",
+    );
+    const images = await renderPdfToImages(pdf, workDir, options);
+    logger.info(
+      {
+        ...diagnosticContext,
+        stage,
+        elapsedMs: elapsedMs(stageStartedAt),
+        imageCount: images.length,
+      },
+      "File layout preview PDF rendering completed",
+    );
+    return images;
+  } catch (error) {
+    logger.warn(
+      {
+        ...diagnosticContext,
+        stage,
+        elapsedMs: elapsedMs(stageStartedAt),
+        error: getFileGenerationErrorDetails(error),
+      },
+      "File layout preview stage failed",
+    );
+    throw error;
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }

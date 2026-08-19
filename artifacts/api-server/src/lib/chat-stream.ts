@@ -28,13 +28,14 @@ import { db, assets } from "@workspace/db";
 import {
   detectFileFormat,
   buildFileGenerationPrompt,
-  parseFileData,
+  inspectFileData,
   renderFile,
   type FileFormat,
   type ParsedFileData,
 } from "./file-generation";
-import { arePreviewToolsAvailable, previewGeneratedFile } from "./file-preview";
+import { getPreviewToolStatus, previewGeneratedFile } from "./file-preview";
 import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
+import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 
 const AUDIT_TIMEOUT_MS = 60_000;
 const REVISION_TIMEOUT_MS = 60_000;
@@ -115,6 +116,7 @@ export async function streamChatReply(args: {
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
   const {
+    req,
     res,
     client,
     provider,
@@ -340,7 +342,26 @@ export async function streamChatReply(args: {
       }
 
       let assetIds: number[] | undefined;
+      const requestId =
+        typeof (req as { id?: unknown } | undefined)?.id === "string" ||
+        typeof (req as { id?: unknown } | undefined)?.id === "number"
+          ? String((req as { id: string | number }).id)
+          : undefined;
+      const formatDetectionStartedAt = Date.now();
       const fileFormat = detectFileFormat(userText, requestedFileFormat);
+      if (fileFormat) {
+        logger.info(
+          {
+            stage: "file-format-detection",
+            requestId,
+            conversationId,
+            fileFormat,
+            explicitFormat: requestedFileFormat ?? undefined,
+            elapsedMs: elapsedMs(formatDetectionStartedAt),
+          },
+          "File generation format selected",
+        );
+      }
       if (fileFormat && conversationId) {
         assetIds = await withTimeout(
           generateAndReviewFile({
@@ -355,6 +376,7 @@ export async function streamChatReply(args: {
             chatMessages,
             fullResponse,
             clientGone,
+            requestId,
           }),
           FILE_GENERATION_TIMEOUT_MS,
           "File generation",
@@ -432,7 +454,13 @@ async function streamModelText(args: {
     }>;
   } catch (err) {
     if (!isUnsupportedGenerationParam(err)) throw err;
-    logger.warn({ err, modelId: args.modelId }, "Retrying stream without extra generation params");
+    logger.warn(
+      {
+        error: getFileGenerationErrorDetails(err),
+        modelId: args.modelId,
+      },
+      "Retrying stream without extra generation params",
+    );
     applySafeGenerationParams(streamOptions as unknown as Record<string, unknown>, args.provider);
     stream = (await args.client.chat.completions.create(streamOptions)) as AsyncIterable<{
       choices?: { delta?: StreamDelta }[];
@@ -537,10 +565,26 @@ interface GenerateAndReviewFileContext {
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   fullResponse: string;
   clientGone: boolean;
+  requestId?: string;
 }
 
-async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise<number[] | undefined> {
-  const { res, client, provider, modelId, reasoningLevel, fileFormat, conversationId, userText, chatMessages, fullResponse, clientGone } = ctx;
+export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise<number[] | undefined> {
+  const {
+    res,
+    client,
+    provider,
+    modelId,
+    fileFormat,
+    conversationId,
+    userText,
+    chatMessages,
+    fullResponse,
+    clientGone,
+    requestId,
+  } = ctx;
+  const baseDiagnostic = { requestId, conversationId, fileFormat };
+  let currentStage = "file-generation";
+  let generationAttempt = 0;
 
   try {
     res.write(`data: ${JSON.stringify({ status: "generating-file", format: fileFormat })}\n\n`);
@@ -551,10 +595,22 @@ async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise
       parsed: ParsedFileData;
       rawOutput: string;
     }> => {
+      generationAttempt += 1;
+      const attemptNumber = generationAttempt;
       const filePrompt = buildFileGenerationPrompt(fileFormat, fileSummary, {
         previousData: options?.previousData,
         feedback: options?.feedback,
       });
+      currentStage = "file-model-generation";
+      const modelStartedAt = Date.now();
+      logger.info(
+        {
+          ...baseDiagnostic,
+          stage: currentStage,
+          attempt: attemptNumber,
+        },
+        "File generation stage started",
+      );
       const rawOutput = await streamModelText({
         client,
         provider,
@@ -569,26 +625,105 @@ async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise
         },
         shouldStop: () => clientGone,
       });
-      const parsed = parseFileData(rawOutput) ?? {};
+      logger.info(
+        {
+          ...baseDiagnostic,
+          stage: currentStage,
+          attempt: attemptNumber,
+          elapsedMs: elapsedMs(modelStartedAt),
+          outputCharacters: rawOutput.length,
+        },
+        "File generation model output received",
+      );
+
+      currentStage = "file-model-output-parsing";
+      const parseStartedAt = Date.now();
+      const parseResult = inspectFileData(rawOutput);
+      const parsed = parseResult.data ?? {};
+      const parseDiagnostic = {
+        ...baseDiagnostic,
+        stage: currentStage,
+        attempt: attemptNumber,
+        elapsedMs: elapsedMs(parseStartedAt),
+        parseStatus: parseResult.status,
+        ignoredFields: parseResult.ignoredFields,
+        hasTitle: Boolean(parsed.title),
+        hasContent: Boolean(parsed.content),
+        sheetCount: parsed.sheets?.length ?? 0,
+        slideCount: parsed.slides?.length ?? 0,
+      };
+      if (parseResult.status === "parsed") {
+        logger.info(parseDiagnostic, "File model output parsed");
+      } else {
+        logger.warn(
+          parseDiagnostic,
+          "File model output was incomplete; renderer fallback will be used",
+        );
+      }
+
+      currentStage = `file-render-${fileFormat}`;
+      const renderStartedAt = Date.now();
+      logger.info(
+        {
+          ...baseDiagnostic,
+          stage: currentStage,
+          attempt: attemptNumber,
+        },
+        "File render stage started",
+      );
       const file = await renderFile(fileFormat, rawOutput, {
         filename: buildFileGenerationFilename(fileFormat, userText),
         previousData: options?.previousData,
         feedback: options?.feedback,
       });
+      logger.info(
+        {
+          ...baseDiagnostic,
+          stage: currentStage,
+          attempt: attemptNumber,
+          elapsedMs: elapsedMs(renderStartedAt),
+          fileSize: file.size,
+          mimeType: file.mimeType,
+        },
+        "File render stage completed",
+      );
       return { file, parsed, rawOutput };
     };
 
     let attempt = await generate();
     let previousData: ParsedFileData = attempt.parsed;
 
-    const previewAvailable = await arePreviewToolsAvailable();
-    if (previewAvailable && !clientGone) {
+    currentStage = "layout-preview-prerequisites";
+    const previewToolStatus = await getPreviewToolStatus();
+    logger.info(
+      {
+        ...baseDiagnostic,
+        stage: currentStage,
+        ...previewToolStatus,
+      },
+      previewToolStatus.available
+        ? "File layout preview prerequisites are available"
+        : "File layout preview skipped because prerequisites are unavailable",
+    );
+    if (previewToolStatus.available && !clientGone) {
       const vision = getVisionClient(modelId);
 
       for (let iteration = 0; iteration < MAX_LAYOUT_REVIEW_ITERATIONS; iteration++) {
         try {
           res.write(`data: ${JSON.stringify({ status: "reviewing-layout", iteration })}\n\n`);
-          const images = await previewGeneratedFile(attempt.file, { maxPages: 3 });
+          currentStage = "layout-preview";
+          const images = await previewGeneratedFile(attempt.file, {
+            maxPages: 3,
+            diagnosticContext: {
+              requestId,
+              conversationId,
+              attempt: generationAttempt,
+              iteration,
+            },
+          });
+
+          currentStage = "layout-review-model";
+          const reviewStartedAt = Date.now();
           const feedback = await reviewLayout({
             client: vision.client,
             modelId: vision.modelId,
@@ -596,13 +731,29 @@ async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise
             images,
             originalData: JSON.stringify(previousData),
           });
+          logger.info(
+            {
+              ...baseDiagnostic,
+              stage: currentStage,
+              attempt: generationAttempt,
+              iteration,
+              elapsedMs: elapsedMs(reviewStartedAt),
+              actionableFeedback: hasActionableFeedback(feedback),
+            },
+            "File layout review completed",
+          );
 
           if (!hasActionableFeedback(feedback)) {
             break;
           }
 
           logger.info(
-            { iteration, fileFormat, conversationId },
+            {
+              ...baseDiagnostic,
+              stage: "layout-revision",
+              attempt: generationAttempt,
+              iteration,
+            },
             "Layout feedback received; regenerating file",
           );
 
@@ -611,13 +762,33 @@ async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise
           }
           attempt = await generate({ previousData, feedback });
           previousData = attempt.parsed;
-        } catch (err) {
-          logger.warn({ err, fileFormat, conversationId, iteration }, "Layout review iteration failed");
+        } catch (error) {
+          logger.warn(
+            {
+              ...baseDiagnostic,
+              stage: currentStage,
+              attempt: generationAttempt,
+              iteration,
+              error: getFileGenerationErrorDetails(error),
+            },
+            "Layout review iteration failed; keeping rendered file",
+          );
           break;
         }
       }
     }
 
+    currentStage = "asset-persistence";
+    const persistenceStartedAt = Date.now();
+    logger.info(
+      {
+        ...baseDiagnostic,
+        stage: currentStage,
+        fileSize: attempt.file.size,
+        mimeType: attempt.file.mimeType,
+      },
+      "Generated file asset persistence started",
+    );
     const [asset] = await db
       .insert(assets)
       .values({
@@ -628,6 +799,16 @@ async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise
         data: attempt.file.buffer.toString("base64"),
       })
       .returning();
+    logger.info(
+      {
+        ...baseDiagnostic,
+        stage: currentStage,
+        elapsedMs: elapsedMs(persistenceStartedAt),
+        persisted: Boolean(asset),
+        assetId: asset?.id,
+      },
+      "Generated file asset persistence completed",
+    );
 
     if (asset && !clientGone) {
       res.write(
@@ -637,13 +818,26 @@ async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise
       );
       return [asset.id];
     }
-  } catch (err) {
-    logger.warn({ err, fileFormat, conversationId }, "File generation failed");
+  } catch (error) {
+    const errorDetails = getFileGenerationErrorDetails(error);
+    logger.error(
+      {
+        ...baseDiagnostic,
+        stage: currentStage,
+        attempt: generationAttempt || undefined,
+        error: errorDetails,
+      },
+      "File generation stage failed",
+    );
     if (!clientGone) {
+      const message =
+        errorDetails.code === "CJK_FONT_UNAVAILABLE"
+          ? "PDF用の日本語フォントを読み込めないため、ファイルを生成できませんでした。テキスト回答はそのまま表示されます。"
+          : "ファイルの生成に失敗しました。テキスト回答はそのまま表示されます。";
       res.write(
         `data: ${JSON.stringify({
           status: "file_warning",
-          message: "ファイルの生成に失敗しました。テキスト回答はそのまま表示されます。",
+          message,
         })}\n\n`,
       );
     }

@@ -84,17 +84,17 @@ describe("reviewLayout", () => {
     expect(content.some((part) => part.type === "text")).toBe(true);
   });
 
-  it("returns empty string and logs on API error", async () => {
+  it("propagates API errors so the caller can log the request context", async () => {
     const mockCreate = vi.fn().mockRejectedValue(new Error("API down"));
     const mockClient = { chat: { completions: { create: mockCreate } } } as unknown as import("openai").default;
 
-    const result = await reviewLayout({
-      client: mockClient,
-      modelId: "gpt-5.6-terra",
-      format: "pdf",
-      images: [Buffer.from("fake-png")],
-    });
-
-    expect(result).toBe("");
+    await expect(
+      reviewLayout({
+        client: mockClient,
+        modelId: "gpt-5.6-terra",
+        format: "pdf",
+        images: [Buffer.from("fake-png")],
+      }),
+    ).rejects.toThrow("API down");
   });
 });

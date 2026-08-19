@@ -71,21 +71,19 @@ export async function reviewLayout(args: {
     });
   }
 
-  try {
-    const response = await client.chat.completions.create({
-      model: modelId,
-      messages: [{ role: "user", content }],
-      max_tokens: 2048,
-    });
+  const response = await client.chat.completions.create({
+    model: modelId,
+    messages: [{ role: "user", content }],
+    max_tokens: 2048,
+  });
 
-    const text = response.choices[0]?.message?.content?.trim() ?? "";
-    if (!text) {
-      logger.warn({ modelId }, "Vision layout review returned empty response");
-      return "";
-    }
-    return text;
-  } catch (err) {
-    logger.warn({ err, modelId }, "Vision layout review failed");
+  const text = response.choices[0]?.message?.content?.trim() ?? "";
+  if (!text) {
+    logger.warn(
+      { stage: "layout-review-model", modelId, format },
+      "Vision layout review returned empty response",
+    );
     return "";
   }
+  return text;
 }

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import type { PDFDocument, PDFFont } from "pdf-lib";
 import { StandardFonts } from "pdf-lib";
@@ -19,20 +20,67 @@ const CJK_FONT_CANDIDATES = [
 
 let fontkitModule: unknown | undefined;
 let cachedCjkFontBytes: Buffer | null | undefined;
+let cachedCjkFontPath: string | null | undefined;
+
+export class CjkFontUnavailableError extends Error {
+  readonly code = "CJK_FONT_UNAVAILABLE";
+
+  constructor() {
+    super("Japanese PDF content requires a usable CJK font, but none was found");
+    this.name = "CjkFontUnavailableError";
+  }
+}
 
 export function hasCjkText(text: string): boolean {
   return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text);
 }
 
-/** Load CJK font bytes from the first available system font. */
+function isStandaloneFontFile(fontPath: string): boolean {
+  return /\.(?:ttf|otf)$/i.test(fontPath) && !/\.ttc$/i.test(fontPath);
+}
+
+function discoverFontconfigCandidates(): string[] {
+  try {
+    const output = execFileSync(
+      "fc-list",
+      ["-f", "%{file}\n", ":lang=ja"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    return output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(
+        (fontPath, index, paths) =>
+          Boolean(fontPath) &&
+          isStandaloneFontFile(fontPath) &&
+          existsSync(fontPath) &&
+          paths.indexOf(fontPath) === index,
+      );
+  } catch {
+    return [];
+  }
+}
+
+function getCjkFontCandidates(): string[] {
+  const candidates = [
+    ...discoverFontconfigCandidates(),
+    ...CJK_FONT_CANDIDATES.filter(isStandaloneFontFile),
+  ];
+  return candidates.filter(
+    (fontPath, index) => candidates.indexOf(fontPath) === index,
+  );
+}
+
+/** Load CJK font bytes from the first available system or fontconfig font. */
 export function loadCjkFontBytes(): Buffer | undefined {
   if (cachedCjkFontBytes !== undefined) {
     return cachedCjkFontBytes || undefined;
   }
-  for (const fontPath of CJK_FONT_CANDIDATES) {
+  for (const fontPath of getCjkFontCandidates()) {
     if (existsSync(fontPath)) {
       try {
         cachedCjkFontBytes = readFileSync(fontPath);
+        cachedCjkFontPath = fontPath;
         return cachedCjkFontBytes;
       } catch {
         // Continue to next candidate.
@@ -40,7 +88,19 @@ export function loadCjkFontBytes(): Buffer | undefined {
     }
   }
   cachedCjkFontBytes = null;
+  cachedCjkFontPath = null;
   return undefined;
+}
+
+export function getCjkFontStatus(): {
+  available: boolean;
+  fontPath?: string;
+} {
+  const available = Boolean(loadCjkFontBytes());
+  return {
+    available,
+    fontPath: available ? cachedCjkFontPath || undefined : undefined,
+  };
 }
 
 async function getFontkitInstance(): Promise<unknown> {
@@ -71,6 +131,7 @@ export async function embedFontForText(
       // Most candidate sets only ship a regular face; reuse it for bold and rely on size contrast.
       return { regular, bold: regular };
     }
+    throw new CjkFontUnavailableError();
   }
 
   const regular = await pdfDoc.embedFont(StandardFonts.Helvetica);

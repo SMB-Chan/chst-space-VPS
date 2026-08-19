@@ -43,6 +43,18 @@ export interface ParsedFileData {
   slides?: SlideData[];
 }
 
+export type FileDataParseStatus =
+  | "parsed"
+  | "missing-file-data"
+  | "invalid-json"
+  | "invalid-shape";
+
+export interface FileDataParseResult {
+  status: FileDataParseStatus;
+  data: ParsedFileData | null;
+  ignoredFields: string[];
+}
+
 const FORMAT_MIME_TYPES: Record<FileFormat, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -149,16 +161,117 @@ export function buildFileGenerationPrompt(
 /**
  * Parse the <file_data> JSON block from LLM output.
  */
-export function parseFileData(rawText: string): ParsedFileData | null {
+function normalizeCell(
+  value: unknown,
+): string | number | boolean | null {
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+    ? value
+    : null;
+}
+
+function normalizeParsedFileData(
+  value: Record<string, unknown>,
+): { data: ParsedFileData; ignoredFields: string[] } {
+  const data: ParsedFileData = {};
+  const ignoredFields: string[] = [];
+
+  if (value.title !== undefined) {
+    if (typeof value.title === "string") data.title = value.title;
+    else ignoredFields.push("title");
+  }
+  if (value.content !== undefined) {
+    if (typeof value.content === "string") data.content = value.content;
+    else ignoredFields.push("content");
+  }
+  if (value.sheets !== undefined) {
+    if (Array.isArray(value.sheets)) {
+      data.sheets = value.sheets
+        .filter(
+          (sheet): sheet is Record<string, unknown> =>
+            typeof sheet === "object" && sheet !== null && !Array.isArray(sheet),
+        )
+        .map((sheet) => ({
+          name: typeof sheet.name === "string" ? sheet.name : "Sheet1",
+          headers: Array.isArray(sheet.headers)
+            ? sheet.headers.map((header) => String(normalizeCell(header) ?? ""))
+            : [],
+          rows: Array.isArray(sheet.rows)
+            ? sheet.rows
+                .filter((row): row is unknown[] => Array.isArray(row))
+                .map((row) => row.map(normalizeCell))
+            : [],
+        }));
+    } else {
+      ignoredFields.push("sheets");
+    }
+  }
+  if (value.slides !== undefined) {
+    if (Array.isArray(value.slides)) {
+      data.slides = value.slides
+        .filter(
+          (slide): slide is Record<string, unknown> =>
+            typeof slide === "object" && slide !== null && !Array.isArray(slide),
+        )
+        .map((slide) => ({
+          title: typeof slide.title === "string" ? slide.title : "Slide",
+          bullets: Array.isArray(slide.bullets)
+            ? slide.bullets.filter(
+                (bullet): bullet is string => typeof bullet === "string",
+              )
+            : [],
+        }));
+    } else {
+      ignoredFields.push("slides");
+    }
+  }
+
+  return { data, ignoredFields };
+}
+
+export function inspectFileData(rawText: string): FileDataParseResult {
   const match = rawText.match(/<file_data>\s*([\s\S]*?)\s*<\/file_data>/);
-  if (!match) return null;
+  if (!match) {
+    return {
+      status: "missing-file-data",
+      data: null,
+      ignoredFields: [],
+    };
+  }
   try {
     const parsed = JSON.parse(match[1]) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return null;
-    return parsed as ParsedFileData;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return {
+        status: "invalid-shape",
+        data: null,
+        ignoredFields: [],
+      };
+    }
+    const normalized = normalizeParsedFileData(
+      parsed as Record<string, unknown>,
+    );
+    return {
+      status: "parsed",
+      data: normalized.data,
+      ignoredFields: normalized.ignoredFields,
+    };
   } catch {
-    return null;
+    return {
+      status: "invalid-json",
+      data: null,
+      ignoredFields: [],
+    };
   }
+}
+
+export function parseFileData(rawText: string): ParsedFileData | null {
+  return inspectFileData(rawText).data;
 }
 
 export async function renderFile(

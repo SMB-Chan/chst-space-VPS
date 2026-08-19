@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --config ./vitest.config.ts",
+    "test:file-generation-diagnostics": "vitest run --config ./vitest.config.ts src/lib/file-generation.test.ts src/lib/file-preview.test.ts src/lib/file-diagnostics.test.ts src/lib/file-generation-diagnostics.test.ts src/lib/chat-stream.file-generation.test.ts --reporter=verbose",
     "test:ssrf": "node ./scripts/ssrf-guard.test.mjs"
   },
   "dependencies": {
