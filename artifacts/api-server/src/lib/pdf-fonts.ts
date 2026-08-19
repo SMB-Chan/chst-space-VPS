@@ -1,13 +1,24 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { PDFDocument, PDFFont } from "pdf-lib";
 import { StandardFonts } from "pdf-lib";
+
+/**
+ * Bundled fallback font shipped with the API server so deployments without a
+ * standalone system CJK font can still render Japanese PDFs.
+ */
+const BUNDLED_CJK_FONT =
+  typeof __dirname === "string"
+    ? path.join(__dirname, "fonts", "DroidSansFallbackFull.ttf")
+    : undefined;
 
 /**
  * Candidate system fonts that support CJK (Chinese, Japanese, Korean) characters.
  * Ordered by preference: smaller fonts first, then common OS defaults.
  */
 const CJK_FONT_CANDIDATES = [
+  BUNDLED_CJK_FONT,
   "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
   "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
   "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
@@ -16,7 +27,7 @@ const CJK_FONT_CANDIDATES = [
   "C:\\Windows\\Fonts\\msgothic.ttc",
   "C:\\Windows\\Fonts\\YuGothM.ttc",
   "C:\\Windows\\Fonts\\msyh.ttc",
-];
+].filter((p): p is string => typeof p === "string");
 
 let fontkitModule: unknown | undefined;
 let cachedCjkFontBytes: Buffer | null | undefined;
