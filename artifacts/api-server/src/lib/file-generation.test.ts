@@ -162,4 +162,48 @@ describe("renderFile", () => {
     expect(file.buffer.length).toBeGreaterThan(100);
     expect(file.filename).toMatch(/\.pdf$/);
   });
+
+  it("renders a Japanese DOCX", async () => {
+    const data = {
+      title: "検索結果",
+      content: "# 検索結果\n\nこれは日本語のDOCX生成テストです。\n\n- ポイント1",
+    };
+    const file = await renderFile("docx", wrapFileData(data));
+    expect(file.buffer.length).toBeGreaterThan(100);
+    expect(file.filename).toMatch(/\.docx$/);
+  });
+
+  it("renders a Japanese XLSX", async () => {
+    const data = {
+      title: "検索結果",
+      sheets: [
+        {
+          name: "Sheet1",
+          headers: ["項目", "内容"],
+          rows: [
+            ["項目1", "日本語の内容"],
+            ["項目2", "その他の内容"],
+          ],
+        },
+      ],
+    };
+    const file = await renderFile("xlsx", wrapFileData(data));
+    expect(file.buffer.length).toBeGreaterThan(100);
+    expect(file.filename).toMatch(/\.xlsx$/);
+  });
+
+  it("renders a Japanese PPTX", async () => {
+    const data = {
+      title: "検索結果",
+      slides: [
+        {
+          title: "スライド1",
+          bullets: ["日本語のポイント1", "日本語のポイント2"],
+        },
+      ],
+    };
+    const file = await renderFile("pptx", wrapFileData(data));
+    expect(file.buffer.length).toBeGreaterThan(100);
+    expect(file.filename).toMatch(/\.pptx$/);
+  });
 });
