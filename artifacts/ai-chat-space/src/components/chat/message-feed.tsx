@@ -38,6 +38,28 @@ type DisplayMessage = OpenaiMessage & {
   assetIds?: number[] | null;
 };
 
+function normalizeSources(value: unknown): { title: string; url: string }[] | null {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAssetIds(value: unknown): number[] | null {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((id): id is number => typeof id === "number") : null;
+  } catch {
+    return null;
+  }
+}
+
 type AttachmentChip = { kind: "image" | "file"; name: string };
 
 const ATTACHMENTS_V1_PREFIX = "CS_ATTACHMENTS_V1:";
@@ -279,7 +301,8 @@ export function MessageFeed({
 
           // For assistant messages: prefer DB-persisted sources; fall back to parsing
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
-          let sources: { title: string; url: string }[] | null = message.sources ?? null;
+          let sources = normalizeSources(message.sources);
+          const assetIds = normalizeAssetIds(message.assetIds);
           if (!isUser) {
             if (!sources || sources.length === 0) {
               // Try to extract legacy sources from the inline block
@@ -401,9 +424,9 @@ export function MessageFeed({
                 {!isUser && display.artifacts && display.artifacts.length > 0 && (
                   <ArtifactCards artifacts={display.artifacts} />
                 )}
-                {!isUser && message.assetIds && message.assetIds.length > 0 && (
+                {!isUser && assetIds && assetIds.length > 0 && (
                   <div className="flex flex-wrap gap-2 px-1">
-                    {message.assetIds.map((assetId) => (
+                    {assetIds.map((assetId) => (
                       <FileDownloadButton key={assetId} assetId={assetId} />
                     ))}
                   </div>

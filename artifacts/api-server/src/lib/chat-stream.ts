@@ -93,7 +93,8 @@ const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファ
 const FILE_GENERATION_SYSTEM_PROMPT = `ユーザーが PDF / Word / Excel / PowerPoint ファイルの生成を求めています。システムが自動的にファイルを生成してダウンロードボタンを表示するので、あなたは以下のように答えてください。
 
 - HTML や Markdown のコードブロック、雛形、手順を出力しない。
-- 「ユーザー側で作成してください」「ブラウザで印刷してください」などの指示を出さない。
+- 「ユーザー側で作成してください」「ブラウザで印刷してください」「ダウンロードして作成」など、ユーザーに作業を押し付ける指示を出さない。
+- 「ファイルを生成できません」などと断らない。システムが必ず生成する。
 - 作成するファイルの概要（タイトルや主なセクション）を短く述べ、後はファイルの自動生成に任せる。`;
 
 function wantsArtifact(userText: string): boolean {
@@ -410,6 +411,10 @@ export async function streamChatReply(args: {
         );
       }
 
+      if (assetIds && assetIds.length > 0 && fileFormat) {
+        fullResponse = finalizeGeneratedFileResponse(fullResponse);
+      }
+
       let completion:
         | { artifacts?: { id: number; filename: string; mime: string; size: number }[] }
         | void
@@ -564,6 +569,27 @@ function stripCodeAndArtifactBlocks(text: string): string {
     .replace(/`{3,}/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+const MANUAL_FILE_PHRASES = [
+  /ユーザー側で作成してください[。]?/g,
+  /ブラウザで印刷してください[。]?/g,
+  /ユーザーが.*作成する必要/g,
+  /HTML.*作成し[、。]/g,
+  /Markdown.*作成し[、。]/g,
+  /ファイルを生成することはできません[。]?/g,
+];
+
+function finalizeGeneratedFileResponse(text: string): string {
+  let cleaned = stripCodeAndArtifactBlocks(text);
+  for (const re of MANUAL_FILE_PHRASES) {
+    cleaned = cleaned.replace(re, "");
+  }
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+  if (!cleaned || cleaned.length < 10) {
+    return "ファイルを作成しました。下のカードからダウンロードできます。";
+  }
+  return cleaned;
 }
 
 function buildFileGenerationSummary(

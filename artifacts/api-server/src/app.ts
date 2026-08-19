@@ -52,6 +52,8 @@ app.use(
           }
         }
       : true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   }),
 );
 // Image attachments need a large body; everything else stays small so
@@ -77,6 +79,12 @@ app.use(
 app.use("/api", healthRouter);
 
 app.use("/api", router);
+
+// Explicit 404 for unknown API paths so deployment health checks and missing
+// routes return JSON instead of Express' default HTML response.
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
 
 // JSON形式のグローバルエラーハンドラ（413等のExpressエラーを含む）
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

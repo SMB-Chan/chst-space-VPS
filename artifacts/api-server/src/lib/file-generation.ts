@@ -121,10 +121,10 @@ export function buildFileGenerationPrompt(
   };
 
   const formatNotes: Record<FileFormat, string> = {
-    pdf: "The server will render this as a real PDF. Do NOT write HTML, do NOT ask the user to create the file, do NOT provide markdown code blocks, and do NOT say the file cannot be created.",
-    docx: "The server will render this as a Word document. Do NOT ask the user to create the file and do NOT provide markdown code blocks.",
-    xlsx: "The server will render this as an Excel workbook. Do NOT ask the user to create the file and do NOT provide markdown code blocks.",
-    pptx: "The server will render this as a PowerPoint presentation. Do NOT ask the user to create the file and do NOT provide markdown code blocks.",
+    pdf: "The server will render this as a real PDF. Do NOT write HTML, do NOT ask the user to create/print/download the file themselves, do NOT provide markdown code blocks, and do NOT say the file cannot be created.",
+    docx: "The server will render this as a Word document. Do NOT ask the user to create the file themselves and do NOT provide markdown code blocks.",
+    xlsx: "The server will render this as an Excel workbook. Do NOT ask the user to create the file themselves and do NOT provide markdown code blocks.",
+    pptx: "The server will render this as a PowerPoint presentation. Do NOT ask the user to create the file themselves and do NOT provide markdown code blocks.",
   };
 
   const parts = [

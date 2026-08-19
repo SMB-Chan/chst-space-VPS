@@ -59,6 +59,24 @@ function parseStoredAssetIds(raw: string | null): number[] | null {
   }
 }
 
+function parseStoredSources(raw: string | null): { title: string; url: string }[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (item): item is { title: string; url: string } =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as { title?: unknown }).title === "string" &&
+        typeof (item as { url?: unknown }).url === "string",
+    );
+  } catch {
+    logger.warn({ raw }, "Ignoring malformed message sources JSON");
+    return null;
+  }
+}
+
 function extractImageDataUrl(content: string): { text: string; imageUrl?: string } {
   const match = content.match(IMAGE_DATA_URL_REGEX);
   if (!match) return { text: content };
@@ -159,6 +177,7 @@ router.get("/openai/conversations/:conversationId", requireAuth, async (req, res
       ...conversation,
       messages: messagesResult.map((message) => ({
         ...message,
+        sources: parseStoredSources(message.sources),
         assetIds: parseStoredAssetIds(message.assetIds),
         artifacts: artifactRows
           .filter((artifact) => artifact.messageId === message.id)
