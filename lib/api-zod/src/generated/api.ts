@@ -53,6 +53,12 @@ export const CreateOpenaiConversationResponse = zod.object({
 
 
 /**
+ * @summary Delete all conversations for the current user
+ */
+export const WipeOpenaiConversationsResponse = zod.void()
+
+
+/**
  * @summary Get conversation with messages
  */
 export const GetOpenaiConversationParams = zod.object({

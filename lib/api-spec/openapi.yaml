@@ -83,6 +83,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenaiConversation"
+    delete:
+      operationId: wipeOpenaiConversations
+      tags: [openai]
+      summary: Delete all conversations for the current user
+      responses:
+        "204":
+          description: All conversations deleted
+        "500":
+          description: Failed to wipe conversations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
   /openai/conversations/{id}:
     get:
       operationId: getOpenaiConversation

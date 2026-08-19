@@ -359,6 +359,77 @@ export const useCreateOpenaiConversation = <TError = ErrorType<unknown>,
       return useMutation(getCreateOpenaiConversationMutationOptions(options));
     }
 
+export const getWipeOpenaiConversationsUrl = () => {
+
+
+
+
+  return `/api/openai/conversations`
+}
+
+/**
+ * @summary Delete all conversations for the current user
+ */
+export const wipeOpenaiConversations = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getWipeOpenaiConversationsUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getWipeOpenaiConversationsMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof wipeOpenaiConversations>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof wipeOpenaiConversations>>, TError,void, TContext> => {
+
+const mutationKey = ['wipeOpenaiConversations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof wipeOpenaiConversations>>, void> = () => {
+
+
+          return  wipeOpenaiConversations(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type WipeOpenaiConversationsMutationResult = NonNullable<Awaited<ReturnType<typeof wipeOpenaiConversations>>>
+
+    export type WipeOpenaiConversationsMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Delete all conversations for the current user
+ */
+export const useWipeOpenaiConversations = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof wipeOpenaiConversations>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof wipeOpenaiConversations>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getWipeOpenaiConversationsMutationOptions(options));
+    }
+
 export const getGetOpenaiConversationUrl = (id: number,) => {
 
 

@@ -194,6 +194,18 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
   }
 });
 
+router.delete("/openai/conversations", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    await ensureChatSchema();
+    await db.delete(conversations).where(eq(conversations.userId, userId));
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Failed to wipe conversations");
+    res.status(500).json({ error: "Failed to wipe conversations" });
+  }
+});
+
 router.delete("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
