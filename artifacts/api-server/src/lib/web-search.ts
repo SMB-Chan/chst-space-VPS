@@ -12,8 +12,16 @@ import {
   stripHtml,
   type SearchResult,
 } from "./search-parse";
+import {
+  expandSearchQueries,
+  mergeSearchResults,
+  extractMainContent,
+  normalizeQuery,
+  FETCH_TOP_N,
+  type ScoredSearchResult,
+} from "./search-enhance";
 
-export type { SearchResult };
+export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchHtml };
 
 export interface WebContext {
@@ -48,20 +56,22 @@ interface CacheEntry {
 const searchCache = new Map<string, CacheEntry>();
 
 function getCachedResults(query: string): SearchResult[] | null {
-  const entry = searchCache.get(query);
+  const key = normalizeQuery(query);
+  const entry = searchCache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiry) {
-    searchCache.delete(query);
+    searchCache.delete(key);
     return null;
   }
   return entry.results;
 }
 
 function setCachedResults(query: string, results: SearchResult[]): void {
+  const key = normalizeQuery(query);
   const now = Date.now();
   // Sweep all expired entries first so they don't count toward the size limit
-  for (const [key, entry] of searchCache) {
-    if (now > entry.expiry) searchCache.delete(key);
+  for (const [cacheKey, entry] of searchCache) {
+    if (now > entry.expiry) searchCache.delete(cacheKey);
   }
   // If still at capacity, evict the oldest entry (Map preserves insertion order)
   while (searchCache.size >= SEARCH_CACHE_MAX) {
@@ -69,7 +79,7 @@ function setCachedResults(query: string, results: SearchResult[]): void {
     if (firstKey !== undefined) searchCache.delete(firstKey);
     else break;
   }
-  searchCache.set(query, { results, expiry: now + SEARCH_CACHE_TTL_MS });
+  searchCache.set(key, { results, expiry: now + SEARCH_CACHE_TTL_MS });
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +257,7 @@ export async function fetchPageText(
       const html = await res.text();
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       const title = titleMatch ? stripHtml(titleMatch[1]) : url;
-      const text = stripHtml(html).slice(0, MAX_PAGE_CHARS);
+      const text = extractMainContent(html).slice(0, MAX_PAGE_CHARS);
       return { title, text };
     } finally {
       cancel(); // disarm only after body has been fully consumed
@@ -272,30 +282,43 @@ async function searchWebOnce(url: string): Promise<SearchResult[]> {
 }
 
 /** Search the web via DuckDuckGo HTML (no API key). Falls back to the lite page. */
-export async function searchWeb(query: string): Promise<SearchResult[]> {
+export async function searchWeb(query: string): Promise<ScoredSearchResult[]> {
   const cached = getCachedResults(query);
   if (cached) {
     logger.debug({ query }, "Search cache hit");
-    return cached;
+    return cached.map((r) => ({ ...r, score: 0 }));
   }
 
+  const queries = expandSearchQueries(query);
   const endpoints = [
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-    `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+    `https://html.duckduckgo.com/html/?q=`,
+    `https://lite.duckduckgo.com/lite/?q=`,
   ];
 
-  for (const endpoint of endpoints) {
-    try {
-      const results = await searchWebOnce(endpoint);
-      if (results.length > 0) {
-        setCachedResults(query, results);
-        return results;
-      }
-    } catch (err) {
-      logger.warn({ err, query, endpoint }, "Web search endpoint error");
+  // Search all query-angle × endpoint combinations in parallel.
+  const searchCalls: Promise<SearchResult[]>[] = [];
+  for (const q of queries) {
+    for (const base of endpoints) {
+      const url = `${base}${encodeURIComponent(q)}`;
+      searchCalls.push(
+        searchWebOnce(url).catch((err) => {
+          logger.warn({ err, query: q, endpoint: base }, "Web search endpoint error");
+          return [];
+        }),
+      );
     }
   }
-  return [];
+
+  const resultSets = await Promise.all(searchCalls);
+  const allResults = resultSets.flat();
+  if (allResults.length === 0) return [];
+
+  const merged = mergeSearchResults(allResults, query);
+  setCachedResults(
+    query,
+    merged.map(({ score: _score, ...rest }) => rest),
+  );
+  return merged;
 }
 
 /**
@@ -460,7 +483,7 @@ export async function buildWebContext(
     onStatus({ status: "searching", query });
     const results = await searchWeb(decision.query);
     if (results.length > 0) {
-      const top = results.slice(0, 2);
+      const top = results.slice(0, FETCH_TOP_N);
       const pages = await Promise.all(top.map((r) => fetchPageText(r.url)));
       for (const r of results) {
         sources.push({ title: r.title, url: r.url });
@@ -468,7 +491,12 @@ export async function buildWebContext(
       const snippetBlock = results
         .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   概要: ${r.snippet}`)
         .join("\n");
-      parts.push(`【Web検索結果（クエリ: ${decision.query}）】\n${snippetBlock}`);
+      const expandedQueries = expandSearchQueries(decision.query);
+      const queryNote =
+        expandedQueries.length > 1
+          ? `（拡張クエリ: ${expandedQueries.slice(1).join(" / ")}）`
+          : "";
+      parts.push(`【Web検索結果（クエリ: ${decision.query}）${queryNote}】\n${snippetBlock}`);
 
       let pagesFetched = 0;
       pages.forEach((page, i) => {
