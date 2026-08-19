@@ -1,7 +1,8 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import * as XLSX from "xlsx";
 import PptxGenJS from "pptxgenjs";
+import { embedFontForText } from "./pdf-fonts";
 
 export type FileFormat = "pdf" | "docx" | "xlsx" | "pptx";
 
@@ -192,9 +193,9 @@ function normalizeContent(parsed: ParsedFileData, fallback: string): string {
 
 async function renderPdf(parsed: ParsedFileData, title: string, format: FileFormat): Promise<GeneratedFile> {
   const content = normalizeContent(parsed, title);
+  const combinedText = `${title}\n${content}`;
   const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const { regular: font, bold: boldFont } = await embedFontForText(pdfDoc, combinedText);
   const pageWidth = 612;
   const pageHeight = 792;
   const margin = 50;
@@ -205,15 +206,19 @@ async function renderPdf(parsed: ParsedFileData, title: string, format: FileForm
   let page = pdfDoc.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
 
+  const isWhitespace = (char: string) => /\s/.test(char);
+
   const drawText = (text: string, opts: { font?: typeof font; size?: number; indent?: number } = {}) => {
     const f = opts.font ?? font;
     const size = opts.size ?? 11;
     const indent = opts.indent ?? 0;
-    const words = text.split(" ");
+    // Break on whitespace for Latin text, and on every character for CJK so
+    // we can wrap scripts that do not use spaces.
+    const chars = Array.from(text);
     let line = "";
 
-    for (const word of words) {
-      const test = line ? `${line} ${word}` : word;
+    for (const char of chars) {
+      const test = line + char;
       const width = f.widthOfTextAtSize(test, size);
       if (width > maxWidth - indent && line) {
         if (y < margin + footerMargin) {
@@ -222,7 +227,7 @@ async function renderPdf(parsed: ParsedFileData, title: string, format: FileForm
         }
         page.drawText(line, { x: margin + indent, y, size, font: f, color: rgb(0.1, 0.1, 0.1) });
         y -= lineHeight * (size / 11);
-        line = word;
+        line = isWhitespace(char) ? "" : char;
       } else {
         line = test;
       }
