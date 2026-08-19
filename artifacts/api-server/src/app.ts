@@ -37,22 +37,21 @@ app.use(
 );
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-const ALLOWED_ORIGINS = new Set(
-  (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
-    .concat(["http://localhost:5173", "http://127.0.0.1:5173"])
-    .filter(Boolean),
-);
+const frontendUrl = process.env.FRONTEND_URL;
 
 app.use(
   cors({
     credentials: true,
-    origin: (origin, callback) => {
-      if (!origin || ALLOWED_ORIGINS.has(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`));
-      }
-    },
+    origin: frontendUrl
+      ? (origin, callback) => {
+          if (!origin || origin === frontendUrl) {
+            callback(null, true);
+          } else {
+            // Reflect no Access-Control-Allow-Origin instead of raising a 500.
+            callback(null, false);
+          }
+        }
+      : true,
   }),
 );
 // Image attachments need a large body; everything else stays small so
