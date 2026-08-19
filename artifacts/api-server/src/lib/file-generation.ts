@@ -111,31 +111,37 @@ export function buildFileGenerationPrompt(
 ): string {
   const formatInstructions: Record<FileFormat, string> = {
     pdf:
-      '{"title": "Document title", "content": "Full markdown content with headings, paragraphs and bullet lists. This will be rendered as a PDF."}',
+      '{"title": "レポートのタイトル", "content": "# 見出し\\n\\n本文。箇条書きの場合は\\n- 項目1\\n- 項目2\\nのように書く。"}',
     docx:
-      '{"title": "Document title", "content": "Full markdown content with headings, paragraphs and bullet lists"}',
+      '{"title": "ドキュメントのタイトル", "content": "# 見出し\\n\\n本文。箇条書きの場合は\\n- 項目1\\n- 項目2\\nのように書く。"}',
     xlsx:
-      '{"title": "Workbook title", "sheets": [{"name": "Sheet1", "headers": ["Column A", "Column B"], "rows": [["a1", "b1"], ["a2", "b2"]]}]}',
+      '{"title": "ワークブックのタイトル", "sheets": [{"name": "Sheet1", "headers": ["列A", "列B"], "rows": [["a1", "b1"], ["a2", "b2"]]}]}',
     pptx:
-      '{"title": "Presentation title", "slides": [{"title": "Slide title", "bullets": ["Point 1", "Point 2"]}]}',
+      '{"title": "プレゼンテーションのタイトル", "slides": [{"title": "スライドのタイトル", "bullets": ["ポイント1", "ポイント2"]}]}',
   };
 
   const formatNotes: Record<FileFormat, string> = {
-    pdf: "The output will be converted to a real PDF file. Do NOT write HTML, do NOT ask the user to create the file, and do NOT provide markdown code blocks outside the <file_data> tag.",
-    docx: "The output will be converted to a Word document. Do NOT ask the user to create the file.",
-    xlsx: "The output will be converted to an Excel workbook. Do NOT ask the user to create the file.",
-    pptx: "The output will be converted to a PowerPoint presentation. Do NOT ask the user to create the file.",
+    pdf: "The server will render this as a real PDF. Do NOT write HTML, do NOT ask the user to create the file, do NOT provide markdown code blocks, and do NOT say the file cannot be created.",
+    docx: "The server will render this as a Word document. Do NOT ask the user to create the file and do NOT provide markdown code blocks.",
+    xlsx: "The server will render this as an Excel workbook. Do NOT ask the user to create the file and do NOT provide markdown code blocks.",
+    pptx: "The server will render this as a PowerPoint presentation. Do NOT ask the user to create the file and do NOT provide markdown code blocks.",
   };
 
   const parts = [
-    "You are a document generation assistant. Based on the conversation below, produce structured content for a downloadable file.",
+    "You are a backend document generation assistant. Your output is parsed by a machine, not shown to the user.",
     "",
     `Requested format: ${format.toUpperCase()}`,
     formatNotes[format],
     "",
-    "Return ONLY a JSON object wrapped in <file_data>...</file_data> tags. Do not include markdown explanations, HTML code, or instructions outside the tags.",
+    "STRICT RULES:",
+    "1. Return ONLY a JSON object wrapped in <file_data>...</file_data> tags.",
+    "2. Do not write any text before or after the <file_data> block.",
+    "3. Do not include markdown code fences (```) or HTML tags.",
+    "4. Do not ask the user to create, download, or print the file themselves.",
+    "5. Do not say the file cannot be created. The server will create it.",
+    "6. Write the content in the same language as the user's request (usually Japanese).",
     "",
-    "Schema:",
+    "Schema example:",
     `<file_data>\n${formatInstructions[format]}\n</file_data>`,
   ];
 

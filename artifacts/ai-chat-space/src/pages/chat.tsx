@@ -471,6 +471,8 @@ export function ChatPage() {
           } else {
             await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId!) });
           }
+        } catch (err) {
+          setStreamError(err instanceof Error ? err.message : "会話の保存に失敗しました。リロードして確認してください。");
         } finally {
           setIsStreaming(false);
           setStreamingContent("");

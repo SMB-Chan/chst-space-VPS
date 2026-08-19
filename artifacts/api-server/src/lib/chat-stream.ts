@@ -217,6 +217,10 @@ export async function streamChatReply(args: {
         );
       }
     } else {
+      // Preserve the original assistant response before audit/revision so file
+      // generation is based on the answer the user actually saw, not a revised
+      // version that may strip file-oriented structure.
+      const fileGenerationBaseResponse = fullResponse;
       let audit: { content: string; modelId: string } | undefined;
       // Run the audit even if the client disconnected mid-stream: the audited
       // result is still persisted via onComplete, so revisiting the
@@ -374,7 +378,7 @@ export async function streamChatReply(args: {
             conversationId,
             userText,
             chatMessages,
-            fullResponse,
+            fullResponse: fileGenerationBaseResponse,
             clientGone,
             requestId,
           }),
@@ -383,15 +387,31 @@ export async function streamChatReply(args: {
         );
       }
 
-      const completion = onComplete
-        ? await onComplete({
-            content: fullResponse,
-            sources: webContext.sources,
-            audit,
-            artifacts: extracted.artifacts,
-            assetIds,
-          })
-        : undefined;
+      let completion:
+        | { artifacts?: { id: number; filename: string; mime: string; size: number }[] }
+        | void
+        | undefined;
+      try {
+        completion = onComplete
+          ? await onComplete({
+              content: fullResponse,
+              sources: webContext.sources,
+              audit,
+              artifacts: extracted.artifacts,
+              assetIds,
+            })
+          : undefined;
+      } catch (err) {
+        logger.error({ err, modelId, conversationId }, "Failed to persist chat completion");
+        if (!clientGone) {
+          res.write(
+            `data: ${JSON.stringify({
+              error: "メッセージの保存に失敗しました。もう一度お試しください。",
+            })}\n\n`,
+          );
+        }
+        return;
+      }
 
       if (extracted.artifacts.length > 0 && !clientGone) {
         const saved = completion?.artifacts ?? [];
@@ -522,10 +542,12 @@ function buildFileGenerationSummary(
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
   assistantResponse: string,
 ): string {
-  const recent = chatMessages.slice(-8);
+  // Exclude injected system prompts (file generation instructions, web context,
+  // skills, etc.) so the file model only sees the actual user/assistant exchange.
+  const recent = chatMessages.slice(-8).filter((msg) => msg.role !== "system");
   const historyText = recent
     .map((msg) => {
-      const role = msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "System";
+      const role = msg.role === "user" ? "User" : "Assistant";
       return `${role}:\n${stripCodeAndArtifactBlocks(formatMessageForSummary(msg))}`;
     })
     .join("\n\n");
