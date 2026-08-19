@@ -6,20 +6,24 @@ import { StandardFonts } from "pdf-lib";
 
 /**
  * Bundled fallback font shipped with the API server so deployments without a
- * standalone system CJK font can still render Japanese PDFs.
+ * standalone system CJK font can still render Japanese PDFs. In the esbuild
+ * bundle __dirname is dist/, while under vitest it is src/lib — cover both.
  */
-const BUNDLED_CJK_FONT =
+const BUNDLED_CJK_FONT_CANDIDATES =
   typeof __dirname === "string"
-    ? path.join(__dirname, "fonts", "DroidSansFallbackFull.ttf")
-    : undefined;
+    ? [
+        path.join(__dirname, "fonts", "IPAGothic.ttf"),
+        path.join(__dirname, "..", "..", "fonts", "IPAGothic.ttf"),
+      ]
+    : [];
 
 /**
  * Candidate system fonts that support CJK (Chinese, Japanese, Korean) characters.
- * Ordered by preference: smaller fonts first, then common OS defaults.
+ * The bundled font comes first: some system "CJK fallback" fonts (e.g. the
+ * Droid Sans Fallback build shipped for server images) contain no Latin/digit
+ * glyphs at all, which turns every number in a PDF into a tofu box.
  */
 const CJK_FONT_CANDIDATES = [
-  BUNDLED_CJK_FONT,
-  "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
   "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
   "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
   "/System/Library/Fonts/PingFang.ttc",
@@ -74,6 +78,7 @@ function discoverFontconfigCandidates(): string[] {
 
 function getCjkFontCandidates(): string[] {
   const candidates = [
+    ...BUNDLED_CJK_FONT_CANDIDATES,
     ...discoverFontconfigCandidates(),
     ...CJK_FONT_CANDIDATES.filter(isStandaloneFontFile),
   ];
@@ -138,10 +143,11 @@ export async function embedFontForText(
     if (bytes) {
       const fontkit = await getFontkitInstance();
       pdfDoc.registerFontkit(fontkit as never);
-      // pdf-lib's subsetter does not reliably preserve all CJK glyphs (e.g.
-      // katakana and some kanji may become boxes), so embed the full font.
-      // The resulting PDF is larger but readable across all viewers.
-      const regular = await pdfDoc.embedFont(bytes, { subset: false });
+      // Subset embedding keeps Japanese PDFs small. This requires a complete
+      // font: the previously bundled Droid Sans Fallback build lacked Latin
+      // glyphs, which both broke subsetting (katakana tofu) and dropped every
+      // digit. The bundled IPA Gothic covers ASCII + CJK and subsets cleanly.
+      const regular = await pdfDoc.embedFont(bytes, { subset: true });
       // Most candidate sets only ship a regular face; reuse it for bold and rely on size contrast.
       return { regular, bold: regular };
     }

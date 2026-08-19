@@ -37,8 +37,8 @@ import { getPreviewToolStatus, previewGeneratedFile } from "./file-preview";
 import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 
-const AUDIT_TIMEOUT_MS = 60_000;
-const REVISION_TIMEOUT_MS = 60_000;
+const AUDIT_TIMEOUT_MS = 120_000;
+const REVISION_TIMEOUT_MS = 120_000;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 
