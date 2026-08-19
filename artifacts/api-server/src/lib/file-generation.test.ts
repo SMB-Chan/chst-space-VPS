@@ -152,4 +152,14 @@ describe("renderFile", () => {
     const file = await renderFile("docx", wrapFileData(SAMPLE_FILE_DATA));
     expect(file.format).toBe("docx");
   });
+
+  it("renders a Japanese PDF without WinAnsi encoding errors", async () => {
+    const data = {
+      title: "検索結果まとめ",
+      content: "# 検索結果\n\nこれは日本語のPDF生成テストです。\n\n- ポイント1\n- ポイント2",
+    };
+    const file = await renderFile("pdf", wrapFileData(data));
+    expect(file.buffer.length).toBeGreaterThan(100);
+    expect(file.filename).toMatch(/\.pdf$/);
+  });
 });
