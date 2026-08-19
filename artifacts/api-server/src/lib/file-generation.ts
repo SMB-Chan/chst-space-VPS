@@ -99,7 +99,7 @@ export function buildFileGenerationPrompt(
 ): string {
   const formatInstructions: Record<FileFormat, string> = {
     pdf:
-      '{"title": "Document title", "content": "Full markdown content with headings, paragraphs and bullet lists"}',
+      '{"title": "Document title", "content": "Full markdown content with headings, paragraphs and bullet lists. This will be rendered as a PDF."}',
     docx:
       '{"title": "Document title", "content": "Full markdown content with headings, paragraphs and bullet lists"}',
     xlsx:
@@ -108,12 +108,20 @@ export function buildFileGenerationPrompt(
       '{"title": "Presentation title", "slides": [{"title": "Slide title", "bullets": ["Point 1", "Point 2"]}]}',
   };
 
+  const formatNotes: Record<FileFormat, string> = {
+    pdf: "The output will be converted to a real PDF file. Do NOT write HTML, do NOT ask the user to create the file, and do NOT provide markdown code blocks outside the <file_data> tag.",
+    docx: "The output will be converted to a Word document. Do NOT ask the user to create the file.",
+    xlsx: "The output will be converted to an Excel workbook. Do NOT ask the user to create the file.",
+    pptx: "The output will be converted to a PowerPoint presentation. Do NOT ask the user to create the file.",
+  };
+
   const parts = [
     "You are a document generation assistant. Based on the conversation below, produce structured content for a downloadable file.",
     "",
     `Requested format: ${format.toUpperCase()}`,
+    formatNotes[format],
     "",
-    "Return ONLY a JSON object wrapped in <file_data>...</file_data> tags. Do not include markdown explanations outside the tags.",
+    "Return ONLY a JSON object wrapped in <file_data>...</file_data> tags. Do not include markdown explanations, HTML code, or instructions outside the tags.",
     "",
     "Schema:",
     `<file_data>\n${formatInstructions[format]}\n</file_data>`,

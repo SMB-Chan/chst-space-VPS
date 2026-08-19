@@ -75,8 +75,18 @@ const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファ
 - artifact block の内容はユーザーに見せる本文ではなく、ダウンロードファイルとして保存される。
 - 通常の回答本文には artifact block を残さず、何を作ったかだけ短く書く。`;
 
+const FILE_GENERATION_SYSTEM_PROMPT = `ユーザーが PDF / Word / Excel / PowerPoint ファイルの生成を求めています。システムが自動的にファイルを生成してダウンロードボタンを表示するので、あなたは以下のように答えてください。
+
+- HTML や Markdown のコードブロック、雛形、手順を出力しない。
+- 「ユーザー側で作成してください」「ブラウザで印刷してください」などの指示を出さない。
+- 作成するファイルの概要（タイトルや主なセクション）を短く述べ、後はファイルの自動生成に任せる。`;
+
 function wantsArtifact(userText: string): boolean {
-  return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html|pdf|excel|word|powerpoint)/i.test(userText);
+  return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html)/i.test(userText);
+}
+
+function wantsGeneratedFile(userText: string): boolean {
+  return /(pdf|docx|xlsx|pptx|word|excel|powerpoint|エクセル|パワーポイント|ワード)/i.test(userText);
 }
 
 export async function streamChatReply(args: {
@@ -137,6 +147,9 @@ export async function streamChatReply(args: {
   try {
     if (wantsArtifact(userText)) {
       chatMessages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
+    }
+    if (wantsGeneratedFile(userText) || requestedFileFormat) {
+      chatMessages.push({ role: "system", content: FILE_GENERATION_SYSTEM_PROMPT });
     }
 
     const skills = matchSkills(userText);
@@ -467,6 +480,15 @@ function formatMessageForSummary(
   return "";
 }
 
+function stripCodeAndArtifactBlocks(text: string): string {
+  return text
+    .replace(/```artifact\s*[^\n]*\n[\s\S]*?```/gi, "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`{3,}/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function buildFileGenerationSummary(
   userText: string,
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
@@ -476,7 +498,7 @@ function buildFileGenerationSummary(
   const historyText = recent
     .map((msg) => {
       const role = msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "System";
-      return `${role}:\n${formatMessageForSummary(msg)}`;
+      return `${role}:\n${stripCodeAndArtifactBlocks(formatMessageForSummary(msg))}`;
     })
     .join("\n\n");
 
@@ -488,7 +510,7 @@ function buildFileGenerationSummary(
     userText,
     "",
     "Assistant response to base the file on:",
-    assistantResponse,
+    stripCodeAndArtifactBlocks(assistantResponse),
   ].join("\n");
 }
 

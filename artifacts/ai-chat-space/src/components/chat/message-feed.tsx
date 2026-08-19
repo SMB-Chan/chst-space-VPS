@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from "react";
 import { OpenaiMessage, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
-import { Markdown } from "./markdown";
+import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { Loader2, Paperclip, Bot, Brain, ChevronDown, FileText, Download } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -154,7 +154,7 @@ function AuditCard({
       </button>
       {open && content ? (
         <div className="px-3 pb-3 text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]">
-          <Markdown content={content} />
+          <SafeMarkdown content={content} />
         </div>
       ) : null}
     </div>
@@ -371,7 +371,7 @@ export function MessageFeed({
                       <div className="whitespace-pre-wrap">{displayContent}</div>
                     ) : (
                       <>
-                        <Markdown content={displayContent} />
+                        <SafeMarkdown content={displayContent} />
                         {message.id === STREAMING_ASSISTANT_ID &&
                           (streamingPhase === "generating" || streamingPhase === "revising") && (
                           <span
