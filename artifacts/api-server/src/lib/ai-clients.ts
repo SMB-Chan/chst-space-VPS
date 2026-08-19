@@ -90,11 +90,12 @@ export function applyGenerationParams(
   provider: ModelProvider,
   level: ReasoningLevel,
 ): void {
+  const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
   if (provider === "openai") {
     opts.max_completion_tokens = 8192;
     // Only o-series reliably accepts reasoning_effort on the Replit proxy.
     // Sending it to gpt-5.6-* returns 400 Unsupported parameter.
-    if (modelId.startsWith("o")) {
+    if (model?.reasoning === "openai" && modelId.startsWith("o")) {
       opts.reasoning_effort = level === "off" ? "low" : level;
     }
     return;
@@ -102,7 +103,6 @@ export function applyGenerationParams(
 
   opts.max_tokens = 8192;
   const extra: Record<string, unknown> = { incremental_output: true };
-  const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
   if (model?.reasoning === "dashscope") {
     extra.enable_thinking = level !== "off";
     if (level !== "off") {

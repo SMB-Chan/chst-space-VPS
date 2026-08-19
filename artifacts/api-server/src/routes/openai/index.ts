@@ -11,7 +11,6 @@ import {
   parseReasoningLevel,
   getClientForModel,
 } from "../../lib/ai-clients";
-import { ensureChatSchema } from "../../lib/ensure-schema";
 import { streamChatReply } from "../../lib/chat-stream";
 import { logger } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
@@ -40,6 +39,12 @@ function publicAiError(err: unknown): string {
     return "AI APIキーが無効です。Secretsを確認してください。";
   }
   return "AIの応答中にエラーが発生しました。";
+}
+
+function parsePositiveInt(raw: string | number | string[] | undefined): number | undefined {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  const value = typeof first === "number" ? first : Number.parseInt(String(first ?? ""), 10);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function parseStoredAssetIds(raw: string | null): number[] | null {
@@ -75,13 +80,12 @@ router.get("/openai/models", (_req, res) => {
 
 router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) => {
   const userId = getUserId(req);
-  const artifactId = Number.parseInt(String(req.params.artifactId ?? ""), 10);
-  if (!Number.isFinite(artifactId)) {
+  const artifactId = parsePositiveInt(req.params.artifactId);
+  if (artifactId === undefined) {
     res.status(400).json({ error: "Invalid artifact id" });
     return;
   }
   try {
-    await ensureChatSchema();
     const [artifact] = await db
       .select()
       .from(artifacts)
@@ -105,7 +109,6 @@ router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) 
 router.get("/openai/conversations", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    await ensureChatSchema();
     const result = await db
       .select()
       .from(conversations)
@@ -122,12 +125,11 @@ router.get("/openai/conversations", requireAuth, async (req, res) => {
 router.get("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const conversationId = parseInt(String(req.params.conversationId ?? ""), 10);
-    if (isNaN(conversationId)) {
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    if (conversationId === undefined) {
       res.status(400).json({ error: "Invalid conversation ID" });
       return;
     }
-    await ensureChatSchema();
     const [conversation] = await db
       .select()
       .from(conversations)
@@ -182,7 +184,6 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
       res.status(400).json({ error: "Invalid request body" });
       return;
     }
-    await ensureChatSchema();
     const [conversation] = await db
       .insert(conversations)
       .values({ userId, title: parsed.data.title })
@@ -197,7 +198,6 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
 router.delete("/openai/conversations", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    await ensureChatSchema();
     await db.delete(conversations).where(eq(conversations.userId, userId));
     res.status(204).send();
   } catch (err) {
@@ -209,12 +209,11 @@ router.delete("/openai/conversations", requireAuth, async (req, res) => {
 router.delete("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const conversationId = parseInt(String(req.params.conversationId ?? ""), 10);
-    if (isNaN(conversationId)) {
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    if (conversationId === undefined) {
       res.status(400).json({ error: "Invalid conversation ID" });
       return;
     }
-    await ensureChatSchema();
     const [deleted] = await db
       .delete(conversations)
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
@@ -230,17 +229,23 @@ router.delete("/openai/conversations/:conversationId", requireAuth, async (req, 
   }
 });
 
+const historyMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+});
+
 const sendMessageBody = z.object({
   content: z.string().min(1).max(100_000),
   modelId: z.string().optional(),
+  history: z.array(historyMessageSchema).max(200).optional(),
 });
 
 const REQUESTED_FILE_FORMATS = ["pdf", "docx", "xlsx", "pptx"] as const;
 
 router.post("/openai/conversations/:conversationId/messages", requireAuth, async (req, res) => {
   const userId = getUserId(req);
-  const conversationId = parseInt(String(req.params.conversationId ?? ""), 10);
-  if (isNaN(conversationId)) {
+  const conversationId = parsePositiveInt(req.params.conversationId);
+  if (conversationId === undefined) {
     res.status(400).json({ error: "Invalid conversation ID" });
     return;
   }
@@ -252,7 +257,6 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
   }
 
   try {
-    await ensureChatSchema();
     const [conversation] = await db
       .select()
       .from(conversations)
@@ -264,7 +268,10 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
     }
 
     const { text: newMessageText, imageUrl: newImageUrl } = extractImageDataUrl(parsed.data.content);
-    const modelId = parsed.data.modelId || DEFAULT_MODEL;
+    const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
+    const modelId =
+      parsed.data.modelId ||
+      (AVAILABLE_MODELS.some((m) => m.id === modelQuery) ? modelQuery : DEFAULT_MODEL);
     const reasoningLevel = parseReasoningLevel(req.query.reasoning);
     const auditModelQuery = typeof req.query.auditModel === "string" ? req.query.auditModel : "";
     const auditModelId =
@@ -360,6 +367,12 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         ];
         const inserted = await db.insert(messages).values(messageInserts).returning();
         const assistantMessage = inserted.find((m) => m.role === "assistant");
+        if (assistantMessage && assetIds && assetIds.length > 0) {
+          await db
+            .update(assets)
+            .set({ messageId: assistantMessage.id })
+            .where(inArray(assets.id, assetIds));
+        }
         if (!extractedArtifacts?.length || !assistantMessage) return;
 
         const existing = await db
@@ -416,7 +429,6 @@ router.delete("/openai/messages", requireAuth, async (req, res) => {
       res.status(400).json({ error: "Invalid request body" });
       return;
     }
-    await ensureChatSchema();
     const owned = await db
       .select({ id: messages.id })
       .from(messages)
@@ -444,7 +456,10 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
 
   try {
     const { text: newMessageText, imageUrl: newImageUrl } = extractImageDataUrl(parsed.data.content);
-    const modelId = parsed.data.modelId || DEFAULT_MODEL;
+    const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
+    const modelId =
+      parsed.data.modelId ||
+      (AVAILABLE_MODELS.some((m) => m.id === modelQuery) ? modelQuery : DEFAULT_MODEL);
     const reasoningLevel = parseReasoningLevel(req.query.reasoning);
     const auditModelQuery = typeof req.query.auditModel === "string" ? req.query.auditModel : "";
     const auditModelId =
@@ -469,7 +484,10 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       }
     }
 
-    const chatMessages: { role: "user"; content: unknown }[] = [];
+    const chatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
+    for (const hist of parsed.data.history ?? []) {
+      chatMessages.push({ role: hist.role, content: hist.content });
+    }
     if (newImageUrl) {
       chatMessages.push({
         role: "user",
@@ -511,14 +529,13 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
 router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<void> => {
   const userId = getUserId(req);
   const rawId = Array.isArray(req.params.assetId) ? req.params.assetId[0] : req.params.assetId;
-  const assetId = Number.parseInt(rawId, 10);
-  if (!Number.isFinite(assetId)) {
+  const assetId = parsePositiveInt(rawId);
+  if (assetId === undefined) {
     res.status(400).json({ error: "Invalid asset id" });
     return;
   }
 
   try {
-    await ensureChatSchema();
     const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
     if (!asset) {
       res.status(404).json({ error: "Asset not found" });
@@ -534,7 +551,19 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
       return;
     }
 
+    const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
+    if (!base64Pattern.test(asset.data)) {
+      logger.error({ assetId }, "Asset data is not valid base64");
+      res.status(500).json({ error: "ファイルデータが破損しています" });
+      return;
+    }
     const buffer = Buffer.from(asset.data, "base64");
+    if (buffer.length !== asset.size) {
+      logger.warn(
+        { assetId, expectedSize: asset.size, actualSize: buffer.length },
+        "Asset size mismatch; using decoded buffer length",
+      );
+    }
     res.setHeader("Content-Type", asset.mimeType);
     res.setHeader(
       "Content-Disposition",

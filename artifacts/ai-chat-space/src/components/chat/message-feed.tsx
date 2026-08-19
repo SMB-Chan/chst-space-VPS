@@ -101,10 +101,6 @@ function PhaseDots() {
 
 function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(live);
-  useEffect(() => {
-    // ライブ中は開き、終わったら畳んで本文を優先する（モバイルで推論が画面を占有しないように）
-    setOpen(live);
-  }, [live]);
   if (!text && !live) return null;
   return (
     <div className="w-full rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
@@ -137,9 +133,6 @@ function AuditCard({
   live?: boolean;
 }) {
   const [open, setOpen] = useState(!!live);
-  useEffect(() => {
-    setOpen(!!live);
-  }, [live]);
   if (!content && !live) return null;
   return (
     <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
@@ -176,7 +169,7 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
           )}
         >
           <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <FileText className="w-4.5 h-4.5" />
+            <FileText className="w-[1.125rem] h-[1.125rem]" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium truncate">{artifact.filename}</div>
@@ -290,8 +283,8 @@ export function MessageFeed({
           if (!isUser) {
             if (!sources || sources.length === 0) {
               // Try to extract legacy sources from the inline block
-              const legacyMatch = displayContent.match(
-                /\n\n参照元:\n((?:- \[.*?\]\(.*?\)\n?)+)$/s
+              const legacyMatch = displayContent.trimEnd().match(
+                /\n\n参照元:\n((?:- \[.*?\]\(.*?\)\n?)+)/s
               );
               if (legacyMatch) {
                 const extracted: { title: string; url: string }[] = [];

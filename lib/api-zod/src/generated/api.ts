@@ -161,9 +161,21 @@ export const SendOpenaiMessageParams = zod.object({
   "id": zod.coerce.number().int()
 })
 
+export const SendOpenaiMessageQueryParams = zod.object({
+  "model": zod.coerce.string().optional().describe('Model ID to use for the response'),
+  "reasoning": zod.enum(['off', 'low', 'medium', 'high']).optional().describe('Reasoning level for the primary model'),
+  "auditModel": zod.coerce.string().optional().describe('Optional model ID to audit the response'),
+  "auditReasoning": zod.enum(['off', 'low', 'medium', 'high']).optional().describe('Reasoning level for the audit model')
+})
+
 export const SendOpenaiMessageBody = zod.object({
   "content": zod.string(),
-  "fileFormat": zod.string().nullish().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)')
+  "modelId": zod.string().optional().describe('Model ID to use (overrides the query parameter)'),
+  "fileFormat": zod.string().nullish().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)'),
+  "history": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})).optional().describe('Conversation history for ephemeral\/private mode')
 })
 
 export const SendOpenaiMessageResponse = zod.unknown()

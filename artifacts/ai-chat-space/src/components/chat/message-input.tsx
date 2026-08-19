@@ -51,12 +51,12 @@ function validateFile(file: File): string | null {
   if (file.size > MAX_FILE_SIZE_BYTES) {
     return `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。1件15MB以下のファイルを選択してください。`;
   }
-  const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type) || file.type.startsWith("image/");
+  const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
   const isText = ACCEPTED_TEXT_TYPES.includes(file.type) ||
     file.name.endsWith(".txt") || file.name.endsWith(".md") ||
     file.name.endsWith(".csv") || file.name.endsWith(".json");
   if (!isImage && !isText) {
-    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP）またはテキストファイル（TXT・MD・CSV・JSON）を添付してください。`;
+    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP・SVG）またはテキストファイル（TXT・MD・CSV・JSON）を添付してください。`;
   }
   return null;
 }
@@ -66,7 +66,7 @@ function totalSize(files: StagedFile[]): number {
 }
 
 function readOne(file: File): Promise<OutgoingAttachment> {
-  const isImage = file.type.startsWith("image/");
+  const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {

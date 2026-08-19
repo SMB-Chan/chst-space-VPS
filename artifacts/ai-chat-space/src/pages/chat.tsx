@@ -48,6 +48,7 @@ async function streamMessage(
   onArtifacts: (artifacts: ChatArtifact[]) => void,
   onResetContent: () => void,
   onFile: (file: { id: number; filename: string; mimeType: string }) => void,
+  artifactBlobUrlCache: React.MutableRefObject<Map<string, string>>,
   signal?: AbortSignal,
   extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string; fileFormat?: FileFormat },
 ) {
@@ -65,6 +66,7 @@ async function streamMessage(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content,
+          modelId: model,
           ...(extra?.fileFormat ? { fileFormat: extra.fileFormat } : {}),
           ...(extra?.ephemeral && extra.history ? { history: extra.history } : {}),
         }),
@@ -164,7 +166,13 @@ async function streamMessage(
             content: typeof raw.content === "string" ? raw.content : undefined,
           };
           if (!artifact.downloadUrl && artifact.content) {
-            artifact.downloadUrl = URL.createObjectURL(new Blob([artifact.content], { type: artifact.mime }));
+            const cacheKey = `${artifact.filename}:${artifact.content.length}:${artifact.mime}`;
+            let url = artifactBlobUrlCache.current.get(cacheKey);
+            if (!url) {
+              url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.mime }));
+              artifactBlobUrlCache.current.set(cacheKey, url);
+            }
+            artifact.downloadUrl = url;
           }
           return artifact.downloadUrl ? [artifact] : [];
         });
@@ -208,17 +216,16 @@ async function streamMessage(
     }
     if (!failed && buffer.trim()) handleSseLine(buffer.trim());
     if (!failed && !doneCalled) {
-      // done を受け取らずにストリームが終わった = 途中切断。
-      // サーバー側は監査・修正と保存を続行するので、開き直せば最終稿が見える。
-      failed = true;
-      onError(
-        new Error(
-          receivedContent
-            ? "接続が途中で切れました。会話を開き直すと、保存された最新の回答を確認できます。"
-            : "応答が空でした。もう一度お試しください。",
-        ),
-      );
-      return;
+      if (receivedContent) {
+        // The server closed the HTTP response without emitting {done:true}.
+        // As long as we received content, treat the turn as complete rather
+        // than showing a misleading "connection lost" error.
+        callDoneOnce();
+      } else {
+        failed = true;
+        onError(new Error("応答が空でした。もう一度お試しください。"));
+        return;
+      }
     }
     if (!failed) callDoneOnce();
   } catch (err) {
@@ -232,7 +239,7 @@ export function ChatPage() {
   const params = useParams();
   const [location, setLocation] = useLocation();
   const isPrivate = location === "/private" || location.startsWith("/private?");
-  const initialSettings = loadSettings();
+  const [initialSettings] = useState(loadSettings);
   const rawId = params.id;
   const parsedId = rawId ? Number.parseInt(rawId, 10) : NaN;
   const invalidConversationId = rawId != null && !Number.isFinite(parsedId);
@@ -252,6 +259,7 @@ export function ChatPage() {
     audit: "",
     artifacts: [] as ChatArtifact[],
   });
+  const artifactBlobUrlCache = useRef(new Map<string, string>());
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
   const [streamingReasoning, setStreamingReasoning] = useState<string>("");
@@ -300,6 +308,10 @@ export function ChatPage() {
     setSearchWarning(null);
     setActiveSkills([]);
     setStreamingAudit("");
+    // Revoke object URLs created for ephemeral artifact downloads so we do not
+    // leak memory when the user switches conversations.
+    artifactBlobUrlCache.current.forEach((url) => URL.revokeObjectURL(url));
+    artifactBlobUrlCache.current.clear();
   }, [conversationId]);
 
   const { data: conversation, isLoading, isError: conversationLoadError } = useGetOpenaiConversation(
@@ -529,6 +541,7 @@ export function ChatPage() {
       (file) => {
         setStreamingFiles((prev) => [...prev, file]);
       },
+      artifactBlobUrlCache,
       controller.signal,
       {
         ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
@@ -544,8 +557,10 @@ export function ChatPage() {
   const optimisticAlreadyOnServer =
     optimisticUserMessage != null &&
     serverMessages.some(
-      (m) => m.role === "user" && m.content === optimisticUserMessage.content
-        && new Date(m.createdAt).getTime() >= new Date(optimisticUserMessage.createdAt).getTime() - 60_000
+      (m) =>
+        m.role === "user" &&
+        m.content === optimisticUserMessage.content &&
+        Math.abs(new Date(m.createdAt).getTime() - new Date(optimisticUserMessage.createdAt).getTime()) <= 2_000,
     );
 
   // ストリーミング中の内容がサーバーに保存済みなら、ストリーミング吹き出しも重複させない
@@ -714,10 +729,16 @@ export function ChatPage() {
                   : "text-muted-foreground border-border/50 hover:text-foreground",
                 (isStreaming || createConversation.isPending) && "opacity-50",
               )}
-              title={auditModel ? `監査: ${auditModel}` : "監査モード"}
+              title={
+                auditEnabled && auditModel
+                  ? `監査: ${auditModel}`
+                  : auditEnabled
+                    ? "監査 ON（監査モデルが選択されていません）"
+                    : "監査モード"
+              }
             >
               <Scale className="w-3 h-3" />
-              監査{auditEnabled ? " ON" : ""}
+              監査{auditEnabled && auditModel ? " ON" : auditEnabled ? " ON(?)" : ""}
             </button>
           </div>
           <MessageInput

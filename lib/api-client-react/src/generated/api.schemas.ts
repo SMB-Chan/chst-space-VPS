@@ -46,10 +46,27 @@ export interface OpenaiConversationInput {
   title: string;
 }
 
+export type OpenaiMessageInputHistoryItemRole = typeof OpenaiMessageInputHistoryItemRole[keyof typeof OpenaiMessageInputHistoryItemRole];
+
+
+export const OpenaiMessageInputHistoryItemRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export type OpenaiMessageInputHistoryItem = {
+  role: OpenaiMessageInputHistoryItemRole;
+  content: string;
+};
+
 export interface OpenaiMessageInput {
   content: string;
+  /** Model ID to use (overrides the query parameter) */
+  modelId?: string;
   /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
   fileFormat?: string | null;
+  /** Conversation history for ephemeral/private mode */
+  history?: OpenaiMessageInputHistoryItem[];
 }
 
 export interface OpenaiConversationWithMessages {
@@ -62,4 +79,43 @@ export interface OpenaiConversationWithMessages {
 export interface OpenaiError {
   error: string;
 }
+
+export type SendOpenaiMessageParams = {
+/**
+ * Model ID to use for the response
+ */
+model?: string;
+/**
+ * Reasoning level for the primary model
+ */
+reasoning?: SendOpenaiMessageReasoning;
+/**
+ * Optional model ID to audit the response
+ */
+auditModel?: string;
+/**
+ * Reasoning level for the audit model
+ */
+auditReasoning?: SendOpenaiMessageAuditReasoning;
+};
+
+export type SendOpenaiMessageReasoning = typeof SendOpenaiMessageReasoning[keyof typeof SendOpenaiMessageReasoning];
+
+
+export const SendOpenaiMessageReasoning = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type SendOpenaiMessageAuditReasoning = typeof SendOpenaiMessageAuditReasoning[keyof typeof SendOpenaiMessageAuditReasoning];
+
+
+export const SendOpenaiMessageAuditReasoning = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
 

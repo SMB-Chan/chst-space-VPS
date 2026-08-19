@@ -80,7 +80,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
     }
   }, [isMobile, sidebarOpen]);
 
-  const activeId = params.id ? parseInt(params.id) : null;
+  const activeId = params.id ? Number.parseInt(params.id, 10) : null;
 
   const { signOut } = useClerk();
   const { user } = useUser();

@@ -52,14 +52,24 @@ export class ExternalCommandError extends Error {
 
 let cachedToolStatus: PreviewToolStatus | null = null;
 
-function runCommand(command: string, args: string[], cwd?: string): Promise<void> {
+const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
+
+function runCommand(
+  command: string,
+  args: string[],
+  cwd?: string,
+  timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: timeoutMs,
     });
 
     let stderr = "";
+    let killedByTimeout = false;
+
     proc.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
@@ -76,9 +86,25 @@ function runCommand(command: string, args: string[], cwd?: string): Promise<void
       );
     });
 
-    proc.on("close", (code) => {
+    // If the process is still alive after the spawn timeout, force-kill it.
+    const hardKill = setTimeout(() => {
+      killedByTimeout = true;
+      proc.kill("SIGKILL");
+    }, timeoutMs + 5_000);
+
+    proc.on("close", (code, signal) => {
+      clearTimeout(hardKill);
       if (code === 0) {
         resolve();
+      } else if (killedByTimeout || signal) {
+        reject(
+          new ExternalCommandError({
+            command,
+            commandArgs: args,
+            exitCode: null,
+            stderr: `Command timed out after ${timeoutMs}ms (signal: ${signal ?? "SIGTERM"})\n${stderr}`,
+          }),
+        );
       } else {
         reject(
           new ExternalCommandError({

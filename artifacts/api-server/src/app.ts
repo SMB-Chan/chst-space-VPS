@@ -37,7 +37,24 @@ app.use(
 );
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ credentials: true, origin: true }));
+const ALLOWED_ORIGINS = new Set(
+  (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [])
+    .concat(["http://localhost:5173", "http://127.0.0.1:5173"])
+    .filter(Boolean),
+);
+
+app.use(
+  cors({
+    credentials: true,
+    origin: (origin, callback) => {
+      if (!origin || ALLOWED_ORIGINS.has(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
+  }),
+);
 // Image attachments need a large body; everything else stays small so
 // unauthenticated requests cannot force a 25MB parse.
 app.use([...LARGE_JSON_PATHS], express.json({ limit: LARGE_JSON_LIMIT }));

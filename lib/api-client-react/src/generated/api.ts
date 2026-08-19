@@ -26,7 +26,8 @@ import type {
   OpenaiConversationWithMessages,
   OpenaiError,
   OpenaiMessage,
-  OpenaiMessageInput
+  OpenaiMessageInput,
+  SendOpenaiMessageParams
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -727,21 +728,30 @@ export function useListOpenaiMessages<TData = Awaited<ReturnType<typeof listOpen
 
 
 
-export const getSendOpenaiMessageUrl = (id: number,) => {
+export const getSendOpenaiMessageUrl = (id: number,
+    params?: SendOpenaiMessageParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/openai/conversations/${id}/messages`
+  return stringifiedParams.length > 0 ? `/api/openai/conversations/${id}/messages?${stringifiedParams}` : `/api/openai/conversations/${id}/messages`
 }
 
 /**
  * @summary Send a text message and receive a streaming text response
  */
 export const sendOpenaiMessage = async (id: number,
-    openaiMessageInput: OpenaiMessageInput, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+    openaiMessageInput: OpenaiMessageInput,
+    params?: SendOpenaiMessageParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
 
-  return customFetch<unknown>(getSendOpenaiMessageUrl(id),
+  return customFetch<unknown>(getSendOpenaiMessageUrl(id,params),
   {
     ...options,
     method: 'POST',
@@ -755,8 +765,8 @@ export const sendOpenaiMessage = async (id: number,
 
 
 export const getSendOpenaiMessageMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiMessage>>, TError,{id: number;data: BodyType<OpenaiMessageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiMessage>>, TError,{id: number;data: BodyType<OpenaiMessageInput>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiMessage>>, TError,{id: number;data: BodyType<OpenaiMessageInput>;params?: SendOpenaiMessageParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiMessage>>, TError,{id: number;data: BodyType<OpenaiMessageInput>;params?: SendOpenaiMessageParams}, TContext> => {
 
 const mutationKey = ['sendOpenaiMessage'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -768,10 +778,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendOpenaiMessage>>, {id: number;data: BodyType<OpenaiMessageInput>}> = (props) => {
-          const {id,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendOpenaiMessage>>, {id: number;data: BodyType<OpenaiMessageInput>;params?: SendOpenaiMessageParams}> = (props) => {
+          const {id,data,params} = props ?? {};
 
-          return  sendOpenaiMessage(id,data,requestOptions)
+          return  sendOpenaiMessage(id,data,params,requestOptions)
         }
 
 
@@ -789,11 +799,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Send a text message and receive a streaming text response
  */
 export const useSendOpenaiMessage = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiMessage>>, TError,{id: number;data: BodyType<OpenaiMessageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOpenaiMessage>>, TError,{id: number;data: BodyType<OpenaiMessageInput>;params?: SendOpenaiMessageParams}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof sendOpenaiMessage>>,
         TError,
-        {id: number;data: BodyType<OpenaiMessageInput>},
+        {id: number;data: BodyType<OpenaiMessageInput>;params?: SendOpenaiMessageParams},
         TContext
       > => {
       return useMutation(getSendOpenaiMessageMutationOptions(options));

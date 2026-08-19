@@ -204,6 +204,32 @@ paths:
           required: true
           schema:
             type: integer
+        - name: model
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Model ID to use for the response
+        - name: reasoning
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [off, low, medium, high]
+          description: Reasoning level for the primary model
+        - name: auditModel
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional model ID to audit the response
+        - name: auditReasoning
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [off, low, medium, high]
+          description: Reasoning level for the audit model
       requestBody:
         required: true
         content:
@@ -354,10 +380,27 @@ components:
       properties:
         content:
           type: string
+        modelId:
+          type: string
+          description: Model ID to use (overrides the query parameter)
         fileFormat:
           type: string
           description: Optional target file format for generated downloads (pdf, docx, xlsx, pptx)
           nullable: true
+        history:
+          type: array
+          description: Conversation history for ephemeral/private mode
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
+            required:
+              - role
+              - content
       required:
         - content
     OpenaiConversationWithMessages:
