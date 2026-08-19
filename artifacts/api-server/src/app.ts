@@ -63,6 +63,9 @@ app.use([...LARGE_JSON_PATHS], express.urlencoded({ extended: true, limit: LARGE
 app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));
 
+// Health checks are mounted before Clerk so deployment probes never depend on auth.
+app.use("/api", healthRouter);
+
 // Resolve the publishable key from the incoming request host so the same
 // server can serve multiple Clerk custom domains. Falls back to
 // CLERK_PUBLISHABLE_KEY when the host doesn't map to a custom domain.
@@ -74,9 +77,6 @@ app.use(
     ),
   })),
 );
-
-// Health checks are mounted before Clerk so deployment probes never depend on auth.
-app.use("/api", healthRouter);
 
 app.use("/api", router);
 

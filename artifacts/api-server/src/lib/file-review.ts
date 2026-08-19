@@ -50,8 +50,9 @@ export async function reviewLayout(args: {
   format: FileFormat;
   images: Buffer[];
   originalData?: string;
+  signal?: AbortSignal;
 }): Promise<string> {
-  const { client, modelId, format, images, originalData } = args;
+  const { client, modelId, format, images, originalData, signal } = args;
 
   const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     { type: "text", text: buildLayoutReviewPrompt(format, images.length) },
@@ -71,11 +72,14 @@ export async function reviewLayout(args: {
     });
   }
 
-  const response = await client.chat.completions.create({
-    model: modelId,
-    messages: [{ role: "user", content }],
-    max_tokens: 2048,
-  });
+  const response = await client.chat.completions.create(
+    {
+      model: modelId,
+      messages: [{ role: "user", content }],
+      max_tokens: 2048,
+    },
+    { signal },
+  );
 
   const text = response.choices[0]?.message?.content?.trim() ?? "";
   if (!text) {

@@ -39,7 +39,8 @@ import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 
 const AUDIT_TIMEOUT_MS = 60_000;
 const REVISION_TIMEOUT_MS = 60_000;
-const FILE_GENERATION_TIMEOUT_MS = 120_000;
+const FILE_GENERATION_TIMEOUT_MS = 300_000;
+const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 
 function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -813,13 +814,19 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
 
           currentStage = "layout-review-model";
           const reviewStartedAt = Date.now();
-          const feedback = await reviewLayout({
-            client: vision.client,
-            modelId: vision.modelId,
-            format: fileFormat,
-            images,
-            originalData: JSON.stringify(previousData),
-          });
+          const feedback = await withTimeout(
+            (signal) =>
+              reviewLayout({
+                client: vision.client,
+                modelId: vision.modelId,
+                format: fileFormat,
+                images,
+                originalData: JSON.stringify(previousData),
+                signal,
+              }),
+            LAYOUT_REVIEW_TIMEOUT_MS,
+            "Layout review",
+          );
           logger.info(
             {
               ...baseDiagnostic,
