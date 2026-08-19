@@ -36,6 +36,19 @@ import {
 import { arePreviewToolsAvailable, previewGeneratedFile } from "./file-preview";
 import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
 
+const AUDIT_TIMEOUT_MS = 60_000;
+const REVISION_TIMEOUT_MS = 60_000;
+const FILE_GENERATION_TIMEOUT_MS = 120_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]);
+}
+
 export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
@@ -201,28 +214,32 @@ export async function streamChatReply(args: {
               `data: ${JSON.stringify({ status: "auditing", model: auditModelId })}\n\n`,
             );
           }
-          const auditText = await streamModelText({
-            client: auditor.client,
-            provider: auditor.provider,
-            modelId: auditModelId,
-            reasoningLevel: auditReasoningLevel,
-            messages: [
-              { role: "system", content: AUDIT_SYSTEM_PROMPT },
-              {
-                role: "user",
-                content: buildAuditUserMessage({
-                  question: userText,
-                  answer: fullResponse,
-                  sourceText: webContext.contextText,
-                }),
+          const auditText = await withTimeout(
+            streamModelText({
+              client: auditor.client,
+              provider: auditor.provider,
+              modelId: auditModelId,
+              reasoningLevel: auditReasoningLevel,
+              messages: [
+                { role: "system", content: AUDIT_SYSTEM_PROMPT },
+                {
+                  role: "user",
+                  content: buildAuditUserMessage({
+                    question: userText,
+                    answer: fullResponse,
+                    sourceText: webContext.contextText,
+                  }),
+                },
+              ],
+              onDelta: (added, kind) => {
+                if (clientGone || kind !== "content") return;
+                res.write(`data: ${JSON.stringify({ audit: added })}\n\n`);
               },
-            ],
-            onDelta: (added, kind) => {
-              if (clientGone || kind !== "content") return;
-              res.write(`data: ${JSON.stringify({ audit: added })}\n\n`);
-            },
-            shouldStop: () => false,
-          });
+              shouldStop: () => false,
+            }),
+            AUDIT_TIMEOUT_MS,
+            "Audit pass",
+          );
           if (auditText.trim()) {
             audit = { content: auditText.trim(), modelId: auditModelId };
           }
@@ -249,37 +266,41 @@ export async function streamChatReply(args: {
           if (!clientGone) {
             res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
           }
-          const revised = await streamModelText({
-            client,
-            provider,
-            modelId,
-            reasoningLevel,
-            messages: [
-              ...chatMessages,
-              { role: "assistant", content: fullResponse },
-              {
-                role: "user",
-                content: buildRevisionUserMessage({
-                  question: userText,
-                  draft: fullResponse,
-                  audit: audit.content,
-                }),
+          const revised = await withTimeout(
+            streamModelText({
+              client,
+              provider,
+              modelId,
+              reasoningLevel,
+              messages: [
+                ...chatMessages,
+                { role: "assistant", content: fullResponse },
+                {
+                  role: "user",
+                  content: buildRevisionUserMessage({
+                    question: userText,
+                    draft: fullResponse,
+                    audit: audit.content,
+                  }),
+                },
+              ],
+              onDelta: (added, kind) => {
+                if (clientGone) return;
+                if (kind === "reasoning") {
+                  res.write(`data: ${JSON.stringify({ status: "revising", reasoning: added })}\n\n`);
+                  return;
+                }
+                if (!replacedDraft) {
+                  replacedDraft = true;
+                  res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
+                }
+                res.write(`data: ${JSON.stringify({ content: added, status: "revising" })}\n\n`);
               },
-            ],
-            onDelta: (added, kind) => {
-              if (clientGone) return;
-              if (kind === "reasoning") {
-                res.write(`data: ${JSON.stringify({ status: "revising", reasoning: added })}\n\n`);
-                return;
-              }
-              if (!replacedDraft) {
-                replacedDraft = true;
-                res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
-              }
-              res.write(`data: ${JSON.stringify({ content: added, status: "revising" })}\n\n`);
-            },
-            shouldStop: () => false,
-          });
+              shouldStop: () => false,
+            }),
+            REVISION_TIMEOUT_MS,
+            "Revision pass",
+          );
           if (revised.trim()) {
             fullResponse = revised.trim();
           }
@@ -308,19 +329,23 @@ export async function streamChatReply(args: {
       let assetIds: number[] | undefined;
       const fileFormat = detectFileFormat(userText, requestedFileFormat);
       if (fileFormat && conversationId) {
-        assetIds = await generateAndReviewFile({
-          res,
-          client,
-          provider,
-          modelId,
-          reasoningLevel,
-          fileFormat,
-          conversationId,
-          userText,
-          chatMessages,
-          fullResponse,
-          clientGone,
-        });
+        assetIds = await withTimeout(
+          generateAndReviewFile({
+            res,
+            client,
+            provider,
+            modelId,
+            reasoningLevel,
+            fileFormat,
+            conversationId,
+            userText,
+            chatMessages,
+            fullResponse,
+            clientGone,
+          }),
+          FILE_GENERATION_TIMEOUT_MS,
+          "File generation",
+        );
       }
 
       const completion = onComplete
