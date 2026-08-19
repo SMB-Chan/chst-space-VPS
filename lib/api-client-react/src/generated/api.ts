@@ -134,6 +134,83 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
+export const getDownloadOpenaiArtifactUrl = (id: number,) => {
+
+
+
+
+  return `/api/openai/artifacts/${id}`
+}
+
+/**
+ * @summary Download a generated artifact
+ */
+export const downloadOpenaiArtifact = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getDownloadOpenaiArtifactUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadOpenaiArtifactQueryKey = (id: number,) => {
+    return [
+    `/api/openai/artifacts/${id}`
+    ] as const;
+    }
+
+
+export const getDownloadOpenaiArtifactQueryOptions = <TData = Awaited<ReturnType<typeof downloadOpenaiArtifact>>, TError = ErrorType<OpenaiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadOpenaiArtifact>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadOpenaiArtifactQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadOpenaiArtifact>>> = ({ signal }) => downloadOpenaiArtifact(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadOpenaiArtifact>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadOpenaiArtifactQueryResult = NonNullable<Awaited<ReturnType<typeof downloadOpenaiArtifact>>>
+export type DownloadOpenaiArtifactQueryError = ErrorType<OpenaiError>
+
+
+/**
+ * @summary Download a generated artifact
+ */
+
+export function useDownloadOpenaiArtifact<TData = Awaited<ReturnType<typeof downloadOpenaiArtifact>>, TError = ErrorType<OpenaiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadOpenaiArtifact>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadOpenaiArtifactQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getListOpenaiConversationsUrl = () => {
 
 
@@ -359,6 +436,78 @@ export function useGetOpenaiConversation<TData = Awaited<ReturnType<typeof getOp
 
 
 
+export const getUpdateOpenaiConversationUrl = (id: number,) => {
+
+
+
+
+  return `/api/openai/conversations/${id}`
+}
+
+/**
+ * @summary Rename a conversation
+ */
+export const updateOpenaiConversation = async (id: number,
+    openaiConversationInput: OpenaiConversationInput, options?: Parameters<typeof customFetch>[1]): Promise<OpenaiConversation> => {
+
+  return customFetch<OpenaiConversation>(getUpdateOpenaiConversationUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(openaiConversationInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateOpenaiConversationMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOpenaiConversation>>, TError,{id: number;data: BodyType<OpenaiConversationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateOpenaiConversation>>, TError,{id: number;data: BodyType<OpenaiConversationInput>}, TContext> => {
+
+const mutationKey = ['updateOpenaiConversation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOpenaiConversation>>, {id: number;data: BodyType<OpenaiConversationInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateOpenaiConversation(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateOpenaiConversationMutationResult = NonNullable<Awaited<ReturnType<typeof updateOpenaiConversation>>>
+    export type UpdateOpenaiConversationMutationBody = BodyType<OpenaiConversationInput>
+    export type UpdateOpenaiConversationMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Rename a conversation
+ */
+export const useUpdateOpenaiConversation = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOpenaiConversation>>, TError,{id: number;data: BodyType<OpenaiConversationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateOpenaiConversation>>,
+        TError,
+        {id: number;data: BodyType<OpenaiConversationInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateOpenaiConversationMutationOptions(options));
+    }
+
 export const getDeleteOpenaiConversationUrl = (id: number,) => {
 
 
@@ -578,4 +727,81 @@ export const useSendOpenaiMessage = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getSendOpenaiMessageMutationOptions(options));
     }
+
+export const getGetOpenaiAssetUrl = (assetId: number,) => {
+
+
+
+
+  return `/api/openai/assets/${assetId}`
+}
+
+/**
+ * @summary Download a generated asset
+ */
+export const getOpenaiAsset = async (assetId: number, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getGetOpenaiAssetUrl(assetId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpenaiAssetQueryKey = (assetId: number,) => {
+    return [
+    `/api/openai/assets/${assetId}`
+    ] as const;
+    }
+
+
+export const getGetOpenaiAssetQueryOptions = <TData = Awaited<ReturnType<typeof getOpenaiAsset>>, TError = ErrorType<OpenaiError>>(assetId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiAsset>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpenaiAssetQueryKey(assetId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpenaiAsset>>> = ({ signal }) => getOpenaiAsset(assetId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: assetId !== null && assetId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpenaiAsset>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOpenaiAssetQueryResult = NonNullable<Awaited<ReturnType<typeof getOpenaiAsset>>>
+export type GetOpenaiAssetQueryError = ErrorType<OpenaiError>
+
+
+/**
+ * @summary Download a generated asset
+ */
+
+export function useGetOpenaiAsset<TData = Awaited<ReturnType<typeof getOpenaiAsset>>, TError = ErrorType<OpenaiError>>(
+ assetId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiAsset>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOpenaiAssetQueryOptions(assetId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

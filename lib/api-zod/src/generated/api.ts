@@ -18,6 +18,16 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Download a generated artifact
+ */
+export const DownloadOpenaiArtifactParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DownloadOpenaiArtifactResponse = zod.string()
+
+
+/**
  * @summary List all conversations
  */
 export const ListOpenaiConversationsResponseItem = zod.object({
@@ -59,8 +69,40 @@ export const GetOpenaiConversationResponse = zod.object({
   "role": zod.string(),
   "content": zod.string(),
   "modelId": zod.string().nullish(),
+  "sources": zod.array(zod.object({
+  "title": zod.string(),
+  "url": zod.string()
+})).nullish(),
+  "artifacts": zod.array(zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mime": zod.string(),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+})).nullish(),
+  "auditContent": zod.string().nullish(),
+  "auditModelId": zod.string().nullish(),
+  "assetIds": zod.array(zod.number().int()).nullish(),
   "createdAt": zod.coerce.date()
 }))
+})
+
+
+/**
+ * @summary Rename a conversation
+ */
+export const UpdateOpenaiConversationParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const UpdateOpenaiConversationBody = zod.object({
+  "title": zod.string()
+})
+
+export const UpdateOpenaiConversationResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date()
 })
 
 
@@ -87,6 +129,20 @@ export const ListOpenaiMessagesResponseItem = zod.object({
   "role": zod.string(),
   "content": zod.string(),
   "modelId": zod.string().nullish(),
+  "sources": zod.array(zod.object({
+  "title": zod.string(),
+  "url": zod.string()
+})).nullish(),
+  "artifacts": zod.array(zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mime": zod.string(),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+})).nullish(),
+  "auditContent": zod.string().nullish(),
+  "auditModelId": zod.string().nullish(),
+  "assetIds": zod.array(zod.number().int()).nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListOpenaiMessagesResponse = zod.array(ListOpenaiMessagesResponseItem)
@@ -100,9 +156,20 @@ export const SendOpenaiMessageParams = zod.object({
 })
 
 export const SendOpenaiMessageBody = zod.object({
-  "content": zod.string()
+  "content": zod.string(),
+  "fileFormat": zod.string().nullish().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)')
 })
 
 export const SendOpenaiMessageResponse = zod.unknown()
+
+
+/**
+ * @summary Download a generated asset
+ */
+export const GetOpenaiAssetParams = zod.object({
+  "assetId": zod.coerce.number().int()
+})
+
+export const GetOpenaiAssetResponse = zod.unknown()
 
 

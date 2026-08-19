@@ -202,6 +202,37 @@ paths:
           description: SSE stream of assistant text chunks
           content:
             text/event-stream: {}
+  /openai/assets/{assetId}:
+    get:
+      operationId: getOpenaiAsset
+      tags: [openai]
+      summary: Download a generated asset
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Asset binary
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid asset id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
 components:
   schemas:
     HealthStatus:
@@ -284,6 +315,11 @@ components:
         auditModelId:
           type: string
           nullable: true
+        assetIds:
+          type: array
+          items:
+            type: integer
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -305,6 +341,10 @@ components:
       properties:
         content:
           type: string
+        fileFormat:
+          type: string
+          description: Optional target file format for generated downloads (pdf, docx, xlsx, pptx)
+          nullable: true
       required:
         - content
     OpenaiConversationWithMessages:

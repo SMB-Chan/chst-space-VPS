@@ -1,6 +1,15 @@
 import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Paperclip, Send, X, File as FileIcon, Image as ImageIcon } from "lucide-react";
+import {
+  Paperclip,
+  Send,
+  X,
+  File as FileIcon,
+  Image as ImageIcon,
+  FileText,
+  FileSpreadsheet,
+  Presentation,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compressImageFile, formatBytes } from "@/lib/compress-image";
 
@@ -10,11 +19,14 @@ export interface OutgoingAttachment {
   isBase64: boolean;
 }
 
+export type FileFormat = "pdf" | "docx" | "xlsx" | "pptx";
+
 interface MessageInputProps {
   // 戻り値がfalseの場合は送信がブロックされた（入力・添付は保持する）
   onSend: (
     content: string,
     files?: OutgoingAttachment[],
+    fileFormat?: FileFormat,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
 }
@@ -27,6 +39,13 @@ const MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // server-side message cap
 const MAX_FILES = 5;
 
 type StagedFile = { file: File; note: string | null };
+
+const FORMAT_BUTTONS: { format: FileFormat; label: string; icon: React.ElementType }[] = [
+  { format: "pdf", label: "PDF", icon: FileText },
+  { format: "docx", label: "Word", icon: FileText },
+  { format: "xlsx", label: "Excel", icon: FileSpreadsheet },
+  { format: "pptx", label: "PPT", icon: Presentation },
+];
 
 function validateFile(file: File): string | null {
   if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -68,6 +87,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<StagedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [fileFormat, setFileFormat] = useState<FileFormat | null>(null);
   const [compressing, setCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -147,6 +167,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
       const result = await onSend(
         content.trim() || "添付ファイルの内容を説明してください。",
         attachments,
+        fileFormat ?? undefined,
       );
       // 送信がブロックされた場合（例: 画像非対応モデル）は入力・添付を保持する
       if (result === false) return;
@@ -154,6 +175,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
       setContent("");
       setFiles([]);
       setFileError(null);
+      setFileFormat(null);
 
       // Reset textarea height
       if (textareaRef.current) {
@@ -210,7 +232,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
               {item.note && (
                 <span className="text-muted-foreground shrink-0 hidden sm:inline">{item.note}</span>
               )}
-              <button 
+              <button
                 onClick={() => {
                   setFiles((prev) => prev.filter((_, i) => i !== index));
                 }}
@@ -223,48 +245,72 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
           ))}
         </div>
       )}
-      
+
+      <div className="flex items-center gap-1 px-3 pt-2 pb-0 flex-wrap">
+        {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
+          const active = fileFormat === format;
+          return (
+            <button
+              key={format}
+              type="button"
+              onClick={() => setFileFormat(active ? null : format)}
+              disabled={disabled || compressing}
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                active
+                  ? "bg-primary/10 border-primary/40 text-primary"
+                  : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
+                (disabled || compressing) && "opacity-50 cursor-not-allowed",
+              )}
+            >
+              <Icon className="w-3 h-3" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex items-end gap-2 px-2 py-2">
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-          className="hidden" 
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          className="hidden"
           accept="image/*,.txt,.md,.csv,.json"
           multiple
         />
-        
-        <Button 
-          type="button" 
-          variant="ghost" 
-          size="icon" 
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => fileInputRef.current?.click()}
           className="mb-1 w-10 h-10 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-full flex-shrink-0 transition-colors"
           disabled={disabled || compressing}
         >
           <Paperclip className="w-5 h-5" />
         </Button>
-        
+
         <textarea
           ref={textareaRef}
           value={content}
           onChange={adjustHeight}
           onKeyDown={handleKeyDown}
-          placeholder="メッセージを入力..."
+          placeholder={fileFormat ? `この内容を ${fileFormat.toUpperCase()} で生成...` : "メッセージを入力..."}
           className="flex-1 max-h-[200px] min-h-[44px] w-full resize-none bg-transparent py-3 px-1 text-base outline-none placeholder:text-muted-foreground/60 scrollbar-none font-sans"
           rows={1}
           disabled={disabled || compressing}
         />
-        
-        <Button 
+
+        <Button
           type="button"
           size="icon"
           onClick={handleSubmit}
           disabled={(!content.trim() && !hasFiles) || disabled || compressing}
           className={cn(
             "mb-1 w-10 h-10 rounded-full flex-shrink-0 transition-all duration-300",
-            content.trim() || hasFiles 
-              ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:scale-105" 
+            content.trim() || hasFiles
+              ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:scale-105"
               : "bg-muted text-muted-foreground"
           )}
         >

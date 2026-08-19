@@ -54,6 +54,12 @@ export const AVAILABLE_MODELS = [
 
 export type ModelId = typeof AVAILABLE_MODELS[number]["id"];
 
+export const DEFAULT_MODEL: ModelId = AVAILABLE_MODELS[0].id;
+
+export const VISION_MODEL_IDS = new Set<string>(
+  AVAILABLE_MODELS.filter((m) => m.supportsVision).map((m) => m.id),
+);
+
 export function modelSupportsVision(modelId: string): boolean {
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
   return model ? model.supportsVision : false;

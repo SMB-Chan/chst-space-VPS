@@ -5,11 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-
-export interface OpenaiSource {
-  title: string;
-  url: string;
-}
+import type { OpenaiArtifact } from './openaiArtifact';
+import type { OpenaiSource } from './openaiSource';
 
 export interface OpenaiMessage {
   id: number;
@@ -18,5 +15,9 @@ export interface OpenaiMessage {
   content: string;
   modelId?: string | null;
   sources?: OpenaiSource[] | null;
+  artifacts?: OpenaiArtifact[] | null;
+  auditContent?: string | null;
+  auditModelId?: string | null;
+  assetIds?: number[] | null;
   createdAt: Date;
 }

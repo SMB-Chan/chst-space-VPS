@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
-import { conversations, messages, artifacts } from "@workspace/db/schema";
+import { conversations, messages, artifacts, assets } from "@workspace/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, getUserId } from "../middleware";
@@ -10,10 +10,11 @@ import {
   VISION_MODEL_IDS,
   parseReasoningLevel,
   getClientForModel,
-} from "../lib/ai-clients";
-import { ensureChatSchema } from "../lib/ensure-schema";
-import { streamChatReply } from "../lib/chat-stream";
-import { logger } from "../lib/logger";
+} from "../../lib/ai-clients";
+import { ensureChatSchema } from "../../lib/ensure-schema";
+import { streamChatReply } from "../../lib/chat-stream";
+import { logger } from "../../lib/logger";
+import type { FileFormat } from "../../lib/file-generation";
 
 const router = Router();
 
@@ -41,6 +42,18 @@ function publicAiError(err: unknown): string {
   return "AIの応答中にエラーが発生しました。";
 }
 
+function parseStoredAssetIds(raw: string | null): number[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((id): id is number => typeof id === "number");
+  } catch {
+    logger.warn({ raw }, "Ignoring malformed message assetIds JSON");
+    return null;
+  }
+}
+
 function extractImageDataUrl(content: string): { text: string; imageUrl?: string } {
   const match = content.match(IMAGE_DATA_URL_REGEX);
   if (!match) return { text: content };
@@ -62,7 +75,7 @@ router.get("/openai/models", (_req, res) => {
 
 router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) => {
   const userId = getUserId(req);
-  const artifactId = Number.parseInt(req.params.artifactId ?? "", 10);
+  const artifactId = Number.parseInt(String(req.params.artifactId ?? ""), 10);
   if (!Number.isFinite(artifactId)) {
     res.status(400).json({ error: "Invalid artifact id" });
     return;
@@ -109,7 +122,7 @@ router.get("/openai/conversations", requireAuth, async (req, res) => {
 router.get("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const conversationId = parseInt(req.params.conversationId ?? "", 10);
+    const conversationId = parseInt(String(req.params.conversationId ?? ""), 10);
     if (isNaN(conversationId)) {
       res.status(400).json({ error: "Invalid conversation ID" });
       return;
@@ -144,6 +157,7 @@ router.get("/openai/conversations/:conversationId", requireAuth, async (req, res
       ...conversation,
       messages: messagesResult.map((message) => ({
         ...message,
+        assetIds: parseStoredAssetIds(message.assetIds),
         artifacts: artifactRows
           .filter((artifact) => artifact.messageId === message.id)
           .map(({ messageId: _messageId, ...artifact }) => ({
@@ -183,7 +197,7 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
 router.delete("/openai/conversations/:conversationId", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
-    const conversationId = parseInt(req.params.conversationId ?? "", 10);
+    const conversationId = parseInt(String(req.params.conversationId ?? ""), 10);
     if (isNaN(conversationId)) {
       res.status(400).json({ error: "Invalid conversation ID" });
       return;
@@ -209,9 +223,11 @@ const sendMessageBody = z.object({
   modelId: z.string().optional(),
 });
 
+const REQUESTED_FILE_FORMATS = ["pdf", "docx", "xlsx", "pptx"] as const;
+
 router.post("/openai/conversations/:conversationId/messages", requireAuth, async (req, res) => {
   const userId = getUserId(req);
-  const conversationId = parseInt(req.params.conversationId ?? "", 10);
+  const conversationId = parseInt(String(req.params.conversationId ?? ""), 10);
   if (isNaN(conversationId)) {
     res.status(400).json({ error: "Invalid conversation ID" });
     return;
@@ -244,6 +260,12 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         ? auditModelQuery
         : undefined;
     const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
+
+    const requestedFileFormat =
+      typeof req.body?.fileFormat === "string" &&
+      (REQUESTED_FILE_FORMATS as readonly string[]).includes(req.body.fileFormat)
+        ? (req.body.fileFormat as FileFormat)
+        : undefined;
 
     const modelDef = AVAILABLE_MODELS.find((m) => m.id === modelId);
     if (newImageUrl && modelDef && !VISION_MODEL_IDS.has(modelDef.id)) {
@@ -307,8 +329,10 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       userText: newMessageText,
       chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
       auditModelId,
+      conversationId,
+      requestedFileFormat,
       publicAiError,
-      onComplete: async ({ content, sources, audit, artifacts: extractedArtifacts }) => {
+      onComplete: async ({ content, sources, audit, artifacts: extractedArtifacts, assetIds }) => {
         const messageInserts: (typeof messages.$inferInsert)[] = [
           { conversationId, role: "user", content: parsed.data.content },
           {
@@ -316,9 +340,10 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
             role: "assistant",
             content,
             modelId,
-            sources: sources.length ? sources : undefined,
+            sources: sources.length > 0 ? JSON.stringify(sources) : undefined,
             auditContent: audit?.content,
             auditModelId: audit?.modelId,
+            assetIds: assetIds && assetIds.length > 0 ? JSON.stringify(assetIds) : undefined,
           },
         ];
         const inserted = await db.insert(messages).values(messageInserts).returning();
@@ -467,6 +492,47 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     } else if (!res.writableEnded) {
       res.end();
     }
+  }
+});
+
+// Download a generated asset. Only the owner of the parent conversation can access it.
+router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<void> => {
+  const userId = getUserId(req);
+  const rawId = Array.isArray(req.params.assetId) ? req.params.assetId[0] : req.params.assetId;
+  const assetId = Number.parseInt(rawId, 10);
+  if (!Number.isFinite(assetId)) {
+    res.status(400).json({ error: "Invalid asset id" });
+    return;
+  }
+
+  try {
+    await ensureChatSchema();
+    const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
+    if (!asset) {
+      res.status(404).json({ error: "Asset not found" });
+      return;
+    }
+
+    const [conv] = await db
+      .select()
+      .from(conversations)
+      .where(and(eq(conversations.id, asset.conversationId), eq(conversations.userId, userId)));
+    if (!conv) {
+      res.status(404).json({ error: "Asset not found" });
+      return;
+    }
+
+    const buffer = Buffer.from(asset.data, "base64");
+    res.setHeader("Content-Type", asset.mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
+    );
+    res.setHeader("Content-Length", String(buffer.length));
+    res.end(buffer);
+  } catch (err) {
+    logger.error({ err, assetId }, "Failed to download asset");
+    res.status(500).json({ error: "ファイルの取得に失敗しました" });
   }
 });
 

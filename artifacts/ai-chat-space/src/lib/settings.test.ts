@@ -12,6 +12,7 @@ describe("settings store", () => {
       defaultReasoning: "medium",
       auditEnabled: false,
       auditModelId: "qwen3.8-max",
+      auditReasoning: "off",
     });
   });
 
