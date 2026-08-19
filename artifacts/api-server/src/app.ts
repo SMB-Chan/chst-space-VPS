@@ -9,6 +9,7 @@ import {
   getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import healthRouter from "./routes/health";
 import { logger } from "./lib/logger";
 import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
@@ -55,6 +56,9 @@ app.use(
     ),
   })),
 );
+
+// Health checks are mounted before Clerk so deployment probes never depend on auth.
+app.use("/api", healthRouter);
 
 app.use("/api", router);
 
