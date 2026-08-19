@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { ENSURE_MESSAGES_SCHEMA_SQL, ensureMessageSchema } from "./ensure-schema";
+import {
+  ENSURE_ASSETS_SCHEMA_SQL,
+  ENSURE_MESSAGES_SCHEMA_SQL,
+  ensureAssetsSchema,
+  ensureMessageSchema,
+} from "./ensure-schema";
 
 describe("ensureMessageSchema", () => {
   it("adds incrementally introduced message columns if they are missing", () => {
@@ -7,6 +12,7 @@ describe("ensureMessageSchema", () => {
     expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain("ADD COLUMN IF NOT EXISTS audit_model_id text");
     expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain("ADD COLUMN IF NOT EXISTS model_id text");
     expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain("ADD COLUMN IF NOT EXISTS sources text");
+    expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain("ADD COLUMN IF NOT EXISTS asset_ids text");
   });
 
   it("runs the SQL through the provided query function", async () => {
@@ -14,5 +20,22 @@ describe("ensureMessageSchema", () => {
     await ensureMessageSchema(query);
     expect(query).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(ENSURE_MESSAGES_SCHEMA_SQL);
+  });
+});
+
+describe("ensureAssetsSchema", () => {
+  it("creates the assets and artifacts tables and indexes", () => {
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("CREATE TABLE IF NOT EXISTS assets");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("assets_conversation_id_idx");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("assets_message_id_idx");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("CREATE TABLE IF NOT EXISTS artifacts");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("artifacts_conversation_id_idx");
+  });
+
+  it("runs the SQL through the provided query function", async () => {
+    const query = vi.fn().mockResolvedValue(undefined);
+    await ensureAssetsSchema(query);
+    expect(query).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledWith(ENSURE_ASSETS_SCHEMA_SQL);
   });
 });

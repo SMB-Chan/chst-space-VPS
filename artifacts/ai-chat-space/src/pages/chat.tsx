@@ -6,10 +6,11 @@ import {
   useCreateOpenaiConversation,
   getGetOpenaiConversationQueryKey,
   getListOpenaiConversationsQueryKey,
-  OpenaiMessage
+  OpenaiMessage,
+  OpenaiArtifact,
 } from "@workspace/api-client-react";
 import { MessageFeed, type ChatArtifact } from "@/components/chat/message-feed";
-import { MessageInput, type OutgoingAttachment } from "@/components/chat/message-input";
+import { MessageInput, type OutgoingAttachment, type FileFormat } from "@/components/chat/message-input";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
@@ -46,8 +47,9 @@ async function streamMessage(
   onAudit: (text: string) => void,
   onArtifacts: (artifacts: ChatArtifact[]) => void,
   onResetContent: () => void,
+  onFile: (file: { id: number; filename: string; mimeType: string }) => void,
   signal?: AbortSignal,
-  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string },
+  extra?: { ephemeral?: boolean; history?: { role: string; content: string }[]; auditModel?: string; fileFormat?: FileFormat },
 ) {
   try {
     const path = extra?.ephemeral
@@ -63,6 +65,7 @@ async function streamMessage(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content,
+          ...(extra?.fileFormat ? { fileFormat: extra.fileFormat } : {}),
           ...(extra?.ephemeral && extra.history ? { history: extra.history } : {}),
         }),
         credentials: "include",
@@ -125,8 +128,24 @@ async function streamMessage(
         onStatus("auditing");
         onAudit(parsed.audit);
       }
+      if (parsed.status === "generating-file") onStatus("generating-file");
+      if (parsed.status === "reviewing-layout") onStatus("reviewing-layout");
+      if (parsed.status === "revising-layout") onStatus("revising-layout");
+      if (parsed.status === "file_warning" && typeof parsed.message === "string") {
+        onSearchWarning(parsed.message);
+      }
       if (parsed.status === "search_warning" && typeof parsed.message === "string") {
         onSearchWarning(parsed.message);
+      }
+      if (parsed.file && typeof parsed.file === "object" && parsed.file !== null) {
+        const f = parsed.file as { id?: unknown; filename?: unknown; mimeType?: unknown };
+        if (
+          typeof f.id === "number" &&
+          typeof f.filename === "string" &&
+          typeof f.mimeType === "string"
+        ) {
+          onFile({ id: f.id, filename: f.filename, mimeType: f.mimeType });
+        }
       }
       if (Array.isArray(parsed.sources)) {
         onSources(parsed.sources as { title: string; url: string }[]);
@@ -238,6 +257,7 @@ export function ChatPage() {
   const [streamingReasoning, setStreamingReasoning] = useState<string>("");
   const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
   const [streamingArtifacts, setStreamingArtifacts] = useState<ChatArtifact[]>([]);
+  const [streamingFiles, setStreamingFiles] = useState<{ id: number; filename: string; mimeType: string }[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
@@ -273,6 +293,7 @@ export function ChatPage() {
     setStreamingReasoning("");
     setStreamingSources([]);
     setStreamingArtifacts([]);
+    setStreamingFiles([]);
     setOptimisticUserMessage(null);
     setStreamError(null);
     setSearchStatus(null);
@@ -309,7 +330,11 @@ export function ChatPage() {
   const createConversation = useCreateOpenaiConversation();
 
   // 戻り値: false = 送信ブロック（入力・添付は保持される）
-  const handleSend = async (content: string, files?: OutgoingAttachment[]): Promise<boolean> => {
+  const handleSend = async (
+    content: string,
+    files?: OutgoingAttachment[],
+    fileFormat?: FileFormat,
+  ): Promise<boolean> => {
     let finalContent = content;
 
     if (files && files.length > 0) {
@@ -373,6 +398,8 @@ export function ChatPage() {
     setStreamingContent("");
     setStreamingReasoning("");
     setStreamingSources([]);
+    setStreamingArtifacts([]);
+    setStreamingFiles([]);
     setSearchStatus({ kind: "starting" });
     streamSnapshotRef.current = { content: "", sources: [], audit: "", artifacts: [] };
 
@@ -419,6 +446,7 @@ export function ChatPage() {
               content: finalAssistantContent,
               sources: streamSnapshotRef.current.sources.length > 0 ? streamSnapshotRef.current.sources : null,
               artifacts: streamSnapshotRef.current.artifacts.length > 0 ? streamSnapshotRef.current.artifacts : null,
+              assetIds: streamingFiles.length > 0 ? streamingFiles.map((f) => f.id) : null,
               modelId: selectedModel,
               auditContent: streamSnapshotRef.current.audit || null,
               auditModelId: streamSnapshotRef.current.audit ? auditModel : null,
@@ -433,6 +461,7 @@ export function ChatPage() {
         setStreamingReasoning("");
         setStreamingSources([]);
         setStreamingArtifacts([]);
+        setStreamingFiles([]);
         setStreamingAudit("");
         setOptimisticUserMessage(null);
       },
@@ -441,6 +470,7 @@ export function ChatPage() {
         setSearchStatus(null);
         setStreamingSources([]);
         setStreamingArtifacts([]);
+        setStreamingFiles([]);
         setStreamingReasoning("");
         setStreamingAudit("");
         setStreamError(err.message);
@@ -477,10 +507,14 @@ export function ChatPage() {
         streamSnapshotRef.current.content = "";
         setStreamingContent("");
       },
+      (file) => {
+        setStreamingFiles((prev) => [...prev, file]);
+      },
       controller.signal,
       {
         ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
         ...(auditModel ? { auditModel } : {}),
+        ...(fileFormat ? { fileFormat } : {}),
       },
     );
     return true;
@@ -503,16 +537,17 @@ export function ChatPage() {
   const allMessages = [
     ...serverMessages,
     ...(optimisticUserMessage && !optimisticAlreadyOnServer ? [optimisticUserMessage] : []),
-    ...((isStreaming || streamingContent) && !streamingAlreadyOnServer
+    ...((isStreaming || streamingContent || streamingArtifacts.length > 0 || streamingFiles.length > 0) && !streamingAlreadyOnServer
       ? [{
           id: STREAMING_ASSISTANT_ID,
           conversationId: conversationId || 0,
           role: "assistant",
           content: streamingContent,
           sources: streamingSources.length > 0 ? streamingSources : null,
-          artifacts: streamingArtifacts.length > 0 ? streamingArtifacts : null,
+          artifacts: streamingArtifacts.length > 0 ? streamingArtifacts as unknown as OpenaiArtifact[] : null,
+          assetIds: streamingFiles.length > 0 ? streamingFiles.map((f) => f.id) : null,
           createdAt: new Date().toISOString(),
-        }]
+        } as OpenaiMessage]
       : []),
   ];
 
@@ -561,6 +596,12 @@ export function ChatPage() {
                     ? "auditing"
                   : searchStatus?.kind === "searching" || searchStatus?.kind === "fetching"
                     ? "searching"
+                  : searchStatus?.kind === "generating-file"
+                    ? "generating-file"
+                  : searchStatus?.kind === "reviewing-layout"
+                    ? "reviewing-layout"
+                  : searchStatus?.kind === "revising-layout"
+                    ? "revising-layout"
                     : streamingContent
                       ? "generating"
                       : "starting"

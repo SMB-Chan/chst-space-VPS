@@ -8,4 +8,6 @@
 
 export interface OpenaiMessageInput {
   content: string;
+  /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
+  fileFormat?: string | null;
 }

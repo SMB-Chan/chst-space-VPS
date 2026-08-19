@@ -18,6 +18,8 @@ export const messages = pgTable(
     sources: text("sources"),
     auditContent: text("audit_content"),
     auditModelId: text("audit_model_id"),
+    /** JSON-encoded array of asset ids generated for this assistant message */
+    assetIds: text("asset_ids"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

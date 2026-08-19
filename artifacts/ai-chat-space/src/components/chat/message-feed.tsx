@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { OpenaiMessage } from "@workspace/api-client-react";
+import { OpenaiMessage, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 import { SourceCards } from "./source-cards";
@@ -14,6 +14,9 @@ export type StreamingPhase =
   | "searching"
   | "thinking"
   | "generating"
+  | "generating-file"
+  | "reviewing-layout"
+  | "revising-layout"
   | "auditing"
   | "revising"
   | null;
@@ -31,6 +34,7 @@ type DisplayMessage = OpenaiMessage & {
   auditContent?: string | null;
   auditModelId?: string | null;
   artifacts?: ChatArtifact[] | null;
+  assetIds?: number[] | null;
 };
 
 type AttachmentChip = { kind: "image" | "file"; name: string };
@@ -184,18 +188,38 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
   );
 }
 
+function FileDownloadButton({ assetId }: { assetId: number }) {
+  return (
+    <a
+      href={getGetOpenaiAssetUrl(assetId)}
+      download
+      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
+    >
+      <FileText className="w-4 h-4 text-primary" />
+      <span className="font-medium truncate max-w-[180px]">生成ファイルをダウンロード</span>
+      <Download className="w-3.5 h-3.5 text-muted-foreground" />
+    </a>
+  );
+}
+
 function GenerationBadge({ phase }: { phase: StreamingPhase }) {
   if (!phase || phase === "searching") return null;
   const label =
     phase === "thinking"
       ? "推論中"
-      : phase === "generating"
-        ? "生成中"
-        : phase === "auditing"
-          ? "監査中"
-          : phase === "revising"
-            ? "最終報告を作成中"
-            : "準備中";
+      : phase === "generating-file"
+        ? "ファイルを生成中"
+        : phase === "reviewing-layout"
+          ? "レイアウトを確認中"
+          : phase === "revising-layout"
+            ? "レイアウトを修正中"
+            : phase === "generating"
+              ? "生成中"
+              : phase === "auditing"
+                ? "監査中"
+                : phase === "revising"
+                  ? "最終報告を作成中"
+                  : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -374,6 +398,13 @@ export function MessageFeed({
 
                 {!isUser && display.artifacts && display.artifacts.length > 0 && (
                   <ArtifactCards artifacts={display.artifacts} />
+                )}
+                {!isUser && message.assetIds && message.assetIds.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {message.assetIds.map((assetId) => (
+                      <FileDownloadButton key={assetId} assetId={assetId} />
+                    ))}
+                  </div>
                 )}
 
                 {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (

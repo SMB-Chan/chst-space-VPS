@@ -24,6 +24,17 @@ import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
 import { logger } from "./logger";
+import { db, assets } from "@workspace/db";
+import {
+  detectFileFormat,
+  buildFileGenerationPrompt,
+  parseFileData,
+  renderFile,
+  type FileFormat,
+  type ParsedFileData,
+} from "./file-generation";
+import { arePreviewToolsAvailable, previewGeneratedFile } from "./file-preview";
+import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
 
 export type ChatContentPart =
   | { type: "text"; text: string }
@@ -67,11 +78,16 @@ export async function streamChatReply(args: {
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   auditModelId?: string;
   includeArtifactContent?: boolean;
+  /** Persistent conversation id. When provided, file generation is persisted to assets. */
+  conversationId?: number;
+  /** Explicit file format requested by the frontend. */
+  requestedFileFormat?: FileFormat | null;
   onComplete?: (result: {
     content: string;
     sources: { title: string; url: string }[];
     audit?: { content: string; modelId: string };
     artifacts?: ExtractedArtifact[];
+    assetIds?: number[];
   }) => Promise<{ artifacts?: { id: number; filename: string; mime: string; size: number }[] } | void>;
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
@@ -86,6 +102,8 @@ export async function streamChatReply(args: {
     chatMessages,
     auditModelId,
     includeArtifactContent = false,
+    conversationId,
+    requestedFileFormat,
     onComplete,
     publicAiError,
   } = args;
@@ -287,12 +305,31 @@ export async function streamChatReply(args: {
         fullResponse = extracted.content;
       }
 
+      let assetIds: number[] | undefined;
+      const fileFormat = detectFileFormat(userText, requestedFileFormat);
+      if (fileFormat && conversationId) {
+        assetIds = await generateAndReviewFile({
+          res,
+          client,
+          provider,
+          modelId,
+          reasoningLevel,
+          fileFormat,
+          conversationId,
+          userText,
+          chatMessages,
+          fullResponse,
+          clientGone,
+        });
+      }
+
       const completion = onComplete
         ? await onComplete({
             content: fullResponse,
             sources: webContext.sources,
             audit,
             artifacts: extracted.artifacts,
+            assetIds,
           })
         : undefined;
 
@@ -385,4 +422,185 @@ async function streamModelText(args: {
     }
   }
   return splitThinkTags(full).content;
+}
+
+function formatMessageForSummary(
+  msg: OpenAI.Chat.Completions.ChatCompletionMessageParam,
+): string {
+  if (typeof msg.content === "string") {
+    return msg.content;
+  }
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .map((part) => {
+        if (part.type === "text") return part.text;
+        if (part.type === "image_url") return "[画像]";
+        return "";
+      })
+      .join("\n");
+  }
+  return "";
+}
+
+function buildFileGenerationSummary(
+  userText: string,
+  chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  assistantResponse: string,
+): string {
+  const recent = chatMessages.slice(-8);
+  const historyText = recent
+    .map((msg) => {
+      const role = msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "System";
+      return `${role}:\n${formatMessageForSummary(msg)}`;
+    })
+    .join("\n\n");
+
+  return [
+    "Recent conversation:",
+    historyText,
+    "",
+    "Latest user request:",
+    userText,
+    "",
+    "Assistant response to base the file on:",
+    assistantResponse,
+  ].join("\n");
+}
+
+function buildFileGenerationFilename(format: import("./file-generation").FileFormat, userText: string): string {
+  const clean = userText
+    .replace(/(pdf|docx|xlsx|pptx|word|excel|powerpoint|pdfファイル|エクセル|パワーポイント|wordファイル)/gi, "")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .trim()
+    .slice(0, 40);
+  return clean || `generated-${format}`;
+}
+
+const MAX_LAYOUT_REVIEW_ITERATIONS = 2;
+
+interface GenerateAndReviewFileContext {
+  res: Response;
+  client: OpenAI;
+  provider: ModelProvider;
+  modelId: string;
+  reasoningLevel: ReasoningLevel;
+  fileFormat: FileFormat;
+  conversationId: number;
+  userText: string;
+  chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  fullResponse: string;
+  clientGone: boolean;
+}
+
+async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise<number[] | undefined> {
+  const { res, client, provider, modelId, reasoningLevel, fileFormat, conversationId, userText, chatMessages, fullResponse, clientGone } = ctx;
+
+  try {
+    res.write(`data: ${JSON.stringify({ status: "generating-file", format: fileFormat })}\n\n`);
+
+    const fileSummary = buildFileGenerationSummary(userText, chatMessages, fullResponse);
+    const generate = async (options?: { previousData?: ParsedFileData; feedback?: string }): Promise<{
+      file: import("./file-generation").GeneratedFile;
+      parsed: ParsedFileData;
+      rawOutput: string;
+    }> => {
+      const filePrompt = buildFileGenerationPrompt(fileFormat, fileSummary, {
+        previousData: options?.previousData,
+        feedback: options?.feedback,
+      });
+      const rawOutput = await streamModelText({
+        client,
+        provider,
+        modelId,
+        reasoningLevel: "off",
+        messages: [
+          { role: "system", content: filePrompt },
+          { role: "user", content: "Please generate the file content now." },
+        ],
+        onDelta: () => {
+          // File generation is short; no streaming needed.
+        },
+        shouldStop: () => clientGone,
+      });
+      const parsed = parseFileData(rawOutput) ?? {};
+      const file = await renderFile(fileFormat, rawOutput, {
+        filename: buildFileGenerationFilename(fileFormat, userText),
+        previousData: options?.previousData,
+        feedback: options?.feedback,
+      });
+      return { file, parsed, rawOutput };
+    };
+
+    let attempt = await generate();
+    let previousData: ParsedFileData = attempt.parsed;
+
+    const previewAvailable = await arePreviewToolsAvailable();
+    if (previewAvailable && !clientGone) {
+      const vision = getVisionClient(modelId);
+
+      for (let iteration = 0; iteration < MAX_LAYOUT_REVIEW_ITERATIONS; iteration++) {
+        try {
+          res.write(`data: ${JSON.stringify({ status: "reviewing-layout", iteration })}\n\n`);
+          const images = await previewGeneratedFile(attempt.file, { maxPages: 3 });
+          const feedback = await reviewLayout({
+            client: vision.client,
+            modelId: vision.modelId,
+            format: fileFormat,
+            images,
+            originalData: JSON.stringify(previousData),
+          });
+
+          if (!hasActionableFeedback(feedback)) {
+            break;
+          }
+
+          logger.info(
+            { iteration, fileFormat, conversationId },
+            "Layout feedback received; regenerating file",
+          );
+
+          if (!clientGone) {
+            res.write(`data: ${JSON.stringify({ status: "revising-layout", iteration })}\n\n`);
+          }
+          attempt = await generate({ previousData, feedback });
+          previousData = attempt.parsed;
+        } catch (err) {
+          logger.warn({ err, fileFormat, conversationId, iteration }, "Layout review iteration failed");
+          break;
+        }
+      }
+    }
+
+    const [asset] = await db
+      .insert(assets)
+      .values({
+        conversationId,
+        filename: attempt.file.filename,
+        mimeType: attempt.file.mimeType,
+        size: attempt.file.size,
+        data: attempt.file.buffer.toString("base64"),
+      })
+      .returning();
+
+    if (asset && !clientGone) {
+      res.write(
+        `data: ${JSON.stringify({
+          file: { id: asset.id, filename: asset.filename, mimeType: asset.mimeType },
+        })}\n\n`,
+      );
+      return [asset.id];
+    }
+  } catch (err) {
+    logger.warn({ err, fileFormat, conversationId }, "File generation failed");
+    if (!clientGone) {
+      res.write(
+        `data: ${JSON.stringify({
+          status: "file_warning",
+          message: "ファイルの生成に失敗しました。テキスト回答はそのまま表示されます。",
+        })}\n\n`,
+      );
+    }
+  }
+
+  return undefined;
 }

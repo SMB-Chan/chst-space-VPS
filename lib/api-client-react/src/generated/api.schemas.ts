@@ -38,6 +38,7 @@ export interface OpenaiMessage {
   artifacts?: OpenaiArtifact[] | null;
   auditContent?: string | null;
   auditModelId?: string | null;
+  assetIds?: number[] | null;
   createdAt: string;
 }
 
@@ -47,6 +48,8 @@ export interface OpenaiConversationInput {
 
 export interface OpenaiMessageInput {
   content: string;
+  /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
+  fileFormat?: string | null;
 }
 
 export interface OpenaiConversationWithMessages {
@@ -59,3 +62,4 @@ export interface OpenaiConversationWithMessages {
 export interface OpenaiError {
   error: string;
 }
+
