@@ -35,12 +35,14 @@ import {
 } from "./file-generation";
 import { getPreviewToolStatus, previewGeneratedFile } from "./file-preview";
 import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
+import { describeImagesForTextModel } from "./vision-bridge";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 
 const AUDIT_TIMEOUT_MS = 120_000;
 const REVISION_TIMEOUT_MS = 120_000;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
+const VISION_BRIDGE_TIMEOUT_MS = 90_000;
 
 function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -122,6 +124,11 @@ export async function streamChatReply(args: {
     textFiles: { name: string; content: string }[];
     imageDataUrls: string[];
   };
+  /**
+   * Images the main model cannot see itself (non-vision model). A
+   * vision-capable model transcribes them to text before the main call.
+   */
+  visionBridgeImages?: string[];
   includeArtifactContent?: boolean;
   /** Persistent conversation id. When provided, file generation is persisted to assets. */
   conversationId?: number;
@@ -148,6 +155,7 @@ export async function streamChatReply(args: {
     chatMessages,
     auditModelId,
     attachmentsForAudit,
+    visionBridgeImages,
     includeArtifactContent = false,
     conversationId,
     requestedFileFormat,
@@ -189,6 +197,57 @@ export async function streamChatReply(args: {
       );
       for (const skill of skills) {
         workingMessages.push({ role: "system", content: skill.prompt });
+      }
+    }
+
+    // Vision bridge: a non-vision main model gets image content as a text
+    // transcript produced by a vision-capable model. The transcript is also
+    // reused by the audit pass when the auditor cannot see images.
+    let imageTranscript: string | undefined;
+    if (visionBridgeImages && visionBridgeImages.length > 0) {
+      if (!clientGone) {
+        res.write(`data: ${JSON.stringify({ status: "reading-images" })}\n\n`);
+      }
+      try {
+        imageTranscript = await withTimeout(
+          (signal) =>
+            describeImagesForTextModel({
+              imageDataUrls: visionBridgeImages,
+              question: userText,
+              signal,
+            }),
+          VISION_BRIDGE_TIMEOUT_MS,
+          "Vision bridge",
+        );
+        if (imageTranscript) {
+          const transcript =
+            `\n\n添付画像の内容（画像認識モデルによる転記。原文どおりの転写を優先し、` +
+            `判読不能部分は転記漏れの可能性があることに留意すること）:\n${imageTranscript}`;
+          const lastIndex = workingMessages.length - 1;
+          const last = workingMessages[lastIndex];
+          if (last?.role === "user") {
+            workingMessages[lastIndex] = {
+              ...last,
+              content:
+                typeof last.content === "string"
+                  ? last.content + transcript
+                  : [
+                      ...(Array.isArray(last.content) ? last.content : []),
+                      { type: "text", text: transcript },
+                    ],
+            } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, "Vision bridge failed; answering without image content");
+        if (!clientGone) {
+          res.write(
+            `data: ${JSON.stringify({
+              status: "search_warning",
+              message: "画像の読み取りに失敗しました。画像の内容を除いて回答します。",
+            })}\n\n`,
+          );
+        }
       }
     }
 
@@ -270,7 +329,8 @@ export async function streamChatReply(args: {
           });
           const auditImageUrls = attachmentsForAudit?.imageDataUrls ?? [];
           // Forward attached images to the auditor only when it can actually
-          // see them; otherwise say so explicitly instead of silently dropping.
+          // see them; otherwise fall back to the vision-bridge transcript so
+          // the audit still covers image content.
           let auditUserContent: string | ChatContentPart[] = auditUserText;
           if (auditImageUrls.length > 0) {
             if (modelSupportsVision(auditModelId)) {
@@ -285,7 +345,26 @@ export async function streamChatReply(args: {
                 ),
               ];
             } else {
-              auditUserContent = `${auditUserText}\n\n（画像添付が${auditImageUrls.length}件ありますが、この監査モデルは画像入力に非対応のため監査対象外です。）`;
+              if (imageTranscript === undefined) {
+                try {
+                  imageTranscript = await withTimeout(
+                    (signal) =>
+                      describeImagesForTextModel({
+                        imageDataUrls: auditImageUrls,
+                        question: userText,
+                        signal,
+                      }),
+                    VISION_BRIDGE_TIMEOUT_MS,
+                    "Vision bridge",
+                  );
+                } catch (err) {
+                  logger.warn({ err, auditModelId }, "Vision bridge for audit failed");
+                  imageTranscript = "";
+                }
+              }
+              auditUserContent = imageTranscript
+                ? `${auditUserText}\n\n添付画像の内容（画像認識モデルによる転記）:\n${imageTranscript.slice(0, 6000)}`
+                : `${auditUserText}\n\n（画像添付が${auditImageUrls.length}件ありますが、画像の読み取りに失敗したため監査対象外です。）`;
             }
           }
           const auditText = await withTimeout(

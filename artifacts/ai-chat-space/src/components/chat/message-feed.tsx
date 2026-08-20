@@ -14,6 +14,7 @@ import { parseAttachmentMessageForDisplay } from "@/lib/attachments";
 export type StreamingPhase =
   | "starting"
   | "searching"
+  | "reading-images"
   | "thinking"
   | "generating"
   | "generating-file"
@@ -187,7 +188,9 @@ function GenerationBadge({ phase }: { phase: StreamingPhase }) {
   const label =
     phase === "thinking"
       ? "推論中"
-      : phase === "generating-file"
+      : phase === "reading-images"
+        ? "画像を読み取り中"
+        : phase === "generating-file"
         ? "ファイルを生成中"
         : phase === "reviewing-layout"
           ? "レイアウトを確認中"

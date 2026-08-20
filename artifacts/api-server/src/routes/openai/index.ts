@@ -17,6 +17,7 @@ import {
   getClientForModel,
 } from "../../lib/ai-clients";
 import { streamChatReply } from "../../lib/chat-stream";
+import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
 import { logger } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
 import { normalizeConversationTitle } from "../../lib/conversation-title";
@@ -391,7 +392,11 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
     const requestedFileFormat = parsed.data.fileFormat as FileFormat | undefined;
 
     const supportsVision = VISION_MODEL_IDS.has(modelId);
-    if (newMessage.hasImages && !supportsVision) {
+    // Non-vision models are still usable with image attachments: a
+    // vision-capable model transcribes the images to text first. Reject only
+    // when no vision bridge can be constructed at all.
+    const useVisionBridge = newMessage.hasImages && !supportsVision && isVisionBridgeAvailable();
+    if (newMessage.hasImages && !supportsVision && !useVisionBridge) {
       res.status(400).json({
         error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
       });
@@ -424,7 +429,12 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         chatMessages.push({ role: "assistant", content: msg.content });
       }
     }
-    chatMessages.push({ role: "user", content: modelContentFor(newMessage, supportsVision) });
+    chatMessages.push({
+      role: "user",
+      content: useVisionBridge
+        ? newMessage.modelText
+        : modelContentFor(newMessage, supportsVision),
+    });
 
     const { client, provider } = getClientForModel(modelId);
 
@@ -445,6 +455,9 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
           .map((attachment) => ({ name: attachment.name, content: attachment.content })),
         imageDataUrls: newMessage.images.map((image) => image.content),
       },
+      visionBridgeImages: useVisionBridge
+        ? newMessage.images.map((image) => image.content)
+        : undefined,
       conversationId,
       requestedFileFormat,
       publicAiError,
@@ -588,7 +601,11 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
 
     const supportsVision = VISION_MODEL_IDS.has(modelId);
-    if (newMessage.hasImages && !supportsVision) {
+    // Non-vision models are still usable with image attachments: a
+    // vision-capable model transcribes the images to text first. Reject only
+    // when no vision bridge can be constructed at all.
+    const useVisionBridge = newMessage.hasImages && !supportsVision && isVisionBridgeAvailable();
+    if (newMessage.hasImages && !supportsVision && !useVisionBridge) {
       res.status(400).json({
         error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
       });
@@ -618,7 +635,12 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
         chatMessages.push({ role: "assistant", content: hist.content });
       }
     }
-    chatMessages.push({ role: "user", content: modelContentFor(newMessage, supportsVision) });
+    chatMessages.push({
+      role: "user",
+      content: useVisionBridge
+        ? newMessage.modelText
+        : modelContentFor(newMessage, supportsVision),
+    });
 
     const { client, provider } = getClientForModel(modelId);
     await streamChatReply({
@@ -638,6 +660,9 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
           .map((attachment) => ({ name: attachment.name, content: attachment.content })),
         imageDataUrls: newMessage.images.map((image) => image.content),
       },
+      visionBridgeImages: useVisionBridge
+        ? newMessage.images.map((image) => image.content)
+        : undefined,
       includeArtifactContent: true,
       publicAiError,
     });

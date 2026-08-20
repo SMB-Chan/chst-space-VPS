@@ -29,8 +29,8 @@ const MODELS: ModelInfo[] = [
   { id: "qwen3.8-max",     label: "Qwen3.8 Max",     provider: "dashscope", description: "Alibaba最高性能", supportsVision: true, supportsReasoning: true },
   { id: "qwen3.7-plus",    label: "Qwen3.7 Plus",    provider: "dashscope", description: "高速・バランス", supportsVision: true, supportsReasoning: true },
   { id: "qwen3.6-flash",   label: "Qwen3.6 Flash",   provider: "dashscope", description: "最速・低コスト", supportsVision: true, supportsReasoning: true },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "dashscope", description: "推論特化・画像非対応", supportsVision: false, supportsReasoning: true },
-  { id: "glm-5.2",         label: "GLM-5.2",         provider: "dashscope", description: "汎用・画像非対応", supportsVision: false, supportsReasoning: true },
+  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", provider: "dashscope", description: "推論特化・画像は転記で対応", supportsVision: false, supportsReasoning: true },
+  { id: "glm-5.2",         label: "GLM-5.2",         provider: "dashscope", description: "汎用・画像は転記で対応", supportsVision: false, supportsReasoning: true },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {

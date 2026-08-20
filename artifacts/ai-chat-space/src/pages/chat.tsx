@@ -138,6 +138,7 @@ async function streamMessage(
       }
       if (parsed.status === "searching") onStatus("searching", parsed.query as string | undefined);
       if (parsed.status === "fetching") onStatus("fetching");
+      if (parsed.status === "reading-images") onStatus("reading-images");
       if (parsed.status === "thinking") onStatus("thinking");
       if (parsed.status === "generating") onStatus("generating");
       if (parsed.status === "auditing") onStatus("auditing");
@@ -381,17 +382,17 @@ export function ChatPage() {
     fileFormat?: FileFormat,
   ): Promise<boolean> => {
     let finalContent = content;
+    let visionBridgeNote: string | null = null;
 
     if (files && files.length > 0) {
-      // 選択中モデルが画像非対応なら、送信前に分かりやすいエラーを表示する
+      // 画像非対応モデルでも、サーバー側の vision ブリッジが画像をテキスト化する
+      // ため送信自体は許可する。精度が落ちる可能性だけ通知する。
       const hasImage = files.some((file) => file.isBase64);
       if (hasImage) {
         const model = models.find((m) => m.id === selectedModel);
         if (model && !model.supportsVision) {
-          setStreamError(
-            `${model.label} は画像を読み取れません。画像を送る場合は GPT や Qwen などの画像対応モデルを選択してください。`
-          );
-          return false;
+          visionBridgeNote =
+            `${model.label} は画像を直接読み取れないため、画像対応モデルが内容をテキストに書き起こしてから回答します。`;
         }
       }
       finalContent = serializeAttachmentMessage(content, files);
@@ -419,7 +420,7 @@ export function ChatPage() {
 
     sendingToRef.current = targetId ?? 0;
     setStreamError(null);
-    setSearchWarning(null);
+    setSearchWarning(visionBridgeNote);
     setActiveSkills([]);
     setStreamingAudit("");
     setStreamingArtifacts([]);
@@ -644,6 +645,8 @@ export function ChatPage() {
               isStreaming
                 ? searchStatus?.kind === "thinking"
                   ? "thinking"
+                  : searchStatus?.kind === "reading-images"
+                    ? "reading-images"
                   : searchStatus?.kind === "revising"
                     ? "revising"
                   : searchStatus?.kind === "auditing"
