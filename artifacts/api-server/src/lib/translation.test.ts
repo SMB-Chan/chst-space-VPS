@@ -6,8 +6,10 @@ describe("parseTranslationMode", () => {
     expect(parseTranslationMode("auto")).toBe("auto");
     expect(parseTranslationMode("ja-en")).toBe("ja-en");
     expect(parseTranslationMode("en-ja")).toBe("en-ja");
+    expect(parseTranslationMode("auto-ko")).toBe("auto-ko");
     expect(parseTranslationMode("ja-ko")).toBe("ja-ko");
     expect(parseTranslationMode("ko-ja")).toBe("ko-ja");
+    expect(parseTranslationMode("auto-zh")).toBe("auto-zh");
     expect(parseTranslationMode("ja-zh")).toBe("ja-zh");
     expect(parseTranslationMode("zh-ja")).toBe("zh-ja");
   });
@@ -21,10 +23,17 @@ describe("parseTranslationMode", () => {
 });
 
 describe("buildTranslationSystemPrompt", () => {
-  it("covers both directions in auto mode", () => {
-    const prompt = buildTranslationSystemPrompt("auto");
-    expect(prompt).toContain("日本語なら英語へ");
-    expect(prompt).toContain("日本語以外なら日本語へ");
+  it("covers both directions in auto modes", () => {
+    const en = buildTranslationSystemPrompt("auto");
+    expect(en).toContain("日本語なら英語へ");
+    expect(en).toContain("日本語以外なら日本語へ");
+    const ko = buildTranslationSystemPrompt("auto-ko");
+    expect(ko).toContain("日本語なら韓国語へ");
+    expect(ko).toContain("韓国語なら日本語へ");
+    const zh = buildTranslationSystemPrompt("auto-zh");
+    expect(zh).toContain("日本語なら中国語へ");
+    expect(zh).toContain("中国語なら日本語へ");
+    expect(zh).toContain("簡体字");
   });
 
   it("pins the direction for explicit modes", () => {

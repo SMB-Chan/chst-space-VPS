@@ -15,8 +15,10 @@ const TRANSLATION_MODES: { id: TranslationModeSetting; label: string; hint: stri
   { id: "auto", label: "自動（日⇄英）", hint: "日本語は英語へ、それ以外は日本語へ" },
   { id: "ja-en", label: "日本語 → 英語", hint: "常に英語へ翻訳" },
   { id: "en-ja", label: "英語 → 日本語", hint: "常に日本語へ翻訳" },
+  { id: "auto-ko", label: "自動（日⇄韓）", hint: "日本語は韓国語へ、韓国語は日本語へ" },
   { id: "ja-ko", label: "日本語 → 韓国語", hint: "常に韓国語へ翻訳" },
   { id: "ko-ja", label: "韓国語 → 日本語", hint: "常に日本語へ翻訳" },
+  { id: "auto-zh", label: "自動（日⇄中）", hint: "日本語は中国語へ、中国語は日本語へ" },
   { id: "ja-zh", label: "日本語 → 中国語", hint: "簡体字・本土表現へ翻訳" },
   { id: "zh-ja", label: "中国語 → 日本語", hint: "常に日本語へ翻訳" },
 ];

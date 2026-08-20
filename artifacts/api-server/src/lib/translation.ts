@@ -7,14 +7,25 @@
  * understood as instructions about the previous translation.
  */
 
-export type TranslationMode = "auto" | "ja-en" | "en-ja" | "ja-ko" | "ko-ja" | "ja-zh" | "zh-ja";
+export type TranslationMode =
+  | "auto"
+  | "ja-en"
+  | "en-ja"
+  | "auto-ko"
+  | "ja-ko"
+  | "ko-ja"
+  | "auto-zh"
+  | "ja-zh"
+  | "zh-ja";
 
 const TRANSLATION_MODES: readonly TranslationMode[] = [
   "auto",
   "ja-en",
   "en-ja",
+  "auto-ko",
   "ja-ko",
   "ko-ja",
+  "auto-zh",
   "ja-zh",
   "zh-ja",
 ];
@@ -29,8 +40,11 @@ const DIRECTION_RULES: Record<TranslationMode, string> = {
   auto: "ユーザーの文章が日本語なら英語へ、日本語以外なら日本語へ翻訳する。",
   "ja-en": "ユーザーの文章をすべて日本語から英語へ翻訳する。",
   "en-ja": "ユーザーの文章をすべて英語から日本語へ翻訳する。",
+  "auto-ko": "ユーザーの文章が日本語なら韓国語へ、韓国語なら日本語へ翻訳する。",
   "ja-ko": "ユーザーの文章をすべて日本語から韓国語へ翻訳する。",
   "ko-ja": "ユーザーの文章をすべて韓国語から日本語へ翻訳する。",
+  "auto-zh":
+    "ユーザーの文章が日本語なら中国語へ、中国語なら日本語へ翻訳する。中国語への翻訳では簡体字を使い、本土（中国大陸）の語彙・表現を優先する。",
   "ja-zh":
     "ユーザーの文章をすべて日本語から中国語へ翻訳する。中国語は簡体字を使い、本土（中国大陸）の語彙・表現を優先する。",
   "zh-ja": "ユーザーの文章をすべて中国語から日本語へ翻訳する。",
