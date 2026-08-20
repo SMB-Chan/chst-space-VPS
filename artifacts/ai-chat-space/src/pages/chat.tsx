@@ -13,9 +13,10 @@ import { MessageFeed, type ChatArtifact } from "@/components/chat/message-feed";
 import { MessageInput, type OutgoingAttachment, type FileFormat } from "@/components/chat/message-input";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
+import { TranslationModeSelector } from "@/components/chat/translation-selector";
 import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTANT_ID } from "@/lib/chat";
 import { type ReasoningLevel } from "@/lib/reasoning";
-import { loadSettings, pickAuditModel, saveSettings, subscribeSettings } from "@/lib/settings";
+import { loadSettings, pickAuditModel, saveSettings, subscribeSettings, type TranslationModeSetting } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import {
   compactAttachmentMessageForHistory,
@@ -60,6 +61,7 @@ async function streamMessage(
     auditModel?: string;
     fileFormat?: FileFormat;
     attachments?: OutgoingAttachment[];
+    translationMode?: string;
   },
 ) {
   try {
@@ -69,8 +71,11 @@ async function streamMessage(
     const auditQuery = extra?.auditModel
       ? `&auditModel=${encodeURIComponent(extra.auditModel)}&auditReasoning=${encodeURIComponent(loadSettings().auditReasoning)}`
       : "";
+    const translateQuery = extra?.translationMode
+      ? `&translate=${encodeURIComponent(extra.translationMode)}`
+      : "";
     const res = await fetch(
-      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}${auditQuery}`,
+      `${path}?model=${encodeURIComponent(model)}&reasoning=${encodeURIComponent(reasoning)}${auditQuery}${translateQuery}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -292,6 +297,7 @@ export function ChatPage() {
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [activeSkills, setActiveSkills] = useState<{ id: string; label: string }[]>([]);
   const [auditEnabled, setAuditEnabled] = useState(initialSettings.auditEnabled);
+  const [translationMode, setTranslationMode] = useState<TranslationModeSetting>(initialSettings.translationMode);
   const [auditModelId, setAuditModelId] = useState(initialSettings.auditModelId);
   const [streamingAudit, setStreamingAudit] = useState("");
   const resolvedAuditModel = auditEnabled
@@ -346,6 +352,7 @@ export function ChatPage() {
   useEffect(() => subscribeSettings((s) => {
     setAuditEnabled(s.auditEnabled);
     setAuditModelId(s.auditModelId);
+    setTranslationMode(s.translationMode);
   }), []);
 
   // Safety net: if streaming gets stuck for too long, force-reset the input.
@@ -566,6 +573,7 @@ export function ChatPage() {
       {
         ...(isPrivate ? { ephemeral: true, history: privateHistory } : {}),
         ...(auditModel ? { auditModel } : {}),
+        ...(translationMode !== "off" ? { translationMode } : {}),
         ...(fileFormat ? { fileFormat } : {}),
         ...(files && files.length > 0 ? { attachments: files } : {}),
       },
@@ -737,6 +745,14 @@ export function ChatPage() {
                 disabled={isStreaming || createConversation.isPending}
               />
             )}
+            <TranslationModeSelector
+              value={translationMode}
+              onSelect={(mode) => {
+                setTranslationMode(mode);
+                saveSettings({ translationMode: mode });
+              }}
+              disabled={isStreaming || createConversation.isPending}
+            />
             <button
               type="button"
               disabled={isStreaming || createConversation.isPending}
@@ -767,7 +783,12 @@ export function ChatPage() {
           <MessageInput
             onSend={handleSend}
             disabled={isStreaming || createConversation.isPending}
-            fileGenerationEnabled={!isPrivate}
+            fileGenerationEnabled={!isPrivate && translationMode === "off"}
+            placeholder={
+              translationMode !== "off"
+                ? "翻訳するテキストをそのまま入力..."
+                : undefined
+            }
           />
         </div>
       </div>

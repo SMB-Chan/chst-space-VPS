@@ -1,5 +1,11 @@
 import { parseReasoningLevel, type ReasoningLevel } from "./reasoning";
 
+export type TranslationModeSetting = "off" | "auto" | "ja-en" | "en-ja";
+
+function parseTranslationModeSetting(raw: unknown): TranslationModeSetting {
+  return raw === "auto" || raw === "ja-en" || raw === "en-ja" ? raw : "off";
+}
+
 const STORAGE_KEY = "chat-space.settings.v1";
 
 export interface AppSettings {
@@ -8,6 +14,7 @@ export interface AppSettings {
   auditEnabled: boolean;
   auditModelId: string;
   auditReasoning: ReasoningLevel;
+  translationMode: TranslationModeSetting;
 }
 
 const FALLBACK: AppSettings = {
@@ -16,6 +23,7 @@ const FALLBACK: AppSettings = {
   auditEnabled: false,
   auditModelId: "qwen3.8-max",
   auditReasoning: "off",
+  translationMode: "off",
 };
 
 export function loadSettings(): AppSettings {
@@ -35,6 +43,7 @@ export function loadSettings(): AppSettings {
           ? parsed.auditModelId
           : FALLBACK.auditModelId,
       auditReasoning: parseReasoningLevel(parsed.auditReasoning),
+      translationMode: parseTranslationModeSetting(parsed.translationMode),
     };
   } catch {
     return { ...FALLBACK };

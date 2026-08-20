@@ -36,6 +36,7 @@ import {
 import { getPreviewToolStatus, previewGeneratedFile } from "./file-preview";
 import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
 import { describeImagesForTextModel } from "./vision-bridge";
+import { buildTranslationSystemPrompt, type TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 
 const AUDIT_TIMEOUT_MS = 120_000;
@@ -129,6 +130,8 @@ export async function streamChatReply(args: {
    * vision-capable model transcribes them to text before the main call.
    */
   visionBridgeImages?: string[];
+  /** Translation mode: every user message is translated instead of answered. */
+  translationMode?: TranslationMode;
   includeArtifactContent?: boolean;
   /** Persistent conversation id. When provided, file generation is persisted to assets. */
   conversationId?: number;
@@ -156,6 +159,7 @@ export async function streamChatReply(args: {
     auditModelId,
     attachmentsForAudit,
     visionBridgeImages,
+    translationMode,
     includeArtifactContent = false,
     conversationId,
     requestedFileFormat,
@@ -180,14 +184,20 @@ export async function streamChatReply(args: {
     // Clone the caller's message array so injected system prompts do not leak
     // back to the caller or to downstream consumers.
     const workingMessages = [...chatMessages];
-    if (wantsArtifact(userText)) {
+    if (translationMode) {
+      workingMessages.push({
+        role: "system",
+        content: buildTranslationSystemPrompt(translationMode),
+      });
+    }
+    if (!translationMode && wantsArtifact(userText)) {
       workingMessages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
     }
-    if (wantsGeneratedFile(userText) || requestedFileFormat) {
+    if (!translationMode && (wantsGeneratedFile(userText) || requestedFileFormat)) {
       workingMessages.push({ role: "system", content: FILE_GENERATION_SYSTEM_PROMPT });
     }
 
-    const skills = matchSkills(userText);
+    const skills = translationMode ? [] : matchSkills(userText);
     if (skills.length > 0 && !clientGone) {
       res.write(
         `data: ${JSON.stringify({
@@ -251,16 +261,20 @@ export async function streamChatReply(args: {
       }
     }
 
-    const webContext = await buildWebContext(
-      client,
-      modelId,
-      provider,
-      userText,
-      (event) => {
-        if (!clientGone) res.write(`data: ${JSON.stringify(event)}\n\n`);
-      },
-      { forceQuery: composeSkillSearchQuery(userText, skills) },
-    );
+    // Translation mode works from the conversation alone; web search would
+    // only add latency and untrusted noise.
+    const webContext = translationMode
+      ? { searched: false, sources: [], contextText: "" }
+      : await buildWebContext(
+          client,
+          modelId,
+          provider,
+          userText,
+          (event) => {
+            if (!clientGone) res.write(`data: ${JSON.stringify(event)}\n\n`);
+          },
+          { forceQuery: composeSkillSearchQuery(userText, skills) },
+        );
 
     if (webContext.contextText) {
       const today = new Date().toISOString().slice(0, 10);
@@ -502,7 +516,9 @@ export async function streamChatReply(args: {
           ? String((req as { id: string | number }).id)
           : undefined;
       const formatDetectionStartedAt = Date.now();
-      const fileFormat = detectFileFormat(userText, requestedFileFormat);
+      const fileFormat = translationMode
+        ? null
+        : detectFileFormat(userText, requestedFileFormat);
       if (fileFormat) {
         logger.info(
           {

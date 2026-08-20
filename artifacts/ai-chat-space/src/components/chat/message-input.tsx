@@ -30,6 +30,7 @@ interface MessageInputProps {
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   fileGenerationEnabled?: boolean;
+  placeholder?: string;
 }
 
 // 画像のみ対応（PDFなどバイナリは非対応）
@@ -101,6 +102,7 @@ export function MessageInput({
   onSend,
   disabled,
   fileGenerationEnabled = true,
+  placeholder,
 }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<StagedFile[]>([]);
@@ -328,7 +330,7 @@ export function MessageInput({
           value={content}
           onChange={adjustHeight}
           onKeyDown={handleKeyDown}
-          placeholder={fileFormat ? `この内容を ${fileFormat.toUpperCase()} で生成...` : "メッセージを入力..."}
+          placeholder={placeholder ?? (fileFormat ? `この内容を ${fileFormat.toUpperCase()} で生成...` : "メッセージを入力...")}
           className="flex-1 max-h-[200px] min-h-[44px] w-full resize-none bg-transparent py-3 px-1 text-base outline-none placeholder:text-muted-foreground/60 scrollbar-none font-sans"
           rows={1}
           disabled={disabled || compressing}

@@ -18,6 +18,7 @@ import {
 } from "../../lib/ai-clients";
 import { streamChatReply } from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
+import { parseTranslationMode } from "../../lib/translation";
 import { logger } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
 import { normalizeConversationTitle } from "../../lib/conversation-title";
@@ -388,6 +389,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         ? auditModelQuery
         : undefined;
     const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
+    const translationMode = parseTranslationMode(req.query.translate);
 
     const requestedFileFormat = parsed.data.fileFormat as FileFormat | undefined;
 
@@ -458,6 +460,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       visionBridgeImages: useVisionBridge
         ? newMessage.images.map((image) => image.content)
         : undefined,
+      translationMode,
       conversationId,
       requestedFileFormat,
       publicAiError,
@@ -599,6 +602,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
         ? auditModelQuery
         : undefined;
     const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
+    const translationMode = parseTranslationMode(req.query.translate);
 
     const supportsVision = VISION_MODEL_IDS.has(modelId);
     // Non-vision models are still usable with image attachments: a
@@ -663,6 +667,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       visionBridgeImages: useVisionBridge
         ? newMessage.images.map((image) => image.content)
         : undefined,
+      translationMode,
       includeArtifactContent: true,
       publicAiError,
     });

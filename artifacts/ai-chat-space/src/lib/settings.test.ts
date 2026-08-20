@@ -13,7 +13,21 @@ describe("settings store", () => {
       auditEnabled: false,
       auditModelId: "qwen3.8-max",
       auditReasoning: "off",
+      translationMode: "off",
     });
+  });
+
+  it("persists the translation mode", () => {
+    saveSettings({ translationMode: "auto" });
+    expect(loadSettings().translationMode).toBe("auto");
+  });
+
+  it("rejects an invalid translation mode", () => {
+    saveSettings({ translationMode: "auto" });
+    const raw = JSON.parse(localStorage.getItem("chat-space.settings.v1") ?? "{}");
+    raw.translationMode = "klingon";
+    localStorage.setItem("chat-space.settings.v1", JSON.stringify(raw));
+    expect(loadSettings().translationMode).toBe("off");
   });
 
   it("persists a default model and reasoning level", () => {
