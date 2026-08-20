@@ -20,11 +20,17 @@ export function buildAuditUserMessage(args: {
   question: string;
   answer: string;
   sourceText?: string;
+  attachmentText?: string;
 }): string {
   const question = args.question.trim().slice(0, 4000);
   const answer = args.answer.trim().slice(0, 12_000);
   const sources = (args.sourceText ?? "").trim().slice(0, 8000) || "なし";
-  return `質問:\n${question}\n\n回答:\n${answer}\n\n提供資料:\n${sources}`;
+  const attachments = (args.attachmentText ?? "").trim().slice(0, 8000);
+  return (
+    `質問:\n${question}\n\n` +
+    (attachments ? `質問者の添付資料:\n${attachments}\n\n` : "") +
+    `回答:\n${answer}\n\n提供資料:\n${sources}`
+  );
 }
 
 export const REVISION_INSTRUCTION = `あなたは最終稿の担当です。ユーザーに出す完成した回答だけを書いてください。

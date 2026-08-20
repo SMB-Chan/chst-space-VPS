@@ -14,7 +14,7 @@ import {
   readContentDelta,
   type StreamDelta,
 } from "./stream-delta";
-import { getClientForModel } from "./ai-clients";
+import { getClientForModel, modelSupportsVision } from "./ai-clients";
 import {
   AUDIT_SYSTEM_PROMPT,
   buildAuditUserMessage,
@@ -117,6 +117,11 @@ export async function streamChatReply(args: {
   userText: string;
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   auditModelId?: string;
+  /** Attachments of the current user message, forwarded to the audit model. */
+  attachmentsForAudit?: {
+    textFiles: { name: string; content: string }[];
+    imageDataUrls: string[];
+  };
   includeArtifactContent?: boolean;
   /** Persistent conversation id. When provided, file generation is persisted to assets. */
   conversationId?: number;
@@ -142,6 +147,7 @@ export async function streamChatReply(args: {
     userText,
     chatMessages,
     auditModelId,
+    attachmentsForAudit,
     includeArtifactContent = false,
     conversationId,
     requestedFileFormat,
@@ -252,6 +258,36 @@ export async function streamChatReply(args: {
               `data: ${JSON.stringify({ status: "auditing", model: auditModelId })}\n\n`,
             );
           }
+          const auditUserText = buildAuditUserMessage({
+            question: userText,
+            answer: fullResponse,
+            sourceText: webContext.contextText,
+            attachmentText: attachmentsForAudit?.textFiles.length
+              ? attachmentsForAudit.textFiles
+                  .map((file) => `--- ${file.name} ---\n${file.content}`)
+                  .join("\n\n")
+              : undefined,
+          });
+          const auditImageUrls = attachmentsForAudit?.imageDataUrls ?? [];
+          // Forward attached images to the auditor only when it can actually
+          // see them; otherwise say so explicitly instead of silently dropping.
+          let auditUserContent: string | ChatContentPart[] = auditUserText;
+          if (auditImageUrls.length > 0) {
+            if (modelSupportsVision(auditModelId)) {
+              auditUserContent = [
+                { type: "text", text: auditUserText },
+                {
+                  type: "text",
+                  text: "以下は質問者が添付した画像です。回答が画像の内容と矛盾していないかも監査対象に含めてください。",
+                },
+                ...auditImageUrls.map(
+                  (url): ChatContentPart => ({ type: "image_url", image_url: { url } }),
+                ),
+              ];
+            } else {
+              auditUserContent = `${auditUserText}\n\n（画像添付が${auditImageUrls.length}件ありますが、この監査モデルは画像入力に非対応のため監査対象外です。）`;
+            }
+          }
           const auditText = await withTimeout(
             (signal) =>
               streamModelText({
@@ -263,11 +299,7 @@ export async function streamChatReply(args: {
                   { role: "system", content: AUDIT_SYSTEM_PROMPT },
                   {
                     role: "user",
-                    content: buildAuditUserMessage({
-                      question: userText,
-                      answer: fullResponse,
-                      sourceText: webContext.contextText,
-                    }),
+                    content: auditUserContent,
                   },
                 ],
                 onDelta: (added, kind) => {
@@ -306,6 +338,22 @@ export async function streamChatReply(args: {
           if (!clientGone) {
             res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
           }
+          // The draft already reflects any attached images; resending megabytes
+          // of image data for a text rewrite doubles the failure surface
+          // (payload limits, vision token cost, timeouts), so the revision sees
+          // text only. Attachment names stay visible via their text parts.
+          const revisionMessages = workingMessages.map(
+            (msg): OpenAI.Chat.Completions.ChatCompletionMessageParam => {
+              if (!Array.isArray(msg.content)) return msg;
+              return {
+                ...msg,
+                content: msg.content.filter(
+                  (part): part is OpenAI.Chat.Completions.ChatCompletionContentPartText =>
+                    part.type === "text",
+                ),
+              } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+            },
+          );
           const revised = await withTimeout(
             (signal) =>
               streamModelText({
@@ -314,7 +362,7 @@ export async function streamChatReply(args: {
                 modelId,
                 reasoningLevel,
                 messages: [
-                  ...workingMessages,
+                  ...revisionMessages,
                   { role: "assistant", content: fullResponse },
                   {
                     role: "user",

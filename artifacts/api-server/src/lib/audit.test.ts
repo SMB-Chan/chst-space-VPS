@@ -13,6 +13,24 @@ describe("buildAuditUserMessage", () => {
     expect(text).toContain("日経平均 39000");
     expect(text).not.toContain("前回の会話");
   });
+
+  it("includes user text attachments so the auditor can check against them", () => {
+    const text = buildAuditUserMessage({
+      question: "添付の数値を要約して",
+      answer: "売上は100億円です。",
+      attachmentText: "--- data.csv ---\n売上,95億円",
+    });
+    expect(text).toContain("質問者の添付資料");
+    expect(text).toContain("売上,95億円");
+  });
+
+  it("omits the attachment section when there are no text attachments", () => {
+    const text = buildAuditUserMessage({
+      question: "こんにちは",
+      answer: "こんにちは。",
+    });
+    expect(text).not.toContain("添付資料");
+  });
 });
 
 describe("buildRevisionUserMessage", () => {

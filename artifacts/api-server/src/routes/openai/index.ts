@@ -439,6 +439,12 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       userText: newMessage.question,
       chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
       auditModelId,
+      attachmentsForAudit: {
+        textFiles: newMessage.attachments
+          .filter((attachment) => attachment.kind === "file")
+          .map((attachment) => ({ name: attachment.name, content: attachment.content })),
+        imageDataUrls: newMessage.images.map((image) => image.content),
+      },
       conversationId,
       requestedFileFormat,
       publicAiError,
@@ -626,6 +632,12 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       userText: newMessage.question,
       chatMessages: chatMessages as Parameters<typeof streamChatReply>[0]["chatMessages"],
       auditModelId,
+      attachmentsForAudit: {
+        textFiles: newMessage.attachments
+          .filter((attachment) => attachment.kind === "file")
+          .map((attachment) => ({ name: attachment.name, content: attachment.content })),
+        imageDataUrls: newMessage.images.map((image) => image.content),
+      },
       includeArtifactContent: true,
       publicAiError,
     });
