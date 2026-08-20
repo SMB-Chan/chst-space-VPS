@@ -6,6 +6,10 @@ describe("parseTranslationMode", () => {
     expect(parseTranslationMode("auto")).toBe("auto");
     expect(parseTranslationMode("ja-en")).toBe("ja-en");
     expect(parseTranslationMode("en-ja")).toBe("en-ja");
+    expect(parseTranslationMode("ja-ko")).toBe("ja-ko");
+    expect(parseTranslationMode("ko-ja")).toBe("ko-ja");
+    expect(parseTranslationMode("ja-zh")).toBe("ja-zh");
+    expect(parseTranslationMode("zh-ja")).toBe("zh-ja");
   });
 
   it("rejects unknown or missing values", () => {
@@ -26,6 +30,11 @@ describe("buildTranslationSystemPrompt", () => {
   it("pins the direction for explicit modes", () => {
     expect(buildTranslationSystemPrompt("ja-en")).toContain("日本語から英語");
     expect(buildTranslationSystemPrompt("en-ja")).toContain("英語から日本語");
+    expect(buildTranslationSystemPrompt("ja-ko")).toContain("日本語から韓国語");
+    expect(buildTranslationSystemPrompt("ko-ja")).toContain("韓国語から日本語");
+    expect(buildTranslationSystemPrompt("ja-zh")).toContain("日本語から中国語");
+    expect(buildTranslationSystemPrompt("ja-zh")).toContain("簡体字");
+    expect(buildTranslationSystemPrompt("zh-ja")).toContain("中国語から日本語");
   });
 
   it("demands translation-only output and nuance preservation", () => {

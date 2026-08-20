@@ -1,9 +1,11 @@
 import { parseReasoningLevel, type ReasoningLevel } from "./reasoning";
 
-export type TranslationModeSetting = "off" | "auto" | "ja-en" | "en-ja";
+export type TranslationModeSetting = "off" | "auto" | "ja-en" | "en-ja" | "ja-ko" | "ko-ja" | "ja-zh" | "zh-ja";
 
 function parseTranslationModeSetting(raw: unknown): TranslationModeSetting {
-  return raw === "auto" || raw === "ja-en" || raw === "en-ja" ? raw : "off";
+  return ["auto", "ja-en", "en-ja", "ja-ko", "ko-ja", "ja-zh", "zh-ja"].includes(raw as string)
+    ? (raw as TranslationModeSetting)
+    : "off";
 }
 
 const STORAGE_KEY = "chat-space.settings.v1";

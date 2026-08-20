@@ -15,6 +15,10 @@ const TRANSLATION_MODES: { id: TranslationModeSetting; label: string; hint: stri
   { id: "auto", label: "自動（日⇄英）", hint: "日本語は英語へ、それ以外は日本語へ" },
   { id: "ja-en", label: "日本語 → 英語", hint: "常に英語へ翻訳" },
   { id: "en-ja", label: "英語 → 日本語", hint: "常に日本語へ翻訳" },
+  { id: "ja-ko", label: "日本語 → 韓国語", hint: "常に韓国語へ翻訳" },
+  { id: "ko-ja", label: "韓国語 → 日本語", hint: "常に日本語へ翻訳" },
+  { id: "ja-zh", label: "日本語 → 中国語", hint: "簡体字・本土表現へ翻訳" },
+  { id: "zh-ja", label: "中国語 → 日本語", hint: "常に日本語へ翻訳" },
 ];
 
 interface TranslationModeSelectorProps {
@@ -45,7 +49,7 @@ export function TranslationModeSelector({ value, onSelect, disabled }: Translati
           <span>翻訳 {current.id === "off" ? "" : current.label}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
           翻訳モード — 送るだけで翻訳します
         </DropdownMenuLabel>
