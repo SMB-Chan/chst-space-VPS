@@ -28,7 +28,7 @@
     "http-proxy-middleware": "^4.2.0",
     "ipaddr.js": "^2.5.0",
     "jsdom": "^26.1.0",
-    "openai": "^6.27.0",
+    "openai": "^7.5.0",
     "pdf-lib": "^1.17.1",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
