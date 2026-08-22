@@ -11,6 +11,10 @@ import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
 
 const PROVIDER_TIMEOUT_MS = 10_000;
 const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
+const PRIMARY_MIN_RESULTS = 5;
+const PRIMARY_MIN_DOMAINS = 3;
+const MAX_MERGED_API_RESULTS = 10;
+const DIVERSE_DOMAIN_SOFT_CAP = 2;
 
 export interface ApiSearchProvider {
   name: string;
@@ -51,7 +55,12 @@ function safeResult(
   if (typeof rawUrl !== "string") return null;
   const url = normalizeExternalHttpUrl(rawUrl);
   if (!url) return null;
-  const normalizedTitle = typeof title === "string" && title.trim() ? title.trim() : allowUrlAsTitle ? url : "";
+  const normalizedTitle =
+    typeof title === "string" && title.trim()
+      ? title.trim()
+      : allowUrlAsTitle
+        ? url
+        : "";
   if (!normalizedTitle) return null;
   return {
     title: normalizedTitle,
@@ -155,23 +164,140 @@ export function getConfiguredApiProviders(): ApiSearchProvider[] {
   return providers;
 }
 
+function domainOf(result: SearchResult): string {
+  try {
+    return new URL(result.url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function distinctDomainCount(results: SearchResult[]): number {
+  return new Set(results.map(domainOf).filter(Boolean)).size;
+}
+
+export function hasSufficientPrimaryCoverage(results: SearchResult[]): boolean {
+  return (
+    results.length >= PRIMARY_MIN_RESULTS &&
+    distinctDomainCount(results) >= PRIMARY_MIN_DOMAINS
+  );
+}
+
 /**
- * Try each configured API provider in order; return the first non-empty set.
- * Raw queries are intentionally not written to logs because they can contain
- * user-provided personal or confidential text.
+ * Merge provider-ranked lists while preserving useful provider ordering and
+ * avoiding one provider/domain monopolising the ensemble. The domain cap is a
+ * soft first pass: remaining unique URLs are used afterward if diversity alone
+ * would leave too few results.
  */
-export async function searchWithApiProviders(query: string): Promise<SearchResult[]> {
-  for (const provider of getConfiguredApiProviders()) {
-    try {
-      const results = await provider.search(query);
-      if (results.length > 0) {
-        logger.debug({ provider: provider.name, resultCount: results.length }, "Search API provider used");
-        return results;
+export function mergeSearchProviderResults(
+  resultSets: SearchResult[][],
+  maxResults = MAX_MERGED_API_RESULTS,
+): SearchResult[] {
+  const output: SearchResult[] = [];
+  const seenUrls = new Set<string>();
+  const perDomain = new Map<string, number>();
+  const cursors = resultSets.map(() => 0);
+
+  const addRoundRobin = (enforceDomainCap: boolean): void => {
+    let progressed = true;
+    while (output.length < maxResults && progressed) {
+      progressed = false;
+      for (let setIndex = 0; setIndex < resultSets.length; setIndex++) {
+        const results = resultSets[setIndex] ?? [];
+        while (cursors[setIndex] < results.length) {
+          const candidate = results[cursors[setIndex]++]!;
+          if (seenUrls.has(candidate.url)) continue;
+          const domain = domainOf(candidate);
+          if (
+            enforceDomainCap &&
+            domain &&
+            (perDomain.get(domain) ?? 0) >= DIVERSE_DOMAIN_SOFT_CAP
+          ) {
+            continue;
+          }
+          seenUrls.add(candidate.url);
+          if (domain) perDomain.set(domain, (perDomain.get(domain) ?? 0) + 1);
+          output.push(candidate);
+          progressed = true;
+          break;
+        }
+        if (output.length >= maxResults) return;
       }
-      logger.warn({ provider: provider.name }, "Search API returned no results");
-    } catch (err) {
-      logger.warn({ err, provider: provider.name }, "Search API provider failed");
+    }
+  };
+
+  addRoundRobin(true);
+
+  // The first pass advances past domain-capped candidates. Re-scan every set
+  // for remaining unique URLs without the cap so sparse provider combinations
+  // still return as much useful coverage as possible.
+  if (output.length < maxResults) {
+    for (const results of resultSets) {
+      for (const candidate of results) {
+        if (output.length >= maxResults) break;
+        if (seenUrls.has(candidate.url)) continue;
+        seenUrls.add(candidate.url);
+        output.push(candidate);
+      }
     }
   }
-  return [];
+
+  return output;
+}
+
+async function runProvider(
+  provider: ApiSearchProvider,
+  query: string,
+): Promise<SearchResult[]> {
+  try {
+    const results = await provider.search(query);
+    if (results.length > 0) {
+      logger.debug(
+        { provider: provider.name, resultCount: results.length },
+        "Search API provider used",
+      );
+    } else {
+      logger.warn({ provider: provider.name }, "Search API returned no results");
+    }
+    return results;
+  } catch (err) {
+    logger.warn({ err, provider: provider.name }, "Search API provider failed");
+    return [];
+  }
+}
+
+/**
+ * Prefer one provider when it already gives sufficient coverage. Only pay the
+ * latency/API-cost of additional providers when the primary set is sparse or
+ * concentrated in too few domains. Secondary providers are then queried in
+ * parallel and merged with URL deduplication + domain diversity.
+ *
+ * Raw queries are intentionally never written to logs because they can contain
+ * user-provided personal or confidential text.
+ */
+export async function searchWithProviders(
+  query: string,
+  providers: ApiSearchProvider[],
+): Promise<SearchResult[]> {
+  if (providers.length === 0) return [];
+
+  const primaryResults = await runProvider(providers[0]!, query);
+  if (
+    providers.length === 1 ||
+    hasSufficientPrimaryCoverage(primaryResults)
+  ) {
+    return primaryResults.slice(0, MAX_MERGED_API_RESULTS);
+  }
+
+  const secondaryResults = await Promise.all(
+    providers.slice(1).map((provider) => runProvider(provider, query)),
+  );
+  return mergeSearchProviderResults(
+    [primaryResults, ...secondaryResults],
+    MAX_MERGED_API_RESULTS,
+  );
+}
+
+export async function searchWithApiProviders(query: string): Promise<SearchResult[]> {
+  return searchWithProviders(query, getConfiguredApiProviders());
 }
