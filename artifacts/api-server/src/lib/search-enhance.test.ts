@@ -5,6 +5,9 @@ import {
   scoreSearchResult,
   mergeSearchResults,
   extractMainContent,
+  extractEmbeddedContent,
+  isBotChallengePage,
+  MIN_CONTENT_CHARS,
 } from "./search-enhance";
 
 describe("normalizeQuery", () => {
@@ -139,5 +142,86 @@ describe("extractMainContent", () => {
     expect(text).not.toContain("alert");
     expect(text).not.toContain("color: red");
     expect(text).toContain("Visible content");
+  });
+
+  it("yields too little text for a JS-rendered SPA shell", () => {
+    const html = `
+      <html>
+        <head><title>SPA</title></head>
+        <body>
+          <div id="root"></div>
+          <script src="/assets/index.js"></script>
+        </body>
+      </html>
+    `;
+    expect(extractMainContent(html).length).toBeLessThan(MIN_CONTENT_CHARS);
+  });
+});
+
+describe("isBotChallengePage", () => {
+  it("detects a Cloudflare challenge page", () => {
+    const html = `
+      <html>
+        <head><title>Just a moment...</title></head>
+        <body><div id="challenge-platform"></div></body>
+      </html>
+    `;
+    expect(isBotChallengePage(html)).toBe(true);
+  });
+
+  it("does not flag ordinary article pages", () => {
+    const html = `
+      <html>
+        <body><article><p>普通の記事本文です。ボット対策とは無関係の内容。</p></article></body>
+      </html>
+    `;
+    expect(isBotChallengePage(html)).toBe(false);
+  });
+});
+
+describe("extractEmbeddedContent", () => {
+  it("extracts articleBody from JSON-LD", () => {
+    const body = "これはJSON-LDに埋め込まれた記事本文です。".repeat(10);
+    const html = `
+      <html>
+        <head>
+          <script type="application/ld+json">
+            {"@context":"https://schema.org","@type":"NewsArticle","headline":"タイトル","articleBody":"${body}"}
+          </script>
+        </head>
+        <body><div id="root"></div></body>
+      </html>
+    `;
+    const text = extractEmbeddedContent(html);
+    expect(text).toContain("JSON-LDに埋め込まれた記事本文");
+  });
+
+  it("extracts long strings from Next.js __NEXT_DATA__ and strips HTML", () => {
+    const article = "<p>Next.jsのpropsに入っている本文です。</p>".repeat(8);
+    const html = `
+      <html>
+        <body>
+          <div id="__next"></div>
+          <script id="__NEXT_DATA__" type="application/json">
+            {"props":{"pageProps":{"article":{"title":"題","body":${JSON.stringify(article)}}}}}
+          </script>
+        </body>
+      </html>
+    `;
+    const text = extractEmbeddedContent(html);
+    expect(text).toContain("Next.jsのpropsに入っている本文です");
+    expect(text).not.toContain("<p>");
+  });
+
+  it("returns empty string when no structured data is present", () => {
+    expect(extractEmbeddedContent("<html><body><p>short</p></body></html>")).toBe("");
+  });
+
+  it("ignores malformed JSON blocks without throwing", () => {
+    const html = `
+      <script type="application/ld+json">{broken json</script>
+      <script id="__NEXT_DATA__" type="application/json">not json at all</script>
+    `;
+    expect(extractEmbeddedContent(html)).toBe("");
   });
 });

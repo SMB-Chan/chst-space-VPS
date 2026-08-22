@@ -17,10 +17,14 @@ import {
   expandSearchQueries,
   mergeSearchResults,
   extractMainContent,
+  extractEmbeddedContent,
+  isBotChallengePage,
   normalizeQuery,
   FETCH_TOP_N,
+  MIN_CONTENT_CHARS,
   type ScoredSearchResult,
 } from "./search-enhance";
+import { fetchWithBrowser } from "./render-fetch";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchHtml };
@@ -46,6 +50,30 @@ export const MAX_PAGE_RESPONSE_BYTES = 1024 * 1024;
 export const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+
+/**
+ * Optional last-resort fallback for pages that cannot be read from raw HTML
+ * (JS-rendered shells, bot challenges): fetch through the r.jina.ai rendering
+ * proxy, which returns the page as Markdown. Disabled by default because the
+ * target URL is sent to a third-party service; enable with
+ * WEB_FETCH_RENDER_FALLBACK=1.
+ */
+const RENDER_FALLBACK_ENABLED = /^(1|true|yes)$/i.test(
+  process.env.WEB_FETCH_RENDER_FALLBACK ?? "",
+);
+const RENDER_PROXY_BASE = "https://r.jina.ai/";
+
+/**
+ * Browser-based fallback (local headless Chromium via Playwright) for pages
+ * unreadable from raw HTML.  Local and private, so enabled by default;
+ * disable with WEB_FETCH_PLAYWRIGHT_FALLBACK=0.  Degrades gracefully when
+ * the browser binary is not installed.
+ */
+const PLAYWRIGHT_FALLBACK_ENABLED = !/^(0|false|no)$/i.test(
+  process.env.WEB_FETCH_PLAYWRIGHT_FALLBACK ?? "",
+);
+/** Deadline for one browser-rendered page load (goto + settle). */
+const BROWSER_FETCH_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Bounded in-memory search-result cache
@@ -215,20 +243,24 @@ const safeAgent = new Agent({
  */
 async function fetchWithTimeout(
   rawUrl: string,
-  timeoutMs: number
+  timeoutMs: number,
+  opts?: { userAgent?: string | null }
 ): Promise<{ response: UndiciResponse; cancel: () => void }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const cancel = () => clearTimeout(timer);
+  const userAgent = opts && "userAgent" in opts ? opts.userAgent : USER_AGENT;
 
   try {
     let current = rawUrl;
     for (let hop = 0; hop < 4; hop++) {
       // assertSafeUrl races its internal DNS lookup against our signal
       const url = await assertSafeUrl(current, controller.signal);
+      const headers: Record<string, string> = { "Accept-Language": "ja,en;q=0.8" };
+      if (userAgent) headers["User-Agent"] = userAgent;
       const res = await undiciFetch(url, {
         signal: controller.signal,
-        headers: { "User-Agent": USER_AGENT, "Accept-Language": "ja,en;q=0.8" },
+        headers,
         redirect: "manual",
         dispatcher: safeAgent,
       });
@@ -265,6 +297,65 @@ async function discardResponseBody(response: UndiciResponse): Promise<void> {
   }
 }
 
+/**
+ * Fetch a page through the rendering proxy (r.jina.ai) and return its
+ * Markdown text.  Used only when direct extraction failed and the operator
+ * has opted in via WEB_FETCH_RENDER_FALLBACK.
+ */
+async function fetchViaRenderProxy(url: string): Promise<string | null> {
+  try {
+    // Rendering is slower than a plain fetch, so allow a longer deadline.
+    // Note: r.jina.ai's own Cloudflare challenges browser-like User-Agents
+    // from datacenter IPs, so the proxy request omits the browser UA.
+    const { response: res, cancel } = await fetchWithTimeout(
+      `${RENDER_PROXY_BASE}${url}`,
+      PAGE_FETCH_TIMEOUT_MS * 3,
+      { userAgent: null },
+    );
+    try {
+      if (!res.ok) {
+        await discardResponseBody(res);
+        return null;
+      }
+      const text = (await readResponseTextLimited(res, MAX_PAGE_RESPONSE_BYTES)).trim();
+      // The proxy can return a rendered copy of the target's own bot
+      // challenge ("Just a moment..."), which is not usable content.
+      if (text.length < MIN_CONTENT_CHARS || isBotChallengePage(text)) return null;
+      return text;
+    } finally {
+      cancel();
+    }
+  } catch (err) {
+    logger.warn({ err, url }, "Render-proxy fetch failed");
+    return null;
+  }
+}
+
+/**
+ * Last-resort fetch chain for pages unreadable via plain HTTP:
+ * 1. local headless Chromium (Playwright) — private, enabled by default
+ * 2. r.jina.ai rendering proxy — third-party, opt-in only
+ */
+async function fetchViaFallbacks(
+  url: string,
+): Promise<{ title: string; text: string } | null> {
+  if (PLAYWRIGHT_FALLBACK_ENABLED) {
+    const rendered = await fetchWithBrowser(url, BROWSER_FETCH_TIMEOUT_MS);
+    if (
+      rendered &&
+      rendered.text.length >= MIN_CONTENT_CHARS &&
+      !isBotChallengePage(rendered.text)
+    ) {
+      return { title: rendered.title, text: rendered.text.slice(0, MAX_PAGE_CHARS) };
+    }
+  }
+  if (RENDER_FALLBACK_ENABLED) {
+    const rendered = await fetchViaRenderProxy(url);
+    if (rendered) return { title: url, text: rendered.slice(0, MAX_PAGE_CHARS) };
+  }
+  return null;
+}
+
 export async function fetchPageText(
   url: string
 ): Promise<{ title: string; text: string } | null> {
@@ -272,7 +363,13 @@ export async function fetchPageText(
     const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS);
     try {
       if (!res.ok) {
+        logger.warn({ status: res.status, url }, "Page fetch rejected");
         await discardResponseBody(res);
+        // Bot-protection commonly answers with 401/403/429/503; the fallback
+        // chain (browser, then proxy) may still be able to read the page.
+        if ([401, 403, 429, 503].includes(res.status)) {
+          return await fetchViaFallbacks(url);
+        }
         return null;
       }
       const contentType = res.headers.get("content-type") ?? "";
@@ -285,8 +382,27 @@ export async function fetchPageText(
       const html = await readResponseTextLimited(res, MAX_PAGE_RESPONSE_BYTES);
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       const title = titleMatch ? stripHtml(titleMatch[1]) : url;
-      const text = extractMainContent(html).slice(0, MAX_PAGE_CHARS);
-      return { title, text };
+
+      let text = extractMainContent(html);
+      if (text.length < MIN_CONTENT_CHARS) {
+        // JS-rendered shell or interstitial: try data embedded in the HTML
+        // (JSON-LD articleBody, Next.js __NEXT_DATA__) before giving up.
+        const embedded = extractEmbeddedContent(html);
+        if (embedded.length > text.length) text = embedded;
+      }
+
+      if (text.length < MIN_CONTENT_CHARS) {
+        // Still unreadable (JS shell, interstitial): hand over to the
+        // browser/proxy fallback chain, keeping the HTML-derived title.
+        const fallback = await fetchViaFallbacks(url);
+        if (fallback) return { title: title === url ? fallback.title : title, text: fallback.text };
+        logger.warn(
+          { url, botChallenge: isBotChallengePage(html) },
+          "Page content unreadable (JS-rendered or bot-blocked)",
+        );
+        return null;
+      }
+      return { title, text: text.slice(0, MAX_PAGE_CHARS) };
     } finally {
       cancel(); // disarm only after body has been fully consumed
     }
@@ -490,7 +606,7 @@ export async function buildWebContext(
   });
 
   if (urlFetchFailed) {
-    const warning = "一部のURLが読み込めませんでした（タイムアウトまたはアクセス不可）。読み込めた情報でお答えします。";
+    const warning = "一部のURLが読み込めませんでした（タイムアウト・アクセス拒否・ボット対策によるブロックなど）。読み込めた情報でお答えします。";
     searchWarning = warning;
     onStatus({ status: "search_warning", message: warning });
   }

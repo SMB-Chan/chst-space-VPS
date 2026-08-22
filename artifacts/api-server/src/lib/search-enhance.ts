@@ -238,3 +238,101 @@ export function extractMainContent(html: string): string {
   // Last resort: strip all tags.
   return stripHtml(cleaned).trim();
 }
+
+/**
+ * Below this many characters of extracted text, a page is treated as
+ * unreadable (JS-rendered shell, bot challenge, or empty page) and
+ * fallbacks are attempted.
+ */
+export const MIN_CONTENT_CHARS = 120;
+
+/**
+ * Heuristic markers of bot-protection / JS-challenge pages (Cloudflare,
+ * DataDome, PerimeterX, ...).  Checked case-insensitively against the start
+ * of the document, where these pages carry their challenge markup.
+ */
+const BOT_CHALLENGE_MARKERS = [
+  "just a moment",
+  "checking your browser",
+  "checking if the site connection is secure",
+  "verify you are human",
+  "cf-challenge",
+  "challenge-platform",
+  "cf-browser-verification",
+  "ddjskey", // DataDome
+  "datadome",
+  "px-captcha", // PerimeterX
+  "are you a robot",
+  "enable javascript and cookies to continue",
+];
+
+/** Detect bot-protection / JS-challenge interstitials. */
+export function isBotChallengePage(html: string): boolean {
+  const head = html.slice(0, 50_000).toLowerCase();
+  return BOT_CHALLENGE_MARKERS.some((marker) => head.includes(marker));
+}
+
+/** Recursively collect long human-readable strings from parsed JSON. */
+function collectLongStrings(value: unknown, out: string[], depth: number): void {
+  if (depth > 12 || out.length >= 100) return;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length >= 80) out.push(trimmed);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectLongStrings(item, out, depth + 1);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) collectLongStrings(item, out, depth + 1);
+  }
+}
+
+function parseJsonScript(block: string): unknown | null {
+  try {
+    return JSON.parse(block);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract readable text embedded in the page's structured data, for pages
+ * whose visible body is rendered client-side (so plain HTML extraction
+ * yields nothing):
+ * - `<script type="application/ld+json">` (news articles often carry the
+ *   full `articleBody` here)
+ * - Next.js `<script id="__NEXT_DATA__">` server-rendered props
+ */
+export function extractEmbeddedContent(html: string): string {
+  const candidates: string[] = [];
+
+  const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let ldMatch: RegExpExecArray | null;
+  while ((ldMatch = ldRe.exec(html)) !== null) {
+    const parsed = parseJsonScript(ldMatch[1].trim());
+    if (parsed) collectLongStrings(parsed, candidates, 0);
+  }
+
+  const nextMatch = html.match(
+    /<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i,
+  );
+  if (nextMatch) {
+    const parsed = parseJsonScript(nextMatch[1].trim());
+    if (parsed) collectLongStrings(parsed, candidates, 0);
+  }
+
+  // Fields often contain HTML fragments; strip tags, then keep the longest
+  // unique texts (body first, short metadata last).
+  const seen = new Set<string>();
+  const texts: string[] = [];
+  for (const candidate of candidates) {
+    const text = stripHtml(candidate).trim();
+    if (text.length < 80 || seen.has(text)) continue;
+    seen.add(text);
+    texts.push(text);
+  }
+  texts.sort((a, b) => b.length - a.length);
+  return texts.slice(0, 5).join("\n\n").trim();
+}

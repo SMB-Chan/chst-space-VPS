@@ -62,6 +62,7 @@
 - `messages` にカラムを足したら `pnpm --filter @workspace/db run push`。API 起動時にも欠けている監査カラム等を `ADD COLUMN IF NOT EXISTS` で補う。
 - 「二重送信」報告は、まず DB に 2 件あるのか表示が 2 件なのかを切り分ける。再取得完了を待ってからストリーミング状態をクリアする。
 - ローカルでは Vite が `/api` を `API_PROXY_TARGET`（デフォルト `http://127.0.0.1:5000`）へプロキシする。
+- URL 本文取得は素の HTML 抽出が主。読めないページは `__NEXT_DATA__` / JSON-LD の埋め込み本文 → ローカル headless Chromium（Playwright、`WEB_FETCH_PLAYWRIGHT_FALLBACK=0` で無効化）→ r.jina.ai プロキシ（`WEB_FETCH_RENDER_FALLBACK=1` で有効化、URL が第三者へ送られる）の順にフォールバックする。Playwright のブラウザは `pnpm --filter @workspace/api-server exec playwright install chromium` で導入。
 - `.env` はコミットしない。`.env.example` だけを更新する。
 
 ## Pointers
