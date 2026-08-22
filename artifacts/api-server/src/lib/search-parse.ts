@@ -4,9 +4,30 @@ export interface SearchResult {
   snippet: string;
 }
 
+const TRACKING_QUERY_KEYS = new Set([
+  "fbclid",
+  "gclid",
+  "dclid",
+  "msclkid",
+  "mc_cid",
+  "mc_eid",
+  "igshid",
+  "yclid",
+  "_ga",
+  "_gl",
+]);
+
+function isTrackingQueryKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized.startsWith("utm_") || TRACKING_QUERY_KEYS.has(normalized);
+}
+
 /**
  * Accept only ordinary credential-free HTTP(S) URLs for search results and
- * source cards. Returns a canonical URL string or null when unsafe/invalid.
+ * source cards. Fragment and well-known cross-site tracking parameters are
+ * removed so the same document is not treated as multiple search results.
+ * Semantically meaningful query parameters are preserved in their original
+ * order; generic keys such as `ref` are intentionally not removed.
  */
 export function normalizeExternalHttpUrl(raw: string): string | null {
   try {
@@ -14,6 +35,9 @@ export function normalizeExternalHttpUrl(raw: string): string | null {
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     if (url.username || url.password) return null;
     url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (isTrackingQueryKey(key)) url.searchParams.delete(key);
+    }
     return url.href;
   } catch {
     return null;
