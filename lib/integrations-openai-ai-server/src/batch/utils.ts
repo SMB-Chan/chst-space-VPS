@@ -112,11 +112,12 @@ export async function batchProcessWithSSE<T, R>(
           minTimeout,
           maxTimeout,
           factor: 2,
-          onFailedAttempt: (error) => {
+          // p-retry v7+ passes a RetryContext here, not the Error directly.
+          // Inspect the underlying error so rate-limit failures actually retry,
+          // while deterministic/non-transient failures abort immediately.
+          onFailedAttempt: ({ error }) => {
             if (!isRateLimitError(error)) {
-              throw new AbortError(
-                error instanceof Error ? error : new Error(String(error))
-              );
+              throw new AbortError(error);
             }
           },
         }
