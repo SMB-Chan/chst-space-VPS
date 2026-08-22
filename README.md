@@ -13,6 +13,7 @@
 - Web 検索（DuckDuckGo、API キー不要）と参照元カード
 - 画像・テキストファイルの添付
 - 添付制限: 最大5件、画像1件10MB、テキスト1件1MB、テキスト合計2MB、全添付合計20MB（SVG非対応）
+- 長期会話の過去画像は最新の履歴を優先し、合計10MiB・最大4枚まで再送（現在のユーザーメッセージ画像はこの履歴枠の対象外）
 - 会話履歴の保存・削除、メモリ一括消去
 - プライベートセッション（サーバーに残さない。PDF / Office生成は通常会話のみ）
 - PWA（ホーム画面追加）と既定モデルの端末保存
@@ -92,17 +93,19 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - `FRONTEND_URL` — APIへアクセスできるブラウザOrigin。カンマ区切り可。本番のクロスOrigin構成では必須
 - `AI_INTEGRATIONS_OPENAI_BASE_URL` / `AI_INTEGRATIONS_OPENAI_API_KEY` — OpenAI 互換エンドポイント
 - `DASHSCOPE_API_KEY` — Qwen 等を使う場合（任意）
-- `AI_REQUESTS_PER_MINUTE` — ユーザー単位・プロセス単位の毎分AIリクエスト上限（既定20、0で無効）
-- `AI_MAX_CONCURRENT_REQUESTS` — ユーザー単位の同時AI生成上限（既定2、0で無効）
+- `AI_REQUESTS_PER_MINUTE` — ユーザー単位・PostgreSQL共有のAIリクエスト上限（既定20/60秒、0で無効）
+- `AI_MAX_CONCURRENT_REQUESTS` — ユーザー単位・全Autoscaleインスタンス共有の同時AI生成上限（既定2、0で無効）
+- `AI_CONCURRENCY_LEASE_TTL_MS` — 同時実行leaseの失効時間（既定90000ms。実行中はheartbeat更新）
 - Token Plan の DashScope はリージョン共通 URL ではなく、専用エンドポイントが必要です
 
 ## 安全性と運用上の注意
 
 - 添付は本文と分離した構造化JSONで送信し、サーバー側で画像data URL・base64の正規形・画像シグネチャとUTF-8テキストを検証してからモデル入力へ変換します。`CS_ATTACHMENTS_V1:` はDB・表示互換用です。
-- 大容量JSONパーサーはチャット送信経路だけに限定し、認証とAI利用量ガードを先に実行します。
+- 大容量JSONパーサーはチャット送信経路だけに限定し、認証とPostgreSQL共有AI利用量ガードを先に実行します。
+- AI利用量ガードは認証ユーザー単位でPostgreSQLを共有状態として使い、固定request windowと期限付きconcurrency leaseを全Autoscaleインスタンス間で共有します。DB側の利用量判定が利用不能な場合はAI生成をfail-closedします。
 - Web取得はDNS再束縛を含むSSRF防御を行い、展開後の本文をページ1MB・検索結果2MBで打ち切ります。
-- AI利用量ガードは1プロセス内の防御です。複数インスタンスで運用する場合は、ゲートウェイまたはRedis等の共有レート制限も併用してください。
-- 現行の画像添付は互換性のため会話メッセージ内へdata URLとして保存されます。大規模運用ではオブジェクトストレージと添付参照テーブルへの移行を推奨します。
+- 現行の画像添付は互換性のため会話メッセージ内へdata URLとして保存されます。モデルへの過去画像再送は最新10MiB・4枚に制限しています。より大規模な添付保存が必要になった場合は参照型ストレージへの移行を検討します。
+- PDF / Office 等の生成binaryは現在PostgreSQLへtransactionalに保存し、既定50MiB/userの共通生成ファイルquotaで制限しています。保持・削除・object storageへの移行条件は [`docs/generated-binary-storage-policy.md`](./docs/generated-binary-storage-policy.md) を参照してください。
 
 ## ライセンス
 
