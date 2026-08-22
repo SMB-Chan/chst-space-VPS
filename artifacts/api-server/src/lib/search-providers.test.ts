@@ -43,6 +43,21 @@ describe("parseBraveResults", () => {
     expect(parseBraveResults(null)).toEqual([]);
     expect(parseBraveResults({ web: { results: "nope" } })).toEqual([]);
   });
+
+  it("drops non-http and credential-bearing URLs", () => {
+    const json = {
+      web: {
+        results: [
+          { title: "JS", url: "javascript:alert(1)" },
+          { title: "Credentials", url: "https://user:pass@example.com/private" },
+          { title: "OK", url: "https://example.com/ok#fragment" },
+        ],
+      },
+    };
+    expect(parseBraveResults(json)).toEqual([
+      { title: "OK", url: "https://example.com/ok", snippet: "" },
+    ]);
+  });
 });
 
 describe("parseTavilyResults", () => {
@@ -51,7 +66,7 @@ describe("parseTavilyResults", () => {
       results: [{ title: "T", url: "https://example.com", content: "本文抜粋" }],
     };
     expect(parseTavilyResults(json)).toEqual([
-      { title: "T", url: "https://example.com", snippet: "本文抜粋" },
+      { title: "T", url: "https://example.com/", snippet: "本文抜粋" },
     ]);
   });
 
