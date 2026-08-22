@@ -15,20 +15,115 @@ export const CLERK_PROXY_PATH = '/api/__clerk';
 /** Dynamic Clerk Frontend API responses should be tiny JSON documents. */
 const MAX_BUFFERED_PROXY_BYTES = 5 * 1024 * 1024;
 
-export function getClerkProxyHost(req: {
-  headers: IncomingHttpHeaders;
-}): string | undefined {
-  const forwarded = req.headers['x-forwarded-host'];
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  const firstHop = raw?.split(',')[0]?.trim();
-  return firstHop || req.headers.host?.trim() || undefined;
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.split(',')[0]?.trim() || undefined;
 }
 
-function getForwardedProtocol(headers: IncomingHttpHeaders): 'http' | 'https' {
-  const forwarded = headers['x-forwarded-proto'];
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  const first = raw?.split(',')[0]?.trim().toLowerCase();
-  return first === 'http' ? 'http' : 'https';
+function normalizeHostname(value: string | undefined): string | undefined {
+  const raw = firstHeaderValue(value);
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(`http://${raw}`);
+    if (parsed.username || parsed.password || !parsed.hostname) return undefined;
+    return parsed.hostname.toLowerCase().replace(/\.$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The proxy origin is security-sensitive: do not derive it from forwarded
+ * request headers. Operators must configure the complete canonical proxy URL.
+ */
+export function getConfiguredClerkProxyUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const raw = env.CLERK_PROXY_URL?.trim();
+  if (!raw) return undefined;
+
+  try {
+    const parsed = new URL(raw);
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return undefined;
+    }
+
+    const pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    if (pathname !== CLERK_PROXY_PATH) return undefined;
+    return `${parsed.origin}${CLERK_PROXY_PATH}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function addHostname(hosts: Set<string>, candidate: string | undefined): void {
+  const hostname = normalizeHostname(candidate);
+  if (hostname) hosts.add(hostname);
+}
+
+function addOriginHostname(hosts: Set<string>, candidate: string): void {
+  try {
+    const parsed = new URL(candidate.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+    addHostname(hosts, parsed.host);
+  } catch {
+    // Invalid entries fail closed rather than widening the host allowlist.
+  }
+}
+
+/**
+ * Build the exact hostname allowlist accepted for dynamic Clerk publishable
+ * keys. Every request-derived hostname remains untrusted until it matches this
+ * configured set.
+ */
+export function getConfiguredClerkHosts(
+  env: NodeJS.ProcessEnv = process.env,
+): Set<string> {
+  const hosts = new Set<string>();
+
+  for (const raw of (env.CLERK_ALLOWED_HOSTS ?? '').split(',')) {
+    addHostname(hosts, raw.trim());
+  }
+  for (const raw of (env.REPLIT_DOMAINS ?? '').split(',')) {
+    addHostname(hosts, raw.trim());
+  }
+  addHostname(hosts, env.REPLIT_DEV_DOMAIN);
+
+  for (const raw of (env.FRONTEND_URL ?? '').split(',')) {
+    if (raw.trim()) addOriginHostname(hosts, raw);
+  }
+
+  const proxyUrl = getConfiguredClerkProxyUrl(env);
+  if (proxyUrl) addOriginHostname(hosts, proxyUrl);
+
+  return hosts;
+}
+
+/**
+ * Forwarded/Host headers are only selectors into a configured allowlist. A
+ * spoofed value can therefore never introduce an arbitrary Clerk hostname.
+ */
+export function getAllowedClerkHost(
+  req: { headers: IncomingHttpHeaders },
+  allowedHosts: ReadonlySet<string>,
+): string | undefined {
+  if (allowedHosts.size === 0) return undefined;
+
+  const candidates = [
+    firstHeaderValue(req.headers['x-forwarded-host']),
+    firstHeaderValue(req.headers.host),
+  ];
+  for (const candidate of candidates) {
+    const hostname = normalizeHostname(candidate);
+    if (hostname && allowedHosts.has(hostname)) return hostname;
+  }
+  return undefined;
 }
 
 export function clerkProxyMiddleware(): RequestHandler {
@@ -37,7 +132,10 @@ export function clerkProxyMiddleware(): RequestHandler {
   }
 
   const secretKey = process.env.CLERK_SECRET_KEY;
-  if (!secretKey) {
+  const proxyUrl = getConfiguredClerkProxyUrl();
+  // A Clerk secret alone must not expose a trust-sensitive FAPI proxy. The
+  // canonical public proxy URL has to be explicitly configured as well.
+  if (!secretKey || !proxyUrl) {
     return (_req, _res, next) => next();
   }
 
@@ -49,16 +147,13 @@ export function clerkProxyMiddleware(): RequestHandler {
       path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ''),
     on: {
       proxyReq: (proxyReq, req) => {
-        const protocol = getForwardedProtocol(req.headers);
-        const host = getClerkProxyHost(req) || '';
-        const proxyUrl = `${protocol}://${host}${CLERK_PROXY_PATH}`;
-
         proxyReq.setHeader('Clerk-Proxy-Url', proxyUrl);
         proxyReq.setHeader('Clerk-Secret-Key', secretKey);
 
-        const xff = req.headers['x-forwarded-for'];
+        // Keep the existing Replit client-IP behavior until issue #46's edge
+        // header contract is proven. Do not guess left/right proxy hops here.
         const clientIp =
-          (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() ||
+          firstHeaderValue(req.headers['x-forwarded-for']) ||
           req.socket?.remoteAddress ||
           '';
         if (clientIp) proxyReq.setHeader('X-Forwarded-For', clientIp);

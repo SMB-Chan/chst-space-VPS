@@ -6,7 +6,8 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
-  getClerkProxyHost,
+  getAllowedClerkHost,
+  getConfiguredClerkHosts,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import healthRouter from "./routes/health";
@@ -65,16 +66,21 @@ app.use("/api", apiSecurityHeaders);
 // Health checks are mounted before Clerk so deployment probes never depend on auth.
 app.use("/api", healthRouter);
 
-// Resolve the publishable key from the incoming request host so the same
-// server can serve multiple Clerk custom domains. Falls back to
-// CLERK_PUBLISHABLE_KEY when the host doesn't map to a custom domain.
+const configuredClerkHosts = getConfiguredClerkHosts();
+
+// Dynamic production publishable keys are only derived from a configured host
+// allowlist. If no request host matches, fall back to the configured key rather
+// than turning an arbitrary forwarded Host value into a new Clerk key.
 app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
+  clerkMiddleware((req) => {
+    const fallbackKey = process.env.CLERK_PUBLISHABLE_KEY;
+    const allowedHost = getAllowedClerkHost(req, configuredClerkHosts);
+    return {
+      publishableKey: allowedHost
+        ? publishableKeyFromHost(allowedHost, fallbackKey)
+        : fallbackKey,
+    };
+  }),
 );
 
 // Attachment requests may carry base64 image data. Authenticate and acquire
