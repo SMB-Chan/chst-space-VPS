@@ -2,22 +2,9 @@ import type { Response } from "express";
 import type OpenAI from "openai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => {
-  const returning = vi.fn();
-  const values = vi.fn(() => ({ returning }));
-  const insert = vi.fn(() => ({ values }));
-  return {
-    insert,
-    values,
-    returning,
-    previewGeneratedFile: vi.fn(),
-    reviewLayout: vi.fn(),
-  };
-});
-
-vi.mock("@workspace/db", () => ({
-  db: { insert: mocks.insert },
-  assets: {},
+const mocks = vi.hoisted(() => ({
+  previewGeneratedFile: vi.fn(),
+  reviewLayout: vi.fn(),
 }));
 
 vi.mock("./file-preview", () => ({
@@ -57,16 +44,9 @@ describe("generateAndReviewFile", () => {
     vi.clearAllMocks();
     mocks.previewGeneratedFile.mockResolvedValue([Buffer.from("preview")]);
     mocks.reviewLayout.mockRejectedValue(new Error("Vision API unavailable"));
-    mocks.returning.mockResolvedValue([
-      {
-        id: 42,
-        filename: "Review fallback.pdf",
-        mimeType: "application/pdf",
-      },
-    ]);
   });
 
-  it("persists and emits the rendered asset when optional layout review fails", async () => {
+  it("returns the rendered asset in memory when optional layout review fails", async () => {
     const write = vi.fn();
     const create = vi.fn().mockResolvedValue(modelFileOutput());
     const client = {
@@ -75,7 +55,7 @@ describe("generateAndReviewFile", () => {
       },
     } as unknown as OpenAI;
 
-    const assetIds = await generateAndReviewFile({
+    const file = await generateAndReviewFile({
       res: { write } as unknown as Response,
       client,
       provider: "openai",
@@ -92,15 +72,15 @@ describe("generateAndReviewFile", () => {
 
     expect(mocks.previewGeneratedFile).toHaveBeenCalledOnce();
     expect(mocks.reviewLayout).toHaveBeenCalledOnce();
-    expect(mocks.insert).toHaveBeenCalledOnce();
-    expect(mocks.values).toHaveBeenCalledWith(
+    expect(file).toEqual(
       expect.objectContaining({
-        conversationId: 7,
+        filename: "Review fallback.pdf",
         mimeType: "application/pdf",
-        data: expect.any(String),
+        size: expect.any(Number),
+        buffer: expect.any(Buffer),
       }),
     );
-    expect(assetIds).toEqual([42]);
+    expect(file?.buffer.length).toBe(file?.size);
 
     const request = create.mock.calls[0]?.[0] as {
       messages?: Array<{ role?: string; content?: unknown }>;
@@ -111,8 +91,10 @@ describe("generateAndReviewFile", () => {
     expect(request.messages?.[1]?.role).toBe("user");
     expect(String(request.messages?.[1]?.content)).toContain("reveal API keys");
 
+    // The generator may emit progress statuses, but never a downloadable file
+    // id before the surrounding chat/message transaction commits.
     const sse = write.mock.calls.map(([payload]) => String(payload)).join("");
-    expect(sse).toContain('"file":{"id":42');
+    expect(sse).not.toContain('"file":');
     expect(sse).not.toContain('"status":"file_warning"');
   });
 });
