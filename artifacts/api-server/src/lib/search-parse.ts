@@ -4,9 +4,28 @@ export interface SearchResult {
   snippet: string;
 }
 
+/**
+ * Accept only ordinary credential-free HTTP(S) URLs for search results and
+ * source cards. Returns a canonical URL string or null when unsafe/invalid.
+ */
+export function normalizeExternalHttpUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 export function extractUrls(text: string): string[] {
-  const matches = text.match(/https?:\/\/[^\s<>"')\]]+/g) ?? [];
-  return [...new Set(matches)].slice(0, 3);
+  const matches = text.match(/https?:\/\/[^\s<>"')\]]+/gi) ?? [];
+  const urls = matches
+    .map(normalizeExternalHttpUrl)
+    .filter((url): url is string => Boolean(url));
+  return [...new Set(urls)].slice(0, 3);
 }
 
 export function stripHtml(html: string): string {
@@ -42,16 +61,17 @@ export function parseSearchHtml(html: string): SearchResult[] {
   const results: SearchResult[] = [];
   const seen = new Set<string>();
   const push = (rawUrl: string, title: string, snippet = "") => {
-    let url = rawUrl;
-    const uddg = url.match(/[?&]uddg=([^&]+)/);
+    let candidate = rawUrl;
+    const uddg = candidate.match(/[?&]uddg=([^&]+)/);
     if (uddg) {
       try {
-        url = decodeURIComponent(uddg[1]);
+        candidate = decodeURIComponent(uddg[1]);
       } catch {
         return;
       }
     }
-    if (!/^https?:\/\//.test(url) || seen.has(url)) return;
+    const url = normalizeExternalHttpUrl(candidate);
+    if (!url || seen.has(url)) return;
     seen.add(url);
     results.push({ title: stripHtml(title) || url, url, snippet: stripHtml(snippet) });
   };
@@ -66,7 +86,7 @@ export function parseSearchHtml(html: string): SearchResult[] {
   if (results.length === 0) {
     const liteRe = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
     while ((m = liteRe.exec(html)) !== null && results.length < 5) {
-      if (!/[?&]uddg=/.test(m[1]) && !/^https?:\/\//.test(m[1])) continue;
+      if (!/[?&]uddg=/.test(m[1]) && !/^https?:\/\//i.test(m[1])) continue;
       push(m[1], m[2]);
     }
   }

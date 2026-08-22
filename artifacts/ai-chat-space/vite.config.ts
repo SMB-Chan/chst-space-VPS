@@ -15,6 +15,38 @@ if (Number.isNaN(port) || port <= 0) {
 const basePath = process.env.BASE_PATH ?? '/';
 const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:5000';
 
+function normalizeAllowedHost(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value.includes('://') ? value : `https://${value}`);
+    if (url.username || url.password || !url.hostname) return null;
+    return url.hostname;
+  } catch {
+    return null;
+  }
+}
+
+function getAllowedHosts(): string[] {
+  const candidates = [
+    process.env.REPLIT_DEV_DOMAIN ?? '',
+    ...(process.env.REPLIT_DOMAINS ?? '').split(','),
+    ...(process.env.VITE_ALLOWED_HOSTS ?? '').split(','),
+  ];
+  return Array.from(
+    new Set(
+      candidates
+        .map(normalizeAllowedHost)
+        .filter((host): host is string => Boolean(host)),
+    ),
+  );
+}
+
+// Vite's default still permits localhost/.localhost and IP literals. Replit's
+// current dev/deployment hostnames are explicitly added from platform-provided
+// environment variables instead of disabling host validation globally.
+const allowedHosts = getAllowedHosts();
+
 export default defineConfig({
   base: basePath,
   plugins: [
@@ -56,7 +88,7 @@ export default defineConfig({
     port,
     strictPort: true,
     host: '0.0.0.0',
-    allowedHosts: true,
+    allowedHosts,
     fs: {
       strict: true,
     },
@@ -70,6 +102,6 @@ export default defineConfig({
   preview: {
     port,
     host: '0.0.0.0',
-    allowedHosts: true,
+    allowedHosts,
   },
 });

@@ -2,40 +2,34 @@ import { describe, expect, it } from "vitest";
 import { isSafeBrowserRequestUrl } from "./render-fetch";
 
 /**
- * SSRF regression tests for the headless-browser path.  Every request the
- * page generates (navigation, redirects, subresources, XHR, iframes) is
- * validated by isSafeBrowserRequestUrl before Playwright lets it through.
+ * SSRF regression tests for the headless-browser path. Every HTTP(S) request
+ * the page generates is validated before Playwright lets it through; service
+ * workers and WebSockets are blocked at the context level.
  */
 describe("isSafeBrowserRequestUrl", () => {
   const blocked = [
-    // loopback / unspecified
     "http://127.0.0.1/",
     "http://localhost/",
     "http://foo.localhost/",
     "http://0.0.0.0/",
-    // RFC1918 private
     "http://10.0.0.1/",
     "http://172.16.0.1/",
     "http://192.168.0.1/",
-    // link-local / cloud metadata endpoint
     "http://169.254.169.254/",
-    // IPv6 loopback / ULA
     "http://[::1]/",
     "http://[fc00::1]/",
-    // internal-ish hostnames
     "http://printer.local/",
     "http://db.internal/",
-    // non-network schemes
     "file:///etc/passwd",
     "chrome://settings/",
-    // credentials in URL
+    "ws://127.0.0.1/socket",
+    "wss://8.8.8.8/socket",
     "http://user:pass@8.8.8.8/",
-    // garbage
     "not a url",
   ];
 
   const allowed = [
-    "https://8.8.8.8/", // literal public IP, no DNS needed
+    "https://8.8.8.8/",
     "http://1.1.1.1/path?q=1",
     "about:blank",
     "data:text/html,<p>hi</p>",
@@ -53,11 +47,8 @@ describe("isSafeBrowserRequestUrl", () => {
     });
   }
 
-  it("caches DNS verdicts per host within one page load", async () => {
-    const cache = new Map<string, Promise<boolean>>();
-    await isSafeBrowserRequestUrl("http://127.0.0.1/a", cache);
-    await isSafeBrowserRequestUrl("http://127.0.0.1/b", cache);
-    expect(cache.size).toBe(1);
-    expect(await isSafeBrowserRequestUrl("http://127.0.0.1/c", cache)).toBe(false);
+  it("does not let a previous safe host verdict mask credentials", async () => {
+    expect(await isSafeBrowserRequestUrl("https://8.8.8.8/public")).toBe(true);
+    expect(await isSafeBrowserRequestUrl("https://user:pass@8.8.8.8/private")).toBe(false);
   });
 });

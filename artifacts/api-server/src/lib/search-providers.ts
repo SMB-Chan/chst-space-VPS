@@ -1,15 +1,16 @@
 import { fetch as undiciFetch } from "undici";
 import { logger } from "./logger";
-import type { SearchResult } from "./search-parse";
+import { readResponseTextLimited } from "./bounded-body";
+import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
 
 /**
- * API-based search providers.  When an API key is configured these replace
- * the fragile DuckDuckGo HTML scraping path, which stays as the keyless
- * fallback.  Hosts are fixed and known, so no SSRF guard is needed here —
- * only the query string carries user input.
+ * API-based search providers. Hosts are fixed and known; only the query string
+ * carries user-controlled data. Provider responses are still untrusted and
+ * are bounded, parsed defensively, and URL-normalized before use.
  */
 
 const PROVIDER_TIMEOUT_MS = 10_000;
+const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 
 export interface ApiSearchProvider {
   name: string;
@@ -24,75 +25,71 @@ async function fetchJson(
   const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
     const res = await undiciFetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) {
-      throw new Error(`Search API returned ${res.status}`);
+    if (!res.ok) throw new Error(`Search API returned ${res.status}`);
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!/\b(?:application\/json|[^;]+\+json)\b/i.test(contentType)) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new Error("Search API returned a non-JSON response");
     }
-    return await res.json();
+    const text = await readResponseTextLimited(res, MAX_PROVIDER_RESPONSE_BYTES);
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("Search API returned invalid JSON");
+    }
   } finally {
     clearTimeout(timer);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Response parsers (pure, unit-tested)
-// ---------------------------------------------------------------------------
+function safeResult(
+  title: unknown,
+  rawUrl: unknown,
+  snippet: unknown,
+  allowUrlAsTitle = false,
+): SearchResult | null {
+  if (typeof rawUrl !== "string") return null;
+  const url = normalizeExternalHttpUrl(rawUrl);
+  if (!url) return null;
+  const normalizedTitle = typeof title === "string" && title.trim() ? title.trim() : allowUrlAsTitle ? url : "";
+  if (!normalizedTitle) return null;
+  return {
+    title: normalizedTitle,
+    url,
+    snippet: typeof snippet === "string" ? snippet : "",
+  };
+}
 
 export function parseBraveResults(json: unknown): SearchResult[] {
   const results = (json as { web?: { results?: unknown[] } })?.web?.results;
   if (!Array.isArray(results)) return [];
-  const out: SearchResult[] = [];
-  for (const r of results) {
-    const item = r as { title?: string; url?: string; description?: string };
-    if (typeof item.title === "string" && typeof item.url === "string") {
-      out.push({
-        title: item.title,
-        url: item.url,
-        snippet: typeof item.description === "string" ? item.description : "",
-      });
-    }
-  }
-  return out;
+  return results.flatMap((raw): SearchResult[] => {
+    const item = raw as { title?: unknown; url?: unknown; description?: unknown };
+    const result = safeResult(item.title, item.url, item.description);
+    return result ? [result] : [];
+  });
 }
 
 export function parseTavilyResults(json: unknown): SearchResult[] {
   const results = (json as { results?: unknown[] })?.results;
   if (!Array.isArray(results)) return [];
-  const out: SearchResult[] = [];
-  for (const r of results) {
-    const item = r as { title?: string; url?: string; content?: string };
-    if (typeof item.title === "string" && typeof item.url === "string") {
-      out.push({
-        title: item.title,
-        url: item.url,
-        snippet: typeof item.content === "string" ? item.content : "",
-      });
-    }
-  }
-  return out;
+  return results.flatMap((raw): SearchResult[] => {
+    const item = raw as { title?: unknown; url?: unknown; content?: unknown };
+    const result = safeResult(item.title, item.url, item.content);
+    return result ? [result] : [];
+  });
 }
 
 export function parseExaResults(json: unknown): SearchResult[] {
   const results = (json as { results?: unknown[] })?.results;
   if (!Array.isArray(results)) return [];
-  const out: SearchResult[] = [];
-  for (const r of results) {
-    const item = r as { title?: string; url?: string; text?: string };
-    if (typeof item.url === "string") {
-      out.push({
-        title: typeof item.title === "string" && item.title ? item.title : item.url,
-        url: item.url,
-        snippet: typeof item.text === "string" ? item.text : "",
-      });
-    }
-  }
-  return out;
+  return results.flatMap((raw): SearchResult[] => {
+    const item = raw as { title?: unknown; url?: unknown; text?: unknown };
+    const result = safeResult(item.title, item.url, item.text, true);
+    return result ? [result] : [];
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Providers
-// ---------------------------------------------------------------------------
-
-/** Tavily — LLM-oriented; returns cleaned page content as snippets. */
 function tavilyProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "tavily",
@@ -103,18 +100,13 @@ function tavilyProvider(apiKey: string): ApiSearchProvider {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          query,
-          max_results: 8,
-          search_depth: "basic",
-        }),
+        body: JSON.stringify({ query, max_results: 8, search_depth: "basic" }),
       });
       return parseTavilyResults(json);
     },
   };
 }
 
-/** Exa — neural/semantic search; tolerant of vague natural-language queries. */
 function exaProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "exa",
@@ -136,7 +128,6 @@ function exaProvider(apiKey: string): ApiSearchProvider {
   };
 }
 
-/** Brave — independent index, plain web results. */
 function braveProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "brave",
@@ -153,10 +144,6 @@ function braveProvider(apiKey: string): ApiSearchProvider {
   };
 }
 
-/**
- * Providers with a configured API key, in preference order.
- * Read from env on every call so tests and runtime config stay in sync.
- */
 export function getConfiguredApiProviders(): ApiSearchProvider[] {
   const providers: ApiSearchProvider[] = [];
   const tavilyKey = process.env.TAVILY_API_KEY?.trim();
@@ -169,21 +156,21 @@ export function getConfiguredApiProviders(): ApiSearchProvider[] {
 }
 
 /**
- * Try each configured API provider in order; return the first non-empty
- * result set.  Returns [] when every provider failed or returned nothing —
- * the caller then falls back to DuckDuckGo scraping.
+ * Try each configured API provider in order; return the first non-empty set.
+ * Raw queries are intentionally not written to logs because they can contain
+ * user-provided personal or confidential text.
  */
 export async function searchWithApiProviders(query: string): Promise<SearchResult[]> {
   for (const provider of getConfiguredApiProviders()) {
     try {
       const results = await provider.search(query);
       if (results.length > 0) {
-        logger.debug({ provider: provider.name, query }, "Search API provider used");
+        logger.debug({ provider: provider.name, resultCount: results.length }, "Search API provider used");
         return results;
       }
-      logger.warn({ provider: provider.name, query }, "Search API returned no results");
+      logger.warn({ provider: provider.name }, "Search API returned no results");
     } catch (err) {
-      logger.warn({ err, provider: provider.name, query }, "Search API provider failed");
+      logger.warn({ err, provider: provider.name }, "Search API provider failed");
     }
   }
   return [];

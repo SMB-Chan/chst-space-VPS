@@ -35,4 +35,18 @@ describe("Markdown", () => {
     expect(html).not.toContain("onerror");
     expect(html).toContain("hello");
   });
+
+  it("renders remote Markdown images as opt-in links instead of img requests", () => {
+    const html = renderToStaticMarkup(
+      <Markdown content={'![tracking pixel](https://tracker.example/pixel.gif?x=1)'} />,
+    );
+    expect(html).not.toContain("<img");
+    expect(html).toContain("tracking pixelを開く");
+    expect(html).toContain("referrerPolicy=\"no-referrer\"");
+  });
+
+  it("does not make non-http links clickable", () => {
+    const html = renderToStaticMarkup(<Markdown content={'[bad](javascript:alert(1))'} />);
+    expect(html).not.toContain("javascript:");
+  });
 });

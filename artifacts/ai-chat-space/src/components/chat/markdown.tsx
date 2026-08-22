@@ -18,6 +18,19 @@ const sanitizeSchema = {
   },
 };
 
+function safeHttpHref(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const url = new URL(raw, base);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (url.username || url.password) return undefined;
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
 function CodeBlock({ language, children }: { language?: string; children: string }) {
   return (
     <div className="rounded-xl overflow-hidden bg-background border border-border shadow-sm my-4 font-sans">
@@ -48,16 +61,41 @@ export function Markdown({ content, className }: MarkdownProps) {
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins as never}
         components={{
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline underline-offset-2 hover:text-primary/80 break-all"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const safeHref = safeHttpHref(href);
+            if (!safeHref) return <span>{children}</span>;
+            return (
+              <a
+                href={safeHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+                className="text-primary underline underline-offset-2 hover:text-primary/80 break-all"
+              >
+                {children}
+              </a>
+            );
+          },
+          // Do not automatically request model-generated remote image URLs.
+          // A malicious web page quoted by the model could otherwise turn a
+          // Markdown image into a tracking/exfiltration request from the user's
+          // browser. Render an explicit link instead so navigation is opt-in.
+          img: ({ src, alt }) => {
+            const safeHref = safeHttpHref(src);
+            const label = alt?.trim() || "外部画像";
+            if (!safeHref) return <span className="text-muted-foreground">[{label}]</span>;
+            return (
+              <a
+                href={safeHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+                className="text-primary underline underline-offset-2 break-all"
+              >
+                [{label}を開く]
+              </a>
+            );
+          },
           h1: ({ children }) => (
             <h2 className="text-2xl font-serif font-semibold mt-8 mb-3 text-primary">{children}</h2>
           ),
@@ -94,9 +132,7 @@ export function Markdown({ content, className }: MarkdownProps) {
             const text = String(children).replace(/\n$/, "");
             const lang = /language-([\w-]+)/.exec(codeClass ?? "")?.[1];
             const isBlock = Boolean(codeClass) || text.includes("\n");
-            if (isBlock) {
-              return <CodeBlock language={lang}>{text}</CodeBlock>;
-            }
+            if (isBlock) return <CodeBlock language={lang}>{text}</CodeBlock>;
             return (
               <code className="px-1.5 py-0.5 rounded-md bg-muted/50 text-primary font-mono text-[0.85em] border border-border/50">
                 {text}
