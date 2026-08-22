@@ -2,12 +2,16 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isSafeBrowserRequestUrl, resolveSystemChromiumExecutable } from "./render-fetch";
+import {
+  getBrowserNetworkArgs,
+  isSafeBrowserRequestUrl,
+  resolveSystemChromiumExecutable,
+} from "./render-fetch";
 
 /**
- * SSRF regression tests for the headless-browser path. Every HTTP(S) request
- * the page generates is validated before Playwright lets it through; service
- * workers and WebSockets are blocked at the context level.
+ * SSRF regression tests for the headless-browser path. Request routing rejects
+ * unsafe URLs early, while the loopback egress proxy enforces the same private
+ * address policy on the actual HTTP(S) destination connect.
  */
 describe("isSafeBrowserRequestUrl", () => {
   const blocked = [
@@ -53,6 +57,17 @@ describe("isSafeBrowserRequestUrl", () => {
   it("does not let a previous safe host verdict mask credentials", async () => {
     expect(await isSafeBrowserRequestUrl("https://8.8.8.8/public")).toBe(true);
     expect(await isSafeBrowserRequestUrl("https://user:pass@8.8.8.8/private")).toBe(false);
+  });
+});
+
+describe("Chromium network containment", () => {
+  it("forces loopback targets through the proxy and disables direct UDP paths", () => {
+    const args = getBrowserNetworkArgs();
+    expect(args).toContain("--proxy-bypass-list=<-loopback>");
+    expect(args).toContain("--disable-quic");
+    expect(args).toContain(
+      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    );
   });
 });
 
