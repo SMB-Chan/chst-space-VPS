@@ -1,6 +1,10 @@
 import { pool } from "@workspace/db";
 import app from "./app";
-import { ensureAssetsSchema, ensureMessageSchema } from "./lib/ensure-schema";
+import {
+  ensureAiUsageSchema,
+  ensureAssetsSchema,
+  ensureMessageSchema,
+} from "./lib/ensure-schema";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"] ?? "5000";
@@ -15,6 +19,7 @@ async function main(): Promise<void> {
   try {
     await ensureMessageSchema((sql) => pool.query(sql));
     await ensureAssetsSchema((sql) => pool.query(sql));
+    await ensureAiUsageSchema((sql) => pool.query(sql));
   } catch (err) {
     logger.error({ err }, "Failed to ensure database schema");
     process.exit(1);

@@ -69,6 +69,28 @@ BEGIN
 END $$;
 `.trim();
 
+export const ENSURE_AI_USAGE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS ai_usage_windows (
+  user_id text PRIMARY KEY,
+  window_start_ms bigint NOT NULL,
+  request_count integer NOT NULL CHECK (request_count >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ai_usage_leases (
+  lease_id text PRIMARY KEY,
+  user_id text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ai_usage_leases_user_expires_idx
+  ON ai_usage_leases(user_id, expires_at);
+
+-- Crashed instances cannot release their lease. Expired rows are harmless but
+-- clearing them at startup keeps the shared coordination table compact.
+DELETE FROM ai_usage_leases WHERE expires_at <= now();
+`.trim();
+
 export async function ensureMessageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -81,8 +103,15 @@ export async function ensureAssetsSchema(
   await query(ENSURE_ASSETS_SCHEMA_SQL);
 }
 
+export async function ensureAiUsageSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_AI_USAGE_SCHEMA_SQL);
+}
+
 export async function ensureChatSchema(): Promise<void> {
   const { db } = await import("@workspace/db");
   await ensureMessageSchema((sql) => db.execute(sql));
   await ensureAssetsSchema((sql) => db.execute(sql));
+  await ensureAiUsageSchema((sql) => db.execute(sql));
 }

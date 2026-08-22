@@ -14,7 +14,7 @@ import { logger } from "./lib/logger";
 import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
 import { requireAuth } from "./middlewares/requireAuth";
-import { aiUsageGuard } from "./middlewares/aiUsageGuard";
+import { sharedAiUsageGuard } from "./middlewares/sharedAiUsageGuard";
 import { isAllowedCorsOrigin, parseAllowedOrigins } from "./lib/cors-origins";
 
 const app: Express = express();
@@ -71,12 +71,13 @@ app.use(
   })),
 );
 
-// Attachment requests may carry base64 image data. Authenticate before the
-// expensive 30MB parser so anonymous clients cannot force large allocations.
+// Attachment requests may carry base64 image data. Authenticate and acquire
+// the shared per-user AI budget before the expensive 30MB parser so anonymous
+// or over-limit clients cannot force large allocations first.
 app.post(
   [...LARGE_JSON_PATHS],
   requireAuth,
-  aiUsageGuard,
+  sharedAiUsageGuard,
   express.json({ limit: LARGE_JSON_LIMIT }),
   express.urlencoded({ extended: true, limit: LARGE_JSON_LIMIT }),
 );
