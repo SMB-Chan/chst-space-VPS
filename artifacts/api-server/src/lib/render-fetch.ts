@@ -1,3 +1,5 @@
+import { accessSync, constants as fsConstants } from "node:fs";
+import { join } from "node:path";
 import type { Browser, BrowserContext, Route } from "playwright";
 import { logger } from "./logger";
 import { assertSafeUrl } from "./ssrf-guard";
@@ -121,9 +123,52 @@ async function installRequestGuard(context: BrowserContext): Promise<void> {
 
 let browserPromise: Promise<Browser> | null = null;
 
+/**
+ * Prefer an operator-supplied Chromium path, then discover a system Chromium
+ * from PATH. This lets Replit use its reproducible Nix Chromium without
+ * downloading a separate Playwright browser bundle. Other hosts continue to
+ * fall back to Playwright's managed executable when no system browser exists.
+ */
+export function resolveSystemChromiumExecutable(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const explicit = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
+  if (explicit) {
+    try {
+      accessSync(explicit, fsConstants.X_OK);
+      return explicit;
+    } catch {
+      logger.warn({ executablePath: explicit }, "Configured Chromium executable is unavailable");
+    }
+  }
+
+  const pathEntries = (env.PATH ?? "").split(":").filter(Boolean);
+  const names = ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"];
+  for (const directory of pathEntries) {
+    for (const name of names) {
+      const candidate = join(directory, name);
+      try {
+        accessSync(candidate, fsConstants.X_OK);
+        return candidate;
+      } catch {
+        // Continue searching PATH.
+      }
+    }
+  }
+  return null;
+}
+
 async function launchBrowser(): Promise<Browser> {
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = resolveSystemChromiumExecutable();
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+  });
+  logger.info(
+    { browserSource: executablePath ? "system" : "playwright", executablePath: executablePath ?? undefined },
+    "Headless Chromium launched",
+  );
   browser.on("disconnected", () => {
     browserPromise = null;
   });
@@ -185,8 +230,7 @@ export async function fetchWithBrowser(
     } catch (err) {
       logger.warn(
         { err },
-        "Playwright browser unavailable; skipping browser fallback " +
-          "(run `pnpm --filter @workspace/api-server exec playwright install chromium`)",
+        "Playwright browser unavailable; skipping browser fallback",
       );
       return null;
     }

@@ -26,4 +26,4 @@ DASHSCOPE_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compat
 
 [nix]
 channel = "stable-25_05"
-packages = ["libreoffice", "ipaexfont"]
+packages = ["libreoffice", "ipaexfont", "chromium"]

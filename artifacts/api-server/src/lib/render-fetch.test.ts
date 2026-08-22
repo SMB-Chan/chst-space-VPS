@@ -1,5 +1,8 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isSafeBrowserRequestUrl } from "./render-fetch";
+import { isSafeBrowserRequestUrl, resolveSystemChromiumExecutable } from "./render-fetch";
 
 /**
  * SSRF regression tests for the headless-browser path. Every HTTP(S) request
@@ -50,5 +53,32 @@ describe("isSafeBrowserRequestUrl", () => {
   it("does not let a previous safe host verdict mask credentials", async () => {
     expect(await isSafeBrowserRequestUrl("https://8.8.8.8/public")).toBe(true);
     expect(await isSafeBrowserRequestUrl("https://user:pass@8.8.8.8/private")).toBe(false);
+  });
+});
+
+describe("resolveSystemChromiumExecutable", () => {
+  it("prefers an explicit executable path", () => {
+    expect(
+      resolveSystemChromiumExecutable({
+        PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: process.execPath,
+        PATH: "",
+      }),
+    ).toBe(process.execPath);
+  });
+
+  it("discovers chromium on PATH", () => {
+    const dir = mkdtempSync(join(tmpdir(), "chat-space-chromium-"));
+    const chromium = join(dir, "chromium");
+    try {
+      writeFileSync(chromium, "#!/bin/sh\nexit 0\n");
+      chmodSync(chromium, 0o755);
+      expect(resolveSystemChromiumExecutable({ PATH: dir })).toBe(chromium);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when no executable is available", () => {
+    expect(resolveSystemChromiumExecutable({ PATH: "" })).toBeNull();
   });
 });
