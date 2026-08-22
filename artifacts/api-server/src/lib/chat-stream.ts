@@ -24,7 +24,6 @@ import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
 import { logger } from "./logger";
-import { db, assets } from "@workspace/db";
 import {
   detectFileFormat,
   buildFileGenerationPrompt,
@@ -32,6 +31,7 @@ import {
   inspectFileData,
   renderFile,
   type FileFormat,
+  type GeneratedFile,
   type ParsedFileData,
 } from "./file-generation";
 import { getPreviewToolStatus, previewGeneratedFile } from "./file-preview";
@@ -143,8 +143,12 @@ export async function streamChatReply(args: {
     sources: { title: string; url: string }[];
     audit?: { content: string; modelId: string };
     artifacts?: ExtractedArtifact[];
-    assetIds?: number[];
-  }) => Promise<{ artifacts?: { id: number; filename: string; mime: string; size: number }[] } | void>;
+    generatedFiles?: GeneratedFile[];
+  }) => Promise<{
+    artifacts?: { sourceIndex: number; id: number; filename: string; mime: string; size: number }[];
+    assets?: { id: number; filename: string; mimeType: string; size: number }[];
+    quotaExceeded?: boolean;
+  } | void>;
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
   const {
@@ -510,7 +514,7 @@ export async function streamChatReply(args: {
         fullResponse = extracted.content;
       }
 
-      let assetIds: number[] | undefined;
+      let generatedFile: GeneratedFile | undefined;
       const requestId =
         typeof (req as { id?: unknown } | undefined)?.id === "string" ||
         typeof (req as { id?: unknown } | undefined)?.id === "number"
@@ -534,7 +538,7 @@ export async function streamChatReply(args: {
         );
       }
       if (fileFormat && conversationId) {
-        assetIds = await withTimeout(
+        generatedFile = await withTimeout(
           (signal) =>
             generateAndReviewFile({
               res,
@@ -556,12 +560,16 @@ export async function streamChatReply(args: {
         );
       }
 
-      if (assetIds && assetIds.length > 0 && fileFormat) {
+      if (generatedFile && fileFormat) {
         fullResponse = finalizeGeneratedFileResponse(fullResponse);
       }
 
       let completion:
-        | { artifacts?: { id: number; filename: string; mime: string; size: number }[] }
+        | {
+            artifacts?: { sourceIndex: number; id: number; filename: string; mime: string; size: number }[];
+            assets?: { id: number; filename: string; mimeType: string; size: number }[];
+            quotaExceeded?: boolean;
+          }
         | void
         | undefined;
       try {
@@ -571,7 +579,7 @@ export async function streamChatReply(args: {
               sources: webContext.sources,
               audit,
               artifacts: extracted.artifacts,
-              assetIds,
+              generatedFiles: generatedFile ? [generatedFile] : undefined,
             })
           : undefined;
       } catch (err) {
@@ -586,10 +594,34 @@ export async function streamChatReply(args: {
         return;
       }
 
+      if (completion?.quotaExceeded && !clientGone) {
+        res.write(
+          `data: ${JSON.stringify({
+            status: "file_warning",
+            message: "保存容量の上限により、一部の生成ファイルを保存できませんでした。",
+          })}\n\n`,
+        );
+      }
+
+      if (completion?.assets?.length && !clientGone) {
+        for (const asset of completion.assets) {
+          res.write(
+            `data: ${JSON.stringify({
+              file: {
+                id: asset.id,
+                filename: asset.filename,
+                mimeType: asset.mimeType,
+                size: asset.size,
+              },
+            })}\n\n`,
+          );
+        }
+      }
+
       if (extracted.artifacts.length > 0 && !clientGone) {
         const saved = completion?.artifacts ?? [];
         const payload: ArtifactSsePayload[] = extracted.artifacts.map((artifact, index) => {
-          const persisted = saved[index];
+          const persisted = saved.find((item) => item.sourceIndex === index);
           const base: ArtifactSsePayload = {
             id: persisted?.id,
             filename: persisted?.filename ?? artifact.filename,
@@ -796,7 +828,7 @@ interface GenerateAndReviewFileContext {
   signal?: AbortSignal;
 }
 
-export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise<number[] | undefined> {
+export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise<GeneratedFile | undefined> {
   const {
     res,
     client,
@@ -1019,48 +1051,18 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
       }
     }
 
-    currentStage = "asset-persistence";
-    const persistenceStartedAt = Date.now();
+    currentStage = "file-ready-for-persistence";
     logger.info(
       {
         ...baseDiagnostic,
         stage: currentStage,
+        attempt: generationAttempt,
         fileSize: attempt.file.size,
         mimeType: attempt.file.mimeType,
       },
-      "Generated file asset persistence started",
+      "Generated file ready for transactional persistence",
     );
-    const [asset] = await db
-      .insert(assets)
-      .values({
-        conversationId,
-        filename: attempt.file.filename,
-        mimeType: attempt.file.mimeType,
-        size: attempt.file.size,
-        data: attempt.file.buffer.toString("base64"),
-      })
-      .returning();
-    logger.info(
-      {
-        ...baseDiagnostic,
-        stage: currentStage,
-        elapsedMs: elapsedMs(persistenceStartedAt),
-        persisted: Boolean(asset),
-        assetId: asset?.id,
-      },
-      "Generated file asset persistence completed",
-    );
-
-    if (asset) {
-      if (!clientGone) {
-        res.write(
-          `data: ${JSON.stringify({
-            file: { id: asset.id, filename: asset.filename, mimeType: asset.mimeType },
-          })}\n\n`,
-        );
-      }
-      return [asset.id];
-    }
+    return attempt.file;
   } catch (error) {
     const errorDetails = getFileGenerationErrorDetails(error);
     logger.error(

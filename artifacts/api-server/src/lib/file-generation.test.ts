@@ -84,11 +84,13 @@ describe("file generation prompt trust boundary", () => {
 
     expect(system).toContain("SECURITY BOUNDARY");
     expect(system).toContain("<file_data>");
+    expect(system).toContain("\nSTRICT RULES:\n");
     expect(system).not.toContain(malicious);
     expect(system).not.toContain("Previous");
     expect(system).not.toContain("output markdown instead");
 
     expect(user).toContain("<conversation_data>");
+    expect(user).toContain("\n<conversation_data>\n");
     expect(user).toContain(malicious);
     expect(user).toContain("<previous_file_data>");
     expect(user).toContain("Previous");

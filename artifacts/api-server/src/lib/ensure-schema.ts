@@ -40,8 +40,9 @@ CREATE INDEX IF NOT EXISTS assets_message_id_idx ON assets(message_id);
 -- They are unreachable from conversation history and should not consume quota.
 DELETE FROM assets WHERE message_id IS NULL;
 
--- Existing deployments may still have ON DELETE SET NULL. Change only that
--- legacy FK; new databases already have CASCADE from the CREATE TABLE above.
+-- Existing deployments may still have a legacy message FK that nullifies the
+-- reference on delete. Replace that legacy action with CASCADE when necessary;
+-- new databases already have CASCADE from the CREATE TABLE above.
 DO $$
 DECLARE
   current_fk text;

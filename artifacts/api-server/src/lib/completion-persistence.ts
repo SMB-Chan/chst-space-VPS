@@ -54,7 +54,7 @@ function parseQuotaBytes(raw: string | undefined): number {
  * unlimited storage; invalid values fall back to 50 MiB.
  */
 export function getGeneratedFileQuotaBytes(
-  env: Pick<NodeJS.ProcessEnv, "MAX_USER_GENERATED_FILE_BYTES"> = process.env,
+  env: { MAX_USER_GENERATED_FILE_BYTES?: string } = process.env,
 ): number {
   return parseQuotaBytes(env.MAX_USER_GENERATED_FILE_BYTES);
 }

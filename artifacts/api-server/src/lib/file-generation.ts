@@ -144,8 +144,8 @@ export function buildFileGenerationPrompt(format: FileFormat): string {
     "6. Write the content in the same language as the user's request (usually Japanese).",
     "",
     "Schema example:",
-    "<file_data>\\n" + formatInstructions[format] + "\\n</file_data>",
-  ].join("\\n");
+    "<file_data>\n" + formatInstructions[format] + "\n</file_data>",
+  ].join("\n");
 }
 
 /** Build untrusted generation context for the separate user-role message. */
@@ -182,7 +182,7 @@ export function buildFileGenerationUserMessage(
   }
 
   parts.push("", "Return only the <file_data> JSON required by the system message.");
-  return parts.join("\\n");
+  return parts.join("\n");
 }
 
 /**

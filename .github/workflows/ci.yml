@@ -13,40 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-file-generation-prompt-newlines:
-    if: github.event_name == 'pull_request' && github.head_ref == 'hotfix/file-generation-prompt-newlines'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: hotfix/file-generation-prompt-newlines
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Apply prompt newline correction
-        run: |
-          if [ "$(git log -1 --pretty=%s)" = "fix(file-generation): use real prompt newlines" ]; then
-            echo "Prompt newline fix already committed"
-            exit 0
-          fi
-          node scripts/fix-file-generation-prompt-newlines.mjs
-          git diff --check
-      - name: Commit prompt newline correction
-        run: |
-          if git diff --quiet; then
-            echo "No prompt newline changes to commit"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts/api-server/src/lib/file-generation.ts \
-                  artifacts/api-server/src/lib/file-generation.test.ts
-          git commit -m "fix(file-generation): use real prompt newlines"
-          git push origin HEAD:hotfix/file-generation-prompt-newlines
-
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20

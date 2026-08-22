@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { conversations, messages, artifacts, assets } from "@workspace/db/schema";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
   CreateOpenaiConversationBody,
   DeleteOpenaiMessagesBody,
@@ -23,6 +23,10 @@ import { logger } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
 import { normalizeConversationTitle } from "../../lib/conversation-title";
 import {
+  deleteOwnedMessagesAndAssets,
+  persistChatCompletion,
+} from "../../lib/completion-persistence";
+import {
   UserMessageContentError,
   fallbackHistoricalUserContent,
   modelContentFor,
@@ -32,9 +36,6 @@ import {
 } from "../../lib/message-content";
 
 const router = Router();
-
-const MAX_ARTIFACTS_PER_MESSAGE = 3;
-const MAX_USER_ARTIFACT_BYTES = 50 * 1024 * 1024;
 
 function publicAiError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
@@ -464,64 +465,29 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       conversationId,
       requestedFileFormat,
       publicAiError,
-      onComplete: async ({ content, sources, audit, artifacts: extractedArtifacts, assetIds }) => {
-        const messageInserts: (typeof messages.$inferInsert)[] = [
-          { conversationId, role: "user", content: newMessage.storedContent },
-          {
-            conversationId,
-            role: "assistant",
-            content,
-            modelId,
-            sources: sources.length > 0 ? JSON.stringify(sources) : undefined,
-            auditContent: audit?.content,
-            auditModelId: audit?.modelId,
-            assetIds: assetIds && assetIds.length > 0 ? JSON.stringify(assetIds) : undefined,
-          },
-        ];
-        const inserted = await db.insert(messages).values(messageInserts).returning();
-        const assistantMessage = inserted.find((m) => m.role === "assistant");
-        if (assistantMessage && assetIds && assetIds.length > 0) {
-          await db
-            .update(assets)
-            .set({ messageId: assistantMessage.id })
-            .where(inArray(assets.id, assetIds));
-        }
-        if (!extractedArtifacts?.length || !assistantMessage) return;
-
-        const existing = await db
-          .select({ size: artifacts.size })
-          .from(artifacts)
-          .where(eq(artifacts.userId, userId));
-        let usedBytes = existing.reduce((sum, row) => sum + row.size, 0);
-        const savedArtifacts: { id: number; filename: string; mime: string; size: number }[] = [];
-        for (const artifact of extractedArtifacts.slice(0, MAX_ARTIFACTS_PER_MESSAGE)) {
-          if (usedBytes + artifact.size > MAX_USER_ARTIFACT_BYTES) {
-            logger.warn({ userId, usedBytes, size: artifact.size }, "Skipping artifact beyond user quota");
-            continue;
-          }
-          const [row] = await db
-            .insert(artifacts)
-            .values({
-              conversationId,
-              messageId: assistantMessage.id,
-              userId,
-              filename: artifact.filename,
-              mime: artifact.mime,
-              size: artifact.size,
-              content: artifact.content,
-            })
-            .returning({
-              id: artifacts.id,
-              filename: artifacts.filename,
-              mime: artifacts.mime,
-              size: artifacts.size,
-            });
-          if (row) {
-            savedArtifacts.push(row);
-            usedBytes += row.size;
-          }
-        }
-        return { artifacts: savedArtifacts };
+      onComplete: async ({
+        content,
+        sources,
+        audit,
+        artifacts: extractedArtifacts,
+        generatedFiles,
+      }) => {
+        const persisted = await persistChatCompletion({
+          userId,
+          conversationId,
+          userContent: newMessage.storedContent,
+          assistantContent: content,
+          modelId,
+          sources,
+          audit,
+          generatedFiles,
+          extractedArtifacts,
+        });
+        return {
+          assets: persisted.assets,
+          artifacts: persisted.artifacts,
+          quotaExceeded: persisted.quotaExceeded,
+        };
       },
     });
   } catch (err) {
@@ -543,17 +509,11 @@ router.delete("/openai/messages", requireAuth, async (req, res) => {
       return;
     }
     const requestedIds = [...new Set(parsed.data.ids)];
-    const owned = await db
-      .select({ id: messages.id })
-      .from(messages)
-      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-      .where(and(inArray(messages.id, requestedIds), eq(conversations.userId, userId)));
-    const ownedIds = owned.map((m) => m.id);
-    if (ownedIds.length === 0) {
+    const deletedIds = await deleteOwnedMessagesAndAssets(userId, requestedIds);
+    if (deletedIds.length === 0) {
       res.status(404).json({ error: "Messages not found" });
       return;
     }
-    await db.delete(messages).where(inArray(messages.id, ownedIds));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete messages");
