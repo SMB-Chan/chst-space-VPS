@@ -7,6 +7,7 @@ import {
   hasSufficientPrimaryCoverage,
   mergeSearchProviderResults,
   searchWithProviders,
+  SEARCH_PROVIDER_REDIRECT_POLICY,
   type ApiSearchProvider,
 } from "./search-providers";
 import type { SearchResult } from "./search-parse";
@@ -40,6 +41,12 @@ function stubProvider(
     search: vi.fn(implementation),
   };
 }
+
+describe("search provider transport policy", () => {
+  it("rejects redirects from authenticated fixed API endpoints", () => {
+    expect(SEARCH_PROVIDER_REDIRECT_POLICY).toBe("error");
+  });
+});
 
 describe("parseBraveResults", () => {
   it("maps web results to SearchResult", () => {

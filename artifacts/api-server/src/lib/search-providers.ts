@@ -15,6 +15,7 @@ const PRIMARY_MIN_RESULTS = 5;
 const PRIMARY_MIN_DOMAINS = 3;
 const MAX_MERGED_API_RESULTS = 10;
 const DIVERSE_DOMAIN_SOFT_CAP = 2;
+export const SEARCH_PROVIDER_REDIRECT_POLICY = "error" as const;
 
 export interface ApiSearchProvider {
   name: string;
@@ -28,7 +29,14 @@ async function fetchJson(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
-    const res = await undiciFetch(url, { ...init, signal: controller.signal });
+    // Authenticated machine-API endpoints are fixed and are not expected to
+    // redirect. Reject redirects rather than carrying API credentials onto a
+    // second destination selected by an unexpected provider response.
+    const res = await undiciFetch(url, {
+      ...init,
+      signal: controller.signal,
+      redirect: SEARCH_PROVIDER_REDIRECT_POLICY,
+    });
     if (!res.ok) throw new Error(`Search API returned ${res.status}`);
     const contentType = res.headers.get("content-type") ?? "";
     if (!/\b(?:application\/json|[^;]+\+json)\b/i.test(contentType)) {
