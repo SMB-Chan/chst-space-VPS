@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check:api-routes
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm --filter @workspace/api-server run test:ssrf
+      - name: Verify generated API clients are reproducible
+        run: |
+          pnpm --filter @workspace/api-spec run codegen
+          git diff --exit-code -- lib/api-client-react/src/generated lib/api-zod/src/generated
+      - run: pnpm run build
+
+  production-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: chatspace
+          POSTGRES_PASSWORD: chatspace
+          POSTGRES_DB: chatspace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U chatspace -d chatspace"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://chatspace:chatspace@127.0.0.1:5432/chatspace
+      AI_INTEGRATIONS_OPENAI_BASE_URL: http://example.test/v1
+      AI_INTEGRATIONS_OPENAI_API_KEY: test-key
+      NODE_ENV: production
+      PORT: 5000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workspace/db run push
+      - run: pnpm --filter @workspace/api-server run build
+      - name: Boot production bundle and probe readiness
+        working-directory: artifacts/api-server
+        run: |
+          node --enable-source-maps ./dist/index.mjs > /tmp/chat-space-api.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; cat /tmp/chat-space-api.log' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5000/api/healthz > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Production API failed readiness probe" >&2
+          exit 1
