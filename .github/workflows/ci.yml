@@ -100,6 +100,10 @@ jobs:
                 echo "X-Powered-By must not be exposed" >&2
                 exit 1
               fi
+              if grep -Eq 'aiUsageLimiter|browserFetch|browserEgress' /tmp/health.json; then
+                echo "Unauthenticated health response must not expose operational counters" >&2
+                exit 1
+              fi
               exit 0
             fi
             sleep 1
