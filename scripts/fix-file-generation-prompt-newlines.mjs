@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+// One-shot hotfix helper. Removed before merge.
 const generationFile = "artifacts/api-server/src/lib/file-generation.ts";
 const testFile = "artifacts/api-server/src/lib/file-generation.test.ts";
 
