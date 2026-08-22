@@ -28,6 +28,7 @@ import { db, assets } from "@workspace/db";
 import {
   detectFileFormat,
   buildFileGenerationPrompt,
+  buildFileGenerationUserMessage,
   inspectFileData,
   renderFile,
   type FileFormat,
@@ -827,7 +828,8 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
     }> => {
       generationAttempt += 1;
       const attemptNumber = generationAttempt;
-      const filePrompt = buildFileGenerationPrompt(fileFormat, fileSummary, {
+      const filePrompt = buildFileGenerationPrompt(fileFormat);
+      const fileUserMessage = buildFileGenerationUserMessage(fileSummary, {
         previousData: options?.previousData,
         feedback: options?.feedback,
       });
@@ -848,7 +850,7 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
         reasoningLevel: "off",
         messages: [
           { role: "system", content: filePrompt },
-          { role: "user", content: "Please generate the file content now." },
+          { role: "user", content: fileUserMessage },
         ],
         onDelta: () => {
           // File generation is short; no streaming needed.
