@@ -5,6 +5,7 @@ import {
   sanitizeSearchQuery,
   scoreSearchResult,
   mergeSearchResults,
+  selectDiverseScoredResults,
   extractArticleContent,
   extractMainContent,
   extractEmbeddedContent,
@@ -121,6 +122,34 @@ describe("mergeSearchResults", () => {
     const merged = mergeSearchResults(results, "東京の天気");
     expect(merged).toHaveLength(2);
     expect(merged[0].url).toBe("https://example.com/b");
+  });
+
+  it("prefers independent hostnames before a third result from the same host", () => {
+    const ranked = [
+      { title: "A1", url: "https://a.example/1", snippet: "", score: 100 },
+      { title: "A2", url: "https://a.example/2", snippet: "", score: 90 },
+      { title: "A3", url: "https://a.example/3", snippet: "", score: 80 },
+      { title: "B", url: "https://b.example/1", snippet: "", score: 70 },
+      { title: "C", url: "https://c.example/1", snippet: "", score: 60 },
+    ];
+
+    expect(selectDiverseScoredResults(ranked, 4).map((item) => item.url)).toEqual([
+      "https://a.example/1",
+      "https://a.example/2",
+      "https://b.example/1",
+      "https://c.example/1",
+    ]);
+  });
+
+  it("fills from deferred results when only one useful hostname exists", () => {
+    const ranked = [
+      { title: "A1", url: "https://a.example/1", snippet: "", score: 100 },
+      { title: "A2", url: "https://a.example/2", snippet: "", score: 90 },
+      { title: "A3", url: "https://a.example/3", snippet: "", score: 80 },
+      { title: "A4", url: "https://a.example/4", snippet: "", score: 70 },
+    ];
+
+    expect(selectDiverseScoredResults(ranked, 4)).toEqual(ranked);
   });
 });
 

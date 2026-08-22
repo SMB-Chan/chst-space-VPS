@@ -6,6 +6,8 @@ import { stripHtml, type SearchResult } from "./search-parse";
 export const FETCH_TOP_N = 3;
 /** Maximum results to return from a merged search. */
 export const MAX_MERGED_RESULTS = 6;
+/** First-pass cap for one hostname in the final ranked result set. */
+const FINAL_HOSTNAME_SOFT_CAP = 2;
 
 /** Normalize a query for cache keys and comparison. */
 export function normalizeQuery(query: string): string {
@@ -204,9 +206,56 @@ export interface ScoredSearchResult extends SearchResult {
   score: number;
 }
 
+function resultHostname(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Preserve score order while preventing one hostname from monopolizing the
+ * first pass. Deferred high-score results are appended in their original score
+ * order only when diversity would otherwise leave the result set short.
+ */
+export function selectDiverseScoredResults(
+  sortedResults: ScoredSearchResult[],
+  maxResults: number,
+): ScoredSearchResult[] {
+  if (maxResults <= 0) return [];
+
+  const selected: ScoredSearchResult[] = [];
+  const deferred: ScoredSearchResult[] = [];
+  const perHostname = new Map<string, number>();
+
+  for (const result of sortedResults) {
+    const hostname = resultHostname(result.url);
+    if (
+      hostname &&
+      (perHostname.get(hostname) ?? 0) >= FINAL_HOSTNAME_SOFT_CAP
+    ) {
+      deferred.push(result);
+      continue;
+    }
+
+    selected.push(result);
+    if (hostname) {
+      perHostname.set(hostname, (perHostname.get(hostname) ?? 0) + 1);
+    }
+    if (selected.length >= maxResults) return selected;
+  }
+
+  for (const result of deferred) {
+    if (selected.length >= maxResults) break;
+    selected.push(result);
+  }
+  return selected;
+}
+
 /**
  * Merge results from multiple queries, deduplicate by URL, score, and return
- * the top results sorted by relevance.
+ * the top results sorted by relevance with a soft final hostname-diversity cap.
  */
 export function mergeSearchResults(
   results: SearchResult[],
@@ -225,7 +274,7 @@ export function mergeSearchResults(
   }
 
   merged.sort((a, b) => b.score - a.score);
-  return merged.slice(0, maxResults);
+  return selectDiverseScoredResults(merged, maxResults);
 }
 
 /**
