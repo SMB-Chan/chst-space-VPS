@@ -27,6 +27,10 @@ import {
   persistChatCompletion,
 } from "../../lib/completion-persistence";
 import {
+  createHistoricalImageBudget,
+  modelContentForHistorical,
+} from "../../lib/historical-image-budget";
+import {
   UserMessageContentError,
   fallbackHistoricalUserContent,
   modelContentFor,
@@ -412,26 +416,38 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       .where(eq(messages.conversationId, conversationId))
       .orderBy(asc(messages.createdAt), asc(messages.id));
 
-    const chatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
-    for (const msg of history) {
+    const historicalImageBudget = createHistoricalImageBudget();
+    const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
+    // Walk newest-first so the bounded replay budget keeps the most recent
+    // historical images, then restore chronological order for the model.
+    for (const msg of [...history].reverse()) {
       if (msg.role === "user") {
         try {
           const parsedHistory = parseUserMessageContent(msg.content);
-          chatMessages.push({
+          historicalChatMessages.push({
             role: "user",
-            content: modelContentFor(parsedHistory, supportsVision),
+            content: modelContentForHistorical(
+              parsedHistory,
+              supportsVision,
+              historicalImageBudget,
+            ),
           });
         } catch (error) {
           logger.warn(
             { err: error, messageId: msg.id, conversationId },
             "Historical attachment could not be reconstructed; omitting its payload",
           );
-          chatMessages.push({ role: "user", content: fallbackHistoricalUserContent(msg.content) });
+          historicalChatMessages.push({
+            role: "user",
+            content: fallbackHistoricalUserContent(msg.content),
+          });
         }
       } else {
-        chatMessages.push({ role: "assistant", content: msg.content });
+        historicalChatMessages.push({ role: "assistant", content: msg.content });
       }
     }
+    historicalChatMessages.reverse();
+    const chatMessages = [...historicalChatMessages];
     chatMessages.push({
       role: "user",
       content: useVisionBridge
@@ -576,29 +592,39 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
-    const chatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
-    for (const hist of parsed.data.history ?? []) {
+    const historicalImageBudget = createHistoricalImageBudget();
+    const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
+    for (const hist of [...(parsed.data.history ?? [])].reverse()) {
       if (hist.role === "user") {
         try {
           const parsedHistory = parseUserMessageContent(
             hist.content,
             hist.attachments as IncomingAttachment[] | undefined,
           );
-          chatMessages.push({
+          historicalChatMessages.push({
             role: "user",
-            content: modelContentFor(parsedHistory, supportsVision),
+            content: modelContentForHistorical(
+              parsedHistory,
+              supportsVision,
+              historicalImageBudget,
+            ),
           });
         } catch (error) {
           logger.warn(
             { err: error },
             "Private-session history attachment could not be reconstructed; omitting its payload",
           );
-          chatMessages.push({ role: "user", content: fallbackHistoricalUserContent(hist.content) });
+          historicalChatMessages.push({
+            role: "user",
+            content: fallbackHistoricalUserContent(hist.content),
+          });
         }
       } else {
-        chatMessages.push({ role: "assistant", content: hist.content });
+        historicalChatMessages.push({ role: "assistant", content: hist.content });
       }
     }
+    historicalChatMessages.reverse();
+    const chatMessages = [...historicalChatMessages];
     chatMessages.push({
       role: "user",
       content: useVisionBridge
