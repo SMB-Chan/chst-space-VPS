@@ -13,35 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare-file-generation-boundary:
-    if: github.event_name == 'pull_request' && github.head_ref == 'hardening/file-generation-trust-boundary'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: hardening/file-generation-trust-boundary
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: node scripts/apply-file-generation-trust-boundary-rest.mjs
-      - run: git diff --check
-      - name: Commit prepared source changes
-        run: |
-          if git diff --quiet; then
-            echo "Trust-boundary source changes already committed"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add artifacts/api-server/src/lib/chat-stream.ts \
-                  artifacts/api-server/src/lib/file-generation.test.ts \
-                  artifacts/api-server/src/lib/chat-stream.file-generation.test.ts
-          git commit -m "fix(file-generation): enforce system/user trust boundary"
-          git push origin HEAD:hardening/file-generation-trust-boundary
-
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
