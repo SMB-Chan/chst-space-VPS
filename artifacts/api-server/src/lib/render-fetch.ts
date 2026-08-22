@@ -34,6 +34,8 @@ import { assertSafeUrl } from "./ssrf-guard";
 
 /** Extra settle time for client-side hydration after DOMContentLoaded. */
 const RENDER_SETTLE_MS = 2_000;
+/** Cleanup may exceed the external deadline only by this small tolerance. */
+const BROWSER_CLEANUP_TOLERANCE_MS = 250;
 
 /** Resource types the extractor never needs. */
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
@@ -92,6 +94,48 @@ export function getBrowserContextOptions(): BrowserContextOptions {
   };
 }
 
+export function remainingBrowserDeadlineMs(
+  deadlineAtMs: number,
+  nowMs = Date.now(),
+  capMs = Number.POSITIVE_INFINITY,
+): number {
+  const remaining = Math.max(0, Math.floor(deadlineAtMs - nowMs));
+  if (!Number.isFinite(capMs)) return remaining;
+  return Math.min(remaining, Math.max(0, Math.floor(capMs)));
+}
+
+class BrowserDeadlineExceededError extends Error {
+  constructor(stage: string) {
+    super(`Browser fetch deadline exceeded during ${stage}`);
+    this.name = "BrowserDeadlineExceededError";
+  }
+}
+
+async function withBrowserDeadline<T>(
+  operation: Promise<T>,
+  deadlineAtMs: number,
+  stage: string,
+): Promise<T> {
+  const remaining = remainingBrowserDeadlineMs(deadlineAtMs);
+  if (remaining <= 0) throw new BrowserDeadlineExceededError(stage);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new BrowserDeadlineExceededError(stage)),
+          remaining,
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Concurrency limiter (Chromium contexts are expensive on small hosts)
 // ---------------------------------------------------------------------------
@@ -103,19 +147,49 @@ const MAX_BROWSER_CONCURRENCY = (() => {
 })();
 
 let activeBrowserJobs = 0;
-const browserJobQueue: Array<() => void> = [];
+interface BrowserJobWaiter {
+  grant(): void;
+}
+const browserJobQueue: BrowserJobWaiter[] = [];
 
-async function acquireBrowserSlot(): Promise<void> {
-  if (activeBrowserJobs >= MAX_BROWSER_CONCURRENCY) {
-    await new Promise<void>((resolve) => browserJobQueue.push(resolve));
+async function acquireBrowserSlot(deadlineAtMs: number): Promise<boolean> {
+  if (activeBrowserJobs < MAX_BROWSER_CONCURRENCY) {
+    activeBrowserJobs++;
+    return true;
   }
-  activeBrowserJobs++;
+
+  const remaining = remainingBrowserDeadlineMs(deadlineAtMs);
+  if (remaining <= 0) return false;
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waiter: BrowserJobWaiter = {
+      grant: () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        activeBrowserJobs++;
+        resolve(true);
+      },
+    };
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const index = browserJobQueue.indexOf(waiter);
+      if (index >= 0) browserJobQueue.splice(index, 1);
+      resolve(false);
+    }, remaining);
+    timer.unref?.();
+    browserJobQueue.push(waiter);
+  });
 }
 
 function releaseBrowserSlot(): void {
-  activeBrowserJobs--;
+  activeBrowserJobs = Math.max(0, activeBrowserJobs - 1);
   const next = browserJobQueue.shift();
-  if (next) next();
+  if (next) next.grant();
 }
 
 // ---------------------------------------------------------------------------
@@ -283,19 +357,47 @@ function discardBrowser(): void {
     .catch(() => undefined);
 }
 
-async function createContext(): Promise<BrowserContext> {
+async function createContext(deadlineAtMs: number): Promise<BrowserContext> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const browser = await getBrowser();
-      return await browser.newContext(getBrowserContextOptions());
+      const browser = await withBrowserDeadline(
+        getBrowser(),
+        deadlineAtMs,
+        "browser launch",
+      );
+      return await withBrowserDeadline(
+        browser.newContext(getBrowserContextOptions()),
+        deadlineAtMs,
+        "browser context creation",
+      );
     } catch (err) {
       lastErr = err;
       logger.warn({ err, attempt }, "Browser context creation failed; resetting browser");
       discardBrowser();
+      if (err instanceof BrowserDeadlineExceededError) throw err;
     }
   }
   throw lastErr;
+}
+
+async function closeContextBounded(context: BrowserContext): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([
+    context.close().then(
+      () => true,
+      () => true,
+    ),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), BROWSER_CLEANUP_TOLERANCE_MS);
+      timer.unref?.();
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (!closed) {
+    logger.warn("Browser context cleanup exceeded tolerance; resetting browser");
+    discardBrowser();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -307,50 +409,90 @@ export async function fetchWithBrowser(
   timeoutMs: number,
 ): Promise<{ title: string; text: string } | null> {
   const startedAt = Date.now();
+  const normalizedTimeoutMs =
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 1;
+  const deadlineAtMs = startedAt + normalizedTimeoutMs;
   browserMetrics.attempts += 1;
-  await acquireBrowserSlot();
+
+  let slotAcquired = false;
+  let context: BrowserContext | undefined;
   try {
-    let context: BrowserContext;
-    try {
-      context = await createContext();
-    } catch (err) {
-      browserMetrics.unavailable += 1;
-      logger.warn(
-        { err },
-        "Playwright browser unavailable; skipping browser fallback",
-      );
+    slotAcquired = await acquireBrowserSlot(deadlineAtMs);
+    if (!slotAcquired) {
+      browserMetrics.failures += 1;
+      logger.warn({ url }, "Browser fetch deadline exceeded while waiting for a slot");
       return null;
     }
 
     try {
-      await installRequestGuard(context);
-      const page = await context.newPage();
+      context = await createContext(deadlineAtMs);
+    } catch (err) {
+      if (err instanceof BrowserDeadlineExceededError) {
+        browserMetrics.failures += 1;
+        logger.warn({ err, url }, "Browser fetch deadline exceeded before navigation");
+      } else {
+        browserMetrics.unavailable += 1;
+        logger.warn(
+          { err },
+          "Playwright browser unavailable; skipping browser fallback",
+        );
+      }
+      return null;
+    }
+
+    try {
+      await withBrowserDeadline(
+        installRequestGuard(context),
+        deadlineAtMs,
+        "request guard setup",
+      );
+      const page = await withBrowserDeadline(
+        context.newPage(),
+        deadlineAtMs,
+        "page creation",
+      );
+      const navigationTimeoutMs = remainingBrowserDeadlineMs(deadlineAtMs);
+      if (navigationTimeoutMs <= 0) {
+        throw new BrowserDeadlineExceededError("navigation");
+      }
       const response = await page.goto(url, {
         waitUntil: "domcontentloaded",
-        timeout: timeoutMs,
+        timeout: navigationTimeoutMs,
       });
       if (!response || !response.ok()) {
         browserMetrics.failures += 1;
         logger.warn({ url, status: response?.status() }, "Browser fetch rejected");
         return null;
       }
-      await page
-        .waitForLoadState("networkidle", { timeout: RENDER_SETTLE_MS })
-        .catch(() => undefined);
 
-      const { title, articleText, bodyText } = await page.evaluate(() => {
-        const doc = (globalThis as Record<string, unknown>).document as {
-          title: string;
-          querySelector(selector: string): { innerText?: string } | null;
-          body?: { innerText?: string } | null;
-        };
-        const semantic = doc.querySelector("article") ?? doc.querySelector("main");
-        return {
-          title: doc.title,
-          articleText: semantic?.innerText?.trim() ?? "",
-          bodyText: doc.body?.innerText?.trim() ?? "",
-        };
-      });
+      const settleTimeoutMs = remainingBrowserDeadlineMs(
+        deadlineAtMs,
+        Date.now(),
+        RENDER_SETTLE_MS,
+      );
+      if (settleTimeoutMs > 0) {
+        await page
+          .waitForLoadState("networkidle", { timeout: settleTimeoutMs })
+          .catch(() => undefined);
+      }
+
+      const { title, articleText, bodyText } = await withBrowserDeadline(
+        page.evaluate(() => {
+          const doc = (globalThis as Record<string, unknown>).document as {
+            title: string;
+            querySelector(selector: string): { innerText?: string } | null;
+            body?: { innerText?: string } | null;
+          };
+          const semantic = doc.querySelector("article") ?? doc.querySelector("main");
+          return {
+            title: doc.title,
+            articleText: semantic?.innerText?.trim() ?? "",
+            bodyText: doc.body?.innerText?.trim() ?? "",
+          };
+        }),
+        deadlineAtMs,
+        "page evaluation",
+      );
       const text = articleText.length >= 200 ? articleText : bodyText;
       if (text.length === 0) {
         browserMetrics.failures += 1;
@@ -360,14 +502,17 @@ export async function fetchWithBrowser(
       return { title: title || url, text };
     } catch (err) {
       browserMetrics.failures += 1;
-      logger.warn({ err, url }, "Browser fetch failed");
+      if (err instanceof BrowserDeadlineExceededError) {
+        logger.warn({ err, url }, "Browser fetch deadline exceeded");
+      } else {
+        logger.warn({ err, url }, "Browser fetch failed");
+      }
       return null;
-    } finally {
-      await context.close().catch(() => undefined);
     }
   } finally {
+    if (context) await closeContextBounded(context);
+    if (slotAcquired) releaseBrowserSlot();
     browserMetrics.totalLatencyMs += Math.max(0, Date.now() - startedAt);
-    releaseBrowserSlot();
   }
 }
 

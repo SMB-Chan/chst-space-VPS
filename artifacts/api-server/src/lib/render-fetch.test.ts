@@ -6,6 +6,7 @@ import {
   getBrowserContextOptions,
   getBrowserNetworkArgs,
   isSafeBrowserRequestUrl,
+  remainingBrowserDeadlineMs,
   resolveSystemChromiumExecutable,
 } from "./render-fetch";
 
@@ -75,6 +76,18 @@ describe("Chromium network containment", () => {
 describe("Chromium user-agent fidelity", () => {
   it("does not override the executable's native user agent", () => {
     expect(getBrowserContextOptions()).not.toHaveProperty("userAgent");
+  });
+});
+
+describe("browser operation deadline", () => {
+  it("returns only time remaining from the absolute deadline", () => {
+    expect(remainingBrowserDeadlineMs(1_500, 1_000)).toBe(500);
+    expect(remainingBrowserDeadlineMs(1_500, 1_600)).toBe(0);
+  });
+
+  it("caps optional settle work without extending the operation deadline", () => {
+    expect(remainingBrowserDeadlineMs(5_000, 1_000, 2_000)).toBe(2_000);
+    expect(remainingBrowserDeadlineMs(2_500, 1_000, 2_000)).toBe(1_500);
   });
 });
 
