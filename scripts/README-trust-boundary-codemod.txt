@@ -1,1 +1,0 @@
-Temporary CI-only codemod helper for issue #22. Remove this file and the codemod script after the generated patch is committed to the branch.
