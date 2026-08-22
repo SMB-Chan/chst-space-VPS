@@ -1,10 +1,12 @@
 import { pool } from "@workspace/db";
 import app from "./app";
+import { closeBrowser } from "./lib/render-fetch";
 import {
   ensureAiUsageSchema,
   ensureAssetsSchema,
   ensureMessageSchema,
 } from "./lib/ensure-schema";
+import { createGracefulShutdown } from "./lib/graceful-shutdown";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"] ?? "5000";
@@ -25,7 +27,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  app.listen(port, (err) => {
+  const server = app.listen(port, (err) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
       process.exit(1);
@@ -33,6 +35,18 @@ async function main(): Promise<void> {
 
     logger.info({ port }, "Server listening");
   });
+
+  const shutdown = createGracefulShutdown({
+    server,
+    resources: [
+      { name: "browser-egress", close: closeBrowser },
+      { name: "postgres", close: async () => pool.end() },
+    ],
+    logger,
+  });
+
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
 }
 
 void main();
