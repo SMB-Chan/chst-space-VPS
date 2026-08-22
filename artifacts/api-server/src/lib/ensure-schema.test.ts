@@ -32,6 +32,13 @@ describe("ensureAssetsSchema", () => {
     expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("artifacts_conversation_id_idx");
   });
 
+  it("cleans legacy orphan assets and migrates the message FK to cascade", () => {
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("DELETE FROM assets WHERE message_id IS NULL");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("ON DELETE CASCADE");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).toContain("assets_message_id_messages_id_fk");
+    expect(ENSURE_ASSETS_SCHEMA_SQL).not.toContain("ON DELETE SET NULL");
+  });
+
   it("runs the SQL through the provided query function", async () => {
     const query = vi.fn().mockResolvedValue(undefined);
     await ensureAssetsSchema(query);
