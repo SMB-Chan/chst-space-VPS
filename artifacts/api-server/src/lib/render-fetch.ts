@@ -1,6 +1,11 @@
 import { accessSync, constants as fsConstants } from "node:fs";
 import { join } from "node:path";
-import type { Browser, BrowserContext, Route } from "playwright";
+import type {
+  Browser,
+  BrowserContext,
+  BrowserContextOptions,
+  Route,
+} from "playwright";
 import {
   closeBrowserEgressProxy,
   getBrowserEgressProxy,
@@ -26,9 +31,6 @@ import { assertSafeUrl } from "./ssrf-guard";
  *
  * Disable with WEB_FETCH_PLAYWRIGHT_FALLBACK=0.
  */
-
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 /** Extra settle time for client-side hydration after DOMContentLoaded. */
 const RENDER_SETTLE_MS = 2_000;
@@ -72,6 +74,22 @@ export function getBrowserFetchMetrics(): BrowserFetchMetrics {
 
 export function getBrowserNetworkArgs(): readonly string[] {
   return BROWSER_NETWORK_ARGS;
+}
+
+/**
+ * Keep context settings independent from browser-version identity. In
+ * particular, do not override `userAgent`: Chromium should advertise the UA
+ * corresponding to the actual executable launched on the host.
+ */
+export function getBrowserContextOptions(): BrowserContextOptions {
+  return {
+    locale: "ja-JP",
+    viewport: { width: 1280, height: 800 },
+    // Playwright documents that context.route() cannot reliably account for
+    // page requests handled by a Service Worker. Block registration so every
+    // network request stays on the routed path below.
+    serviceWorkers: "block",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -270,15 +288,7 @@ async function createContext(): Promise<BrowserContext> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const browser = await getBrowser();
-      return await browser.newContext({
-        userAgent: BROWSER_UA,
-        locale: "ja-JP",
-        viewport: { width: 1280, height: 800 },
-        // Playwright documents that context.route() cannot reliably account
-        // for page requests handled by a Service Worker. Block registration so
-        // every network request stays on the routed path above.
-        serviceWorkers: "block",
-      });
+      return await browser.newContext(getBrowserContextOptions());
     } catch (err) {
       lastErr = err;
       logger.warn({ err, attempt }, "Browser context creation failed; resetting browser");

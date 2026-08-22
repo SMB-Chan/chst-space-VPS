@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  getBrowserContextOptions,
   getBrowserNetworkArgs,
   isSafeBrowserRequestUrl,
   resolveSystemChromiumExecutable,
@@ -68,6 +69,12 @@ describe("Chromium network containment", () => {
     expect(args).toContain(
       "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     );
+  });
+});
+
+describe("Chromium user-agent fidelity", () => {
+  it("does not override the executable's native user agent", () => {
+    expect(getBrowserContextOptions()).not.toHaveProperty("userAgent");
   });
 });
 
