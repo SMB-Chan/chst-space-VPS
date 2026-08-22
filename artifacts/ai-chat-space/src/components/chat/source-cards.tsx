@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Globe2 } from "lucide-react";
 
 export interface Source {
   title: string;
@@ -9,25 +9,23 @@ interface SourceCardsProps {
   sources: Source[];
 }
 
-function getDomain(url: string): string {
+function normalizeSourceUrl(raw: string): URL | null {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
     return url;
-  }
-}
-
-function getFaviconUrl(url: string): string {
-  try {
-    const { origin } = new URL(url);
-    return `https://www.google.com/s2/favicons?sz=32&domain=${origin}`;
   } catch {
-    return "";
+    return null;
   }
 }
 
 export function SourceCards({ sources }: SourceCardsProps) {
-  if (sources.length === 0) return null;
+  const safeSources = sources.flatMap((source) => {
+    const url = normalizeSourceUrl(source.url);
+    return url ? [{ source, url }] : [];
+  });
+  if (safeSources.length === 0) return null;
 
   return (
     <div className="mt-3 space-y-1.5">
@@ -35,29 +33,19 @@ export function SourceCards({ sources }: SourceCardsProps) {
         参照元
       </p>
       <div className="flex flex-wrap gap-2">
-        {sources.map((source, i) => {
-          const domain = getDomain(source.url);
-          const favicon = getFaviconUrl(source.url);
+        {safeSources.map(({ source, url }, i) => {
+          const domain = url.hostname.replace(/^www\./, "");
           return (
             <a
-              key={i}
-              href={source.url}
+              key={`${url.href}-${i}`}
+              href={url.href}
               target="_blank"
               rel="noopener noreferrer"
               className="group flex items-center gap-2 px-3 py-2 rounded-xl bg-background border border-border hover:border-primary/40 hover:bg-primary/5 transition-all duration-150 text-left shadow-sm max-w-[260px] min-w-0"
             >
-              {favicon && (
-                <img
-                  src={favicon}
-                  alt=""
-                  width={14}
-                  height={14}
-                  className="rounded-sm shrink-0 opacity-80"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              )}
+              {/* Deliberately use a local icon. Fetching favicons through a
+                  third party would disclose every cited domain to that party. */}
+              <Globe2 className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-medium text-foreground truncate leading-snug">
                   {source.title || domain}
