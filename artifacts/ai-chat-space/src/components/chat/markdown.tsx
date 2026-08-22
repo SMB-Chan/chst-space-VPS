@@ -21,7 +21,8 @@ const sanitizeSchema = {
 function safeHttpHref(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   try {
-    const url = new URL(raw, window.location.origin);
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const url = new URL(raw, base);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
     if (url.username || url.password) return undefined;
     return url.href;
