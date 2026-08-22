@@ -33,8 +33,11 @@ jobs:
       - run: pnpm --filter @workspace/api-server run test:ssrf
       - name: Verify generated API clients are reproducible
         run: |
-          pnpm --filter @workspace/api-spec run codegen
-          git diff --exit-code -- lib/api-client-react/src/generated lib/api-zod/src/generated
+          pnpm --filter @workspace/api-spec exec orval --config ./orval.config.ts
+          git diff --exit-code -- \
+            lib/api-client-react/src/generated \
+            lib/api-zod/src/generated \
+            lib/api-zod/src/index.ts
       - run: pnpm run build
 
   production-boot:
