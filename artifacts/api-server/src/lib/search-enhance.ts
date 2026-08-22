@@ -16,6 +16,35 @@ export function normalizeQuery(query: string): string {
     .trim();
 }
 
+/** Maximum length accepted for an LLM-generated search query. */
+export const MAX_SEARCH_QUERY_CHARS = 200;
+
+/**
+ * Secret-shaped substrings that must never leave the process inside a search
+ * query (a prompt-injected page could otherwise trick the follow-up-search
+ * decision into exfiltrating them to external search APIs).
+ */
+const SECRET_LIKE_PATTERNS = [
+  /sk-[A-Za-z0-9_-]{16,}/, // OpenAI-style API keys
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /bearer\s+[A-Za-z0-9._-]{16,}/i,
+  /api[_-]?key\s*[:=]\s*\S+/i,
+  /password\s*[:=]\s*\S+/i,
+];
+
+/**
+ * Sanitize a search query produced by an LLM (or an external caller) before
+ * it is sent to a search backend.  Collapses to a single line, enforces a
+ * length cap, and rejects secret-looking content.  Returns "" when the query
+ * is unusable — callers must treat that as "do not search".
+ */
+export function sanitizeSearchQuery(raw: string): string {
+  const oneLine = raw.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!oneLine || oneLine.length > MAX_SEARCH_QUERY_CHARS) return "";
+  if (SECRET_LIKE_PATTERNS.some((pattern) => pattern.test(oneLine))) return "";
+  return oneLine;
+}
+
 /**
  * Expand a single query into a small set of related queries to improve recall.
  * Keeps the original query and adds angle variants (latest/news) without

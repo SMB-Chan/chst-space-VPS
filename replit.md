@@ -65,6 +65,8 @@
 - ローカルでは Vite が `/api` を `API_PROXY_TARGET`（デフォルト `http://127.0.0.1:5000`）へプロキシする。
 - URL 本文取得は素の HTML 抽出が主。読めないページは `__NEXT_DATA__` / JSON-LD の埋め込み本文 → ローカル headless Chromium（Playwright、`WEB_FETCH_PLAYWRIGHT_FALLBACK=0` で無効化）→ r.jina.ai プロキシ（`WEB_FETCH_RENDER_FALLBACK=1` で有効化、URL が第三者へ送られる）の順にフォールバックする。Playwright のブラウザは `pnpm --filter @workspace/api-server exec playwright install chromium` で導入。
 - esbuild でバンドルできないパッケージ（jsdom のように自身のモジュール相対パスを runtime require するもの）は `artifacts/api-server/build.mjs` の `external` に必ず追加する。バンドルに混入すると本番プロセスが起動時にクラッシュし、デプロイのヘルスチェックが失敗する。
+- SSRF ガードは `src/lib/ssrf-guard.ts` に集約。HTTP 経路（undici connector）とブラウザ経路（Playwright の `context.route` で全リクエスト検査）の双方に同一ポリシーを適用する。ブラウザ経路は `PLAYWRIGHT_MAX_CONCURRENCY`（既定1）で同時実行を制限。
+- LLM が生成する検索クエリは `sanitizeSearchQuery` を必ず通す（単一行化・長さ上限・秘密情報パターン拒否）。信頼できない Web 本文を介したプロンプトインジェクション対策。
 - `.env` はコミットしない。`.env.example` だけを更新する。
 
 ## Pointers

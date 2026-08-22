@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   expandSearchQueries,
   normalizeQuery,
+  sanitizeSearchQuery,
   scoreSearchResult,
   mergeSearchResults,
   extractArticleContent,
@@ -16,6 +17,29 @@ describe("normalizeQuery", () => {
     expect(normalizeQuery("  今日の天気  ")).toBe("今日の天気");
     expect(normalizeQuery("GPT-5, release date!")).toBe("gpt5 release date");
     expect(normalizeQuery("　最新　ニュース　")).toBe("最新 ニュース");
+  });
+});
+
+describe("sanitizeSearchQuery", () => {
+  it("passes ordinary queries through", () => {
+    expect(sanitizeSearchQuery("東京 天気 最新")).toBe("東京 天気 最新");
+  });
+
+  it("collapses newlines and extra whitespace into one line", () => {
+    expect(sanitizeSearchQuery("Node.js\n最新版\r\n リリース")).toBe("Node.js 最新版 リリース");
+  });
+
+  it("rejects empty and overlong queries", () => {
+    expect(sanitizeSearchQuery("   ")).toBe("");
+    expect(sanitizeSearchQuery("あ".repeat(201))).toBe("");
+  });
+
+  it("rejects secret-like content that must not leak to search APIs", () => {
+    expect(sanitizeSearchQuery("login with sk-abcdefghijklmnop1234567890")).toBe("");
+    expect(sanitizeSearchQuery("-----BEGIN PRIVATE KEY----- abc")).toBe("");
+    expect(sanitizeSearchQuery("token: Bearer abcdef0123456789abcd")).toBe("");
+    expect(sanitizeSearchQuery("api_key=abcdef12345")).toBe("");
+    expect(sanitizeSearchQuery("password: hunter2")).toBe("");
   });
 });
 
