@@ -96,6 +96,9 @@ async function buildAll() {
       "wrangler",
       "zeromq",
       "zeromq-prebuilt",
+      // jsdom requires sibling files relative to its own module path at
+      // runtime (e.g. ./xhr-sync-worker.js), so it cannot be bundled.
+      "jsdom",
       "playwright",
       "puppeteer",
       "puppeteer-core",
