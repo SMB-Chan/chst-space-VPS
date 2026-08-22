@@ -13,6 +13,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-file-generation-boundary:
+    if: github.event_name == 'pull_request' && github.head_ref == 'hardening/file-generation-trust-boundary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/apply-file-generation-trust-boundary.mjs
+      - run: git diff --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: file-generation-trust-boundary-patch
+          path: |
+            artifacts/api-server/src/lib/file-generation.ts
+            artifacts/api-server/src/lib/chat-stream.ts
+            artifacts/api-server/src/lib/file-generation.test.ts
+            artifacts/api-server/src/lib/chat-stream.file-generation.test.ts
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
