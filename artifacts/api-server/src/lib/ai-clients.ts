@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "./logger";
+import { createLlmTimeContextFetch } from "./llm-time-context";
 
 // Replit-managed OpenAI proxy
 if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
@@ -9,9 +10,15 @@ if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
   throw new Error("AI_INTEGRATIONS_OPENAI_API_KEY must be set.");
 }
 
+// Every OpenAI-compatible /chat/completions request gets a fresh, authoritative
+// Asia/Tokyo timestamp immediately before transport. Non-chat endpoints pass
+// through unchanged.
+const llmFetch = createLlmTimeContextFetch();
+
 export const openaiClient = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  fetch: llmFetch,
 });
 
 // DashScope (Alibaba Cloud) — OpenAI-compatible endpoint
@@ -26,6 +33,7 @@ if (process.env.DASHSCOPE_API_KEY) {
   dashscopeClient = new OpenAI({
     apiKey: process.env.DASHSCOPE_API_KEY,
     baseURL: DASHSCOPE_BASE_URL,
+    fetch: llmFetch,
   });
   logger.info("DashScope client initialized");
 } else {
