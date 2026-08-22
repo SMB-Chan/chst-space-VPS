@@ -1,0 +1,36 @@
+name: Apply file-generation trust boundary
+
+on:
+  push:
+    branches: [hardening/file-generation-trust-boundary]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message != 'chore: apply file generation trust boundary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/file-generation-trust-boundary
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/apply-file-generation-trust-boundary.mjs
+      - name: Commit codemod result
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artifacts/api-server/src/lib/file-generation.ts \
+                  artifacts/api-server/src/lib/chat-stream.ts \
+                  artifacts/api-server/src/lib/file-generation.test.ts \
+                  artifacts/api-server/src/lib/chat-stream.file-generation.test.ts
+          git commit -m "chore: apply file generation trust boundary"
+          git push origin HEAD:hardening/file-generation-trust-boundary
