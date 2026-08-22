@@ -13,6 +13,7 @@ import healthRouter from "./routes/health";
 import { logger } from "./lib/logger";
 import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
+import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
 import { requireAuth } from "./middlewares/requireAuth";
 import { sharedAiUsageGuard } from "./middlewares/sharedAiUsageGuard";
 import { isAllowedCorsOrigin, parseAllowedOrigins } from "./lib/cors-origins";
@@ -56,6 +57,11 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   }),
 );
+
+// Apply conservative document/cache defaults to API responses only. Clerk's
+// own reverse-proxy path above is intentionally not modified by this policy.
+app.use("/api", apiSecurityHeaders);
+
 // Health checks are mounted before Clerk so deployment probes never depend on auth.
 app.use("/api", healthRouter);
 

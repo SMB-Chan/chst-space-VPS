@@ -88,8 +88,18 @@ jobs:
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true; cat /tmp/chat-space-api.log' EXIT
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:5000/api/healthz > /tmp/health.json; then
+            if curl --fail --silent --dump-header /tmp/health.headers \
+              http://127.0.0.1:5000/api/healthz > /tmp/health.json; then
               cat /tmp/health.json
+              grep -qi '^Cache-Control: private, no-store' /tmp/health.headers
+              grep -qi '^X-Content-Type-Options: nosniff' /tmp/health.headers
+              grep -qi '^X-Frame-Options: DENY' /tmp/health.headers
+              grep -qi '^Referrer-Policy: no-referrer' /tmp/health.headers
+              grep -qi "^Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'" /tmp/health.headers
+              if grep -qi '^X-Powered-By:' /tmp/health.headers; then
+                echo "X-Powered-By must not be exposed" >&2
+                exit 1
+              fi
               exit 0
             fi
             sleep 1
