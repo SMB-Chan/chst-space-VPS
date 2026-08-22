@@ -4,6 +4,7 @@ import {
   normalizeQuery,
   scoreSearchResult,
   mergeSearchResults,
+  extractArticleContent,
   extractMainContent,
   extractEmbeddedContent,
   isBotChallengePage,
@@ -155,6 +156,39 @@ describe("extractMainContent", () => {
       </html>
     `;
     expect(extractMainContent(html).length).toBeLessThan(MIN_CONTENT_CHARS);
+  });
+});
+
+describe("extractArticleContent", () => {
+  it("extracts article text and title via Readability", () => {
+    const body = "これは記事の本文です。Readability が抽出すべき内容。".repeat(10);
+    const html = `
+      <html>
+        <head><title>記事タイトル | サイト名</title></head>
+        <body>
+          <nav>ナビゲーション リンク リンク リンク</nav>
+          <article><h1>記事タイトル</h1><p>${body}</p></article>
+          <footer>フッターのコピーライト</footer>
+        </body>
+      </html>
+    `;
+    const article = extractArticleContent(html, "https://example.com/post/1");
+    expect(article).not.toBeNull();
+    expect(article!.text).toContain("Readability が抽出すべき内容");
+    expect(article!.title).toContain("記事タイトル");
+  });
+
+  it("returns null for pages with no identifiable article", () => {
+    expect(
+      extractArticleContent(
+        "<html><body><div id=\"root\"></div></body></html>",
+        "https://example.com/",
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for malformed input without throwing", () => {
+    expect(extractArticleContent("", "https://example.com/")).toBeNull();
   });
 });
 

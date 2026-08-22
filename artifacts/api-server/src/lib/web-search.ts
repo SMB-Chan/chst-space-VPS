@@ -16,6 +16,7 @@ import {
 import {
   expandSearchQueries,
   mergeSearchResults,
+  extractArticleContent,
   extractMainContent,
   extractEmbeddedContent,
   isBotChallengePage,
@@ -25,6 +26,7 @@ import {
   type ScoredSearchResult,
 } from "./search-enhance";
 import { fetchWithBrowser } from "./render-fetch";
+import { searchWithApiProviders } from "./search-providers";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchHtml };
@@ -244,7 +246,7 @@ const safeAgent = new Agent({
 async function fetchWithTimeout(
   rawUrl: string,
   timeoutMs: number,
-  opts?: { userAgent?: string | null }
+  opts?: { userAgent?: string | null; headers?: Record<string, string> }
 ): Promise<{ response: UndiciResponse; cancel: () => void }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -256,7 +258,10 @@ async function fetchWithTimeout(
     for (let hop = 0; hop < 4; hop++) {
       // assertSafeUrl races its internal DNS lookup against our signal
       const url = await assertSafeUrl(current, controller.signal);
-      const headers: Record<string, string> = { "Accept-Language": "ja,en;q=0.8" };
+      const headers: Record<string, string> = {
+        "Accept-Language": "ja,en;q=0.8",
+        ...opts?.headers,
+      };
       if (userAgent) headers["User-Agent"] = userAgent;
       const res = await undiciFetch(url, {
         signal: controller.signal,
@@ -307,10 +312,15 @@ async function fetchViaRenderProxy(url: string): Promise<string | null> {
     // Rendering is slower than a plain fetch, so allow a longer deadline.
     // Note: r.jina.ai's own Cloudflare challenges browser-like User-Agents
     // from datacenter IPs, so the proxy request omits the browser UA.
+    // JINA_API_KEY lifts the anonymous rate limit (~20 rpm).
+    const jinaKey = process.env.JINA_API_KEY?.trim();
     const { response: res, cancel } = await fetchWithTimeout(
       `${RENDER_PROXY_BASE}${url}`,
       PAGE_FETCH_TIMEOUT_MS * 3,
-      { userAgent: null },
+      {
+        userAgent: null,
+        headers: jinaKey ? { Authorization: `Bearer ${jinaKey}` } : undefined,
+      },
     );
     try {
       if (!res.ok) {
@@ -381,9 +391,14 @@ export async function fetchPageText(
       // before conversion to a JavaScript string.
       const html = await readResponseTextLimited(res, MAX_PAGE_RESPONSE_BYTES);
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-      const title = titleMatch ? stripHtml(titleMatch[1]) : url;
+      let title = titleMatch ? stripHtml(titleMatch[1]) : url;
 
-      let text = extractMainContent(html);
+      // Readability (Firefox Reader View engine) is far more accurate than
+      // the regex extractor on article-style pages; keep the regex path as
+      // the fallback for non-article pages.
+      const article = extractArticleContent(html, url);
+      if (article?.title) title = article.title;
+      let text = article?.text ?? extractMainContent(html);
       if (text.length < MIN_CONTENT_CHARS) {
         // JS-rendered shell or interstitial: try data embedded in the HTML
         // (JSON-LD articleBody, Next.js __NEXT_DATA__) before giving up.
@@ -432,6 +447,18 @@ export async function searchWeb(query: string): Promise<ScoredSearchResult[]> {
   if (cached) {
     logger.debug({ query }, "Search cache hit");
     return cached.map((r) => ({ ...r, score: 0 }));
+  }
+
+  // Keyed search APIs (Tavily/Exa/Brave) are far more reliable than HTML
+  // scraping; use them when configured and fall back to DuckDuckGo below.
+  const apiResults = await searchWithApiProviders(query);
+  if (apiResults.length > 0) {
+    const merged = mergeSearchResults(apiResults, query);
+    setCachedResults(
+      query,
+      merged.map(({ score: _score, ...rest }) => rest),
+    );
+    return merged;
   }
 
   const queries = expandSearchQueries(query);
@@ -554,6 +581,78 @@ export async function decideSearch(
   }
 }
 
+/** Hard deadline for the follow-up-search decision call. */
+const FOLLOWUP_DECIDE_TIMEOUT_MS = 6_000;
+
+/**
+ * After the first search round, ask the model whether the gathered material
+ * is sufficient to answer the user's question and, if not, for ONE follow-up
+ * query.  The caller bounds this to a single extra round.  Any failure
+ * resolves to "no further search" — the follow-up is an enhancement, never
+ * a blocker.
+ */
+export async function decideFollowUpSearch(
+  client: OpenAI,
+  model: string,
+  provider: "openai" | "dashscope",
+  userMessage: string,
+  previousQuery: string,
+  gatheredSummary: string,
+): Promise<{ search: boolean; query: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FOLLOWUP_DECIDE_TIMEOUT_MS);
+
+  try {
+    const opts: Parameters<typeof client.chat.completions.create>[0] = {
+      model,
+      stream: false,
+      messages: [
+        {
+          role: "system",
+          content:
+            `あなたは検索判定アシスタントです。ユーザーの質問と、これまでに収集した資料を見て、正確な回答に情報が十分かを判定してください。` +
+            `資料が不足している・質問とずれている・明らかに古い場合のみ追加検索が必要です。十分なら検索不要です。` +
+            `必ず次のJSONのみを出力: {"search": true/false, "query": "追加の検索クエリ(日本語または英語、不要なら空文字)"}`,
+        },
+        {
+          role: "user",
+          content:
+            `【ユーザーの質問】\n${userMessage.slice(0, 1000)}\n\n` +
+            `【これまでの検索クエリ】\n${previousQuery}\n\n` +
+            `【収集済みの資料(抜粋)】\n${gatheredSummary.slice(0, 3000)}`,
+        },
+      ],
+    };
+    if (provider === "openai") {
+      (opts as unknown as Record<string, unknown>).max_completion_tokens = 200;
+    } else {
+      (opts as unknown as Record<string, unknown>).max_tokens = 200;
+      (opts as unknown as Record<string, unknown>).extra_body = { enable_thinking: false };
+    }
+
+    const resp = (await client.chat.completions.create(
+      opts,
+      { signal: controller.signal }
+    )) as OpenAI.Chat.Completions.ChatCompletion;
+
+    const text = resp.choices[0]?.message?.content ?? "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        search: Boolean(parsed.search) && typeof parsed.query === "string" && parsed.query.trim() !== "",
+        query: typeof parsed.query === "string" ? parsed.query.trim() : "",
+      };
+    }
+    return { search: false, query: "" };
+  } catch (err) {
+    logger.warn({ err, model }, "Follow-up search decision failed; skipping");
+    return { search: false, query: "" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Build web context for a user message:
  * - fetches any URLs pasted by the user (with per-page end-to-end timeout)
@@ -621,50 +720,82 @@ export async function buildWebContext(
     onStatus({ status: "search_warning", message: warning });
   }
 
-  // Web search
-  if (decision.search) {
-    searched = true;
-    query = decision.query;
-    onStatus({ status: "searching", query });
-    const results = await searchWeb(decision.query);
-    if (results.length > 0) {
-      const top = results.slice(0, FETCH_TOP_N);
-      const pages = await Promise.all(top.map((r) => fetchPageText(r.url)));
-      for (const r of results) {
-        sources.push({ title: r.title, url: r.url });
-      }
-      const snippetBlock = results
-        .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   概要: ${r.snippet}`)
-        .join("\n");
-      const expandedQueries = expandSearchQueries(decision.query);
-      const queryNote =
-        expandedQueries.length > 1
-          ? `（拡張クエリ: ${expandedQueries.slice(1).join(" / ")}）`
-          : "";
-      parts.push(`【Web検索結果（クエリ: ${decision.query}）${queryNote}】\n${snippetBlock}`);
-
-      let pagesFetched = 0;
-      pages.forEach((page, i) => {
-        if (page) {
-          pagesFetched++;
-          parts.push(`【ページ内容: ${top[i].url}】\n${page.text}`);
-        }
-      });
-
-      // Warn when any (not just all) of the selected pages failed to load
-      if (pagesFetched < top.length) {
-        const warning =
-          pagesFetched === 0
-            ? "ページ取得がすべてタイムアウトしたため、検索スニペットのみを参照しています。"
-            : "一部のページ取得がタイムアウトしたため、取得できた情報でお答えします。";
-        searchWarning = warning;
-        onStatus({ status: "search_warning", message: warning });
-      }
-    } else {
+  // Web search — each round searches, fetches the top pages, and appends to
+  // the shared sources/parts.  Sources and fetched pages are deduplicated by
+  // URL across rounds.
+  const seenSourceUrls = new Set<string>();
+  const runSearchRound = async (roundQuery: string): Promise<void> => {
+    onStatus({ status: "searching", query: roundQuery });
+    const results = await searchWeb(roundQuery);
+    if (results.length === 0) {
       const warning = "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
       searchWarning = warning;
       onStatus({ status: "search_warning", message: warning });
-      parts.push(`【Web検索結果（クエリ: ${decision.query}）】\n検索結果が取得できませんでした。`);
+      parts.push(`【Web検索結果（クエリ: ${roundQuery}）】\n検索結果が取得できませんでした。`);
+      return;
+    }
+
+    // Skip pages already fetched in an earlier round so the follow-up round
+    // neither re-fetches nor miscounts them as failures.
+    const top = results.slice(0, FETCH_TOP_N).filter((r) => !seenSourceUrls.has(r.url));
+    const pages = await Promise.all(top.map((r) => fetchPageText(r.url)));
+    const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
+    for (const r of newResults) {
+      seenSourceUrls.add(r.url);
+      sources.push({ title: r.title, url: r.url });
+    }
+    if (newResults.length === 0) return; // follow-up round found only duplicates
+
+    const snippetBlock = newResults
+      .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   概要: ${r.snippet}`)
+      .join("\n");
+    const expandedQueries = expandSearchQueries(roundQuery);
+    const queryNote =
+      expandedQueries.length > 1
+        ? `（拡張クエリ: ${expandedQueries.slice(1).join(" / ")}）`
+        : "";
+    parts.push(`【Web検索結果（クエリ: ${roundQuery}）${queryNote}】\n${snippetBlock}`);
+
+    let pagesFetched = 0;
+    pages.forEach((page, i) => {
+      if (page) {
+        pagesFetched++;
+        parts.push(`【ページ内容: ${top[i].url}】\n${page.text}`);
+      }
+    });
+
+    // Warn when any (not just all) of the selected pages failed to load
+    if (pagesFetched < top.length) {
+      const warning =
+        pagesFetched === 0
+          ? "ページ取得がすべてタイムアウトしたため、検索スニペットのみを参照しています。"
+          : "一部のページ取得がタイムアウトしたため、取得できた情報でお答えします。";
+      searchWarning = warning;
+      onStatus({ status: "search_warning", message: warning });
+    }
+  };
+
+  if (decision.search) {
+    searched = true;
+    query = decision.query;
+    await runSearchRound(decision.query);
+
+    // One bounded follow-up round: re-search only when the model judges the
+    // gathered material insufficient (off-target, thin, or stale).
+    const followUp = await decideFollowUpSearch(
+      client,
+      model,
+      provider,
+      userMessage,
+      decision.query,
+      parts.join("\n\n"),
+    );
+    if (
+      followUp.search &&
+      followUp.query &&
+      normalizeQuery(followUp.query) !== normalizeQuery(decision.query)
+    ) {
+      await runSearchRound(followUp.query);
     }
   }
 

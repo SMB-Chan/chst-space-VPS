@@ -1,3 +1,5 @@
+import { JSDOM } from "jsdom";
+import { Readability } from "@mozilla/readability";
 import { stripHtml, type SearchResult } from "./search-parse";
 
 /** Number of top-scored results whose pages are fetched for full-text context. */
@@ -245,6 +247,35 @@ export function extractMainContent(html: string): string {
  * fallbacks are attempted.
  */
 export const MIN_CONTENT_CHARS = 120;
+
+/**
+ * Extract article text with Mozilla Readability (Firefox Reader View's
+ * engine) over a jsdom DOM.  Much more accurate than the regex-based
+ * extractMainContent for article-style pages; pure JS, no browser needed.
+ * Scripts are never executed and subresources never load (jsdom defaults),
+ * so untrusted HTML is safe to parse.
+ *
+ * Returns null when Readability cannot identify an article or the result
+ * is too thin to be useful.
+ */
+export function extractArticleContent(
+  html: string,
+  url: string,
+): { title: string; text: string } | null {
+  try {
+    const dom = new JSDOM(html, { url });
+    const article = new Readability(dom.window.document).parse();
+    if (!article) return null;
+    const text = (article.textContent ?? "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (text.length < MIN_CONTENT_CHARS) return null;
+    return { title: (article.title ?? "").trim(), text };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Heuristic markers of bot-protection / JS-challenge pages (Cloudflare,
