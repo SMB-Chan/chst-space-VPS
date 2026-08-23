@@ -272,6 +272,67 @@ async function fetchViaFallbacks(
   return null;
 }
 
+
+const PUBLICATION_META_KEYS = new Set([
+  "article:published_time",
+  "og:published_time",
+  "date",
+  "pubdate",
+  "publishdate",
+  "publish_date",
+  "datepublished",
+  "dc.date",
+  "dc.date.issued",
+  "dcterms.issued",
+]);
+
+function htmlAttributes(tag: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const pattern = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))/g;
+  for (const match of tag.matchAll(pattern)) {
+    attributes[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+  return attributes;
+}
+
+function normalizePublishedAt(value: string): string | null {
+  const parsed = new Date(value.trim());
+  if (Number.isNaN(parsed.getTime())) return null;
+  const time = parsed.getTime();
+  if (time < Date.UTC(1900, 0, 1) || time > Date.now() + 24 * 60 * 60 * 1000) return null;
+  return parsed.toISOString();
+}
+
+export function extractPublishedAtFromHtml(html: string): string | null {
+  const candidates: string[] = [];
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    const attributes = htmlAttributes(tag);
+    const key = (
+      attributes.property ??
+      attributes.name ??
+      attributes.itemprop ??
+      ""
+    ).toLowerCase();
+    if (PUBLICATION_META_KEYS.has(key) && attributes.content) candidates.push(attributes.content);
+  }
+  for (const match of html.matchAll(/"datePublished"\s*:\s*"([^"]+)"/gi)) {
+    candidates.push(match[1]);
+  }
+  for (const tag of html.match(/<time\b[^>]*>/gi) ?? []) {
+    const attributes = htmlAttributes(tag);
+    if (!attributes.datetime) continue;
+    const marker = `${attributes.itemprop ?? ""} ${attributes.class ?? ""}`.toLowerCase();
+    if (!marker || /publish|posted|entry-date|datepublished/.test(marker)) {
+      candidates.push(attributes.datetime);
+    }
+  }
+  for (const candidate of candidates) {
+    const normalized = normalizePublishedAt(candidate);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
 export async function fetchPageText(
   url: string,
   signal?: AbortSignal,
@@ -341,20 +402,11 @@ export async function fetchPageText(
         );
         return null;
       }
-      const dateCandidates = [
-        ...Array.from(html.matchAll(/<meta[^>]+(?:property|name)=["'](?:article:published_time|date|pubdate|发布时间)["'][^>]+content=["']([^"']+)["']/gi), (m) => m[1]),
-        ...Array.from(html.matchAll(/<time[^>]+datetime=["']([^"']+)["']/gi), (m) => m[1]),
-        ...Array.from(html.matchAll(/"datePublished"\s*:\s*"([^"]+)"/gi), (m) => m[1]),
-      ];
-      let publishedAt: string | null = null;
-      for (const candidate of dateCandidates) {
-        const parsedDate = new Date(candidate);
-        if (!Number.isNaN(parsedDate.getTime())) {
-          publishedAt = parsedDate.toISOString();
-          break;
-        }
-      }
-      return { title, text: text.slice(0, MAX_PAGE_CHARS), publishedAt };
+      return {
+        title,
+        text: text.slice(0, MAX_PAGE_CHARS),
+        publishedAt: extractPublishedAtFromHtml(html),
+      };
     } finally {
       cancel(); // disarm only after body has been fully consumed
     }
@@ -443,7 +495,7 @@ export async function decideSearch(
   model: string,
   provider: "openai" | "dashscope",
   userMessage: string,
-  options?: { forceQuery?: string },
+  options?: { forceQuery?: string; signal?: AbortSignal },
 ): Promise<{ search: boolean; query: string; skippedDueToError?: boolean; usedFallback?: boolean }> {
   if (options?.forceQuery) {
     const query = sanitizeSearchQuery(options.forceQuery);
@@ -462,6 +514,10 @@ export async function decideSearch(
     day: "2-digit",
   }).format(new Date());
   const controller = new AbortController();
+  const abortFromParent = () =>
+    controller.abort(options?.signal?.reason ?? new Error("Operation cancelled"));
+  if (options?.signal?.aborted) abortFromParent();
+  else options?.signal?.addEventListener("abort", abortFromParent, { once: true });
   const timer = setTimeout(() => controller.abort(), DECIDE_TIMEOUT_MS);
 
   try {
@@ -506,6 +562,7 @@ export async function decideSearch(
     }
     return { search: false, query: "" };
   } catch (err) {
+    if (options?.signal?.aborted) throw err;
     const isAbort =
       (err as Error)?.name === "AbortError" ||
       controller.signal.aborted ||
@@ -521,6 +578,7 @@ export async function decideSearch(
     return { search: false, query: "", skippedDueToError: true };
   } finally {
     clearTimeout(timer); // always disarm; abort already fired if it needed to
+    options?.signal?.removeEventListener("abort", abortFromParent);
   }
 }
 
@@ -541,8 +599,13 @@ export async function decideFollowUpSearch(
   userMessage: string,
   previousQuery: string,
   gatheredSummary: string,
+  signal?: AbortSignal,
 ): Promise<{ search: boolean; query: string }> {
   const controller = new AbortController();
+  const abortFromParent = () =>
+    controller.abort(signal?.reason ?? new Error("Operation cancelled"));
+  if (signal?.aborted) abortFromParent();
+  else signal?.addEventListener("abort", abortFromParent, { once: true });
   const timer = setTimeout(() => controller.abort(), FOLLOWUP_DECIDE_TIMEOUT_MS);
 
   try {
@@ -595,6 +658,7 @@ export async function decideFollowUpSearch(
     return { search: false, query: "" };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abortFromParent);
   }
 }
 
@@ -688,9 +752,16 @@ export async function buildWebContext(
     const top = results.slice(0, FETCH_TOP_N).filter((r) => !seenSourceUrls.has(r.url));
     const pages = await Promise.all(top.map((r) => fetchPageText(r.url, signal)));
     const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
-    for (const r of newResults) {
-      seenSourceUrls.add(r.url);
-      sources.push({ title: r.title, url: r.url, publishedAt: null, fetchedAt });
+    const fetchedPages = new Map(top.map((result, index) => [result.url, pages[index]]));
+    for (const result of newResults) {
+      seenSourceUrls.add(result.url);
+      const page = fetchedPages.get(result.url);
+      sources.push({
+        title: result.title,
+        url: result.url,
+        publishedAt: page?.publishedAt ?? null,
+        fetchedAt,
+      });
     }
     if (newResults.length === 0) return; // follow-up round found only duplicates
 
@@ -738,6 +809,7 @@ export async function buildWebContext(
       userMessage,
       decision.query,
       parts.join("\n\n"),
+      signal,
     );
     if (
       followUp.search &&

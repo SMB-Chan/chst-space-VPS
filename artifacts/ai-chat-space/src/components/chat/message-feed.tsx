@@ -314,8 +314,10 @@ export function MessageFeed({
               </div>
               
               <div className={cn(
-                "flex flex-col gap-2 min-w-0 max-w-[88%] md:max-w-[82%]",
-                isUser ? "items-end" : "items-start"
+                "flex flex-col gap-2 min-w-0",
+                isUser
+                  ? "items-end max-w-[88%] md:max-w-[70%]"
+                  : "items-start w-full max-w-full md:max-w-[90%]"
               )}>
                 {isUser && attachments.length > 0 && (
                   <div className="flex flex-wrap justify-end gap-2 max-w-full">
@@ -332,15 +334,9 @@ export function MessageFeed({
                 )}
                 
                 {(!isUser && message.id === STREAMING_ASSISTANT_ID && !displayContent) ? (
-                  streamingPhase === "thinking" ? (
-                    <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
-                      <GenerationBadge phase={streamingPhase} />
-                    </div>
-                  ) : (
-                    <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
-                      <GenerationBadge phase={streamingPhase} />
-                    </div>
-                  )
+                  <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
+                    <GenerationBadge phase={streamingPhase} />
+                  </div>
                 ) : (
                   <div className={cn(
                     "px-4 py-3 md:px-5 md:py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words [overflow-wrap:anywhere]",

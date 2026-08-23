@@ -252,14 +252,8 @@ async function streamMessage(
     }
     if (!failed) callDoneOnce();
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      onDone();
-      return;
-    }
-    if (err instanceof Error && err.name === "AbortError") {
-      onDone();
-      return;
-    }
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
     onError(err instanceof Error ? err : new Error(String(err)));
   }
 }
@@ -311,9 +305,57 @@ export function ChatPage() {
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
   const stopStreaming = () => {
+    const targetId = sendingToRef.current ?? conversationId;
     abortRef.current?.abort();
     abortRef.current = null;
-    setStreamError("回答を停止しました。生成済みの内容を保存しています。");
+    setIsStreaming(false);
+    setSearchStatus(null);
+    setStreamingAudit("");
+    setStreamError(null);
+    setSearchWarning(
+      streamingContent
+        ? "生成を停止しました。表示済みの回答を保持しています。"
+        : "生成を停止しました。",
+    );
+
+    if (isPrivate) {
+      const now = new Date().toISOString();
+      const stoppedMessages: OpenaiMessage[] = [];
+      if (optimisticUserMessage) stoppedMessages.push(optimisticUserMessage);
+      if (streamingContent) {
+        stoppedMessages.push({
+          id: STREAMING_ASSISTANT_ID - privateMessages.length - 1,
+          conversationId: 0,
+          role: "assistant",
+          content: stripArtifactBlocks(streamingContent),
+          sources: streamingSources.length > 0 ? streamingSources : null,
+          createdAt: now,
+        } as OpenaiMessage);
+      }
+      if (stoppedMessages.length > 0) {
+        setPrivateMessages((previous) => [...previous, ...stoppedMessages]);
+      }
+      setStreamingContent("");
+      setStreamingSources([]);
+      setStreamingArtifacts([]);
+      setStreamingFiles([]);
+      setOptimisticUserMessage(null);
+      return;
+    }
+
+    if (targetId) {
+      window.setTimeout(() => {
+        void queryClient
+          .invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId) })
+          .finally(() => {
+            setStreamingContent("");
+            setStreamingSources([]);
+            setStreamingArtifacts([]);
+            setStreamingFiles([]);
+            setOptimisticUserMessage(null);
+          });
+      }, 1_000);
+    }
   };
 
   useEffect(() => {
@@ -702,17 +744,6 @@ export function ChatPage() {
                 {skill.label}
               </span>
             ))}
-          </div>
-        </div>
-      )}
-
-      {searchStatus && (searchStatus.kind === "searching" || searchStatus.kind === "fetching") && (
-         <div className="mx-4 md:mx-6 mb-2 max-w-4xl mx-auto w-full">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-muted-foreground">
-            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-            {searchStatus.kind === "searching"
-              ? `Webを検索中${searchStatus.query ? `: 「${searchStatus.query}」` : "..."}`
-              : "ページを読み込み中..."}
           </div>
         </div>
       )}

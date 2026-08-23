@@ -9,4 +9,6 @@
 export interface OpenaiSource {
   title: string;
   url: string;
+  publishedAt?: Date | null;
+  fetchedAt?: Date | null;
 }

@@ -9,12 +9,17 @@ export type AuditPatch = {
 };
 
 const MAX_OPERATIONS = 8;
+const MAX_FIND_CHARS = 2000;
 const MAX_REPLACEMENT_CHARS = 4000;
-const MAX_NOTE_CHARS = 2000;
-const MAX_TARGET_CHARS = 4000;
-const MAX_OPERATION_CHARS = 8000;
-const MAX_TOTAL_REPLACEMENT_CHARS = 12_000;
+const MAX_TOTAL_REPLACEMENT_CHARS = 8000;
 const MAX_FINAL_CHARS = 20_000;
+const MAX_NOTE_CHARS = 2000;
+
+function unwrapJson(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
+  return fenced ? fenced[1] : trimmed;
+}
 
 export function applyValidatedAuditPatch(
   draft: string,
@@ -22,69 +27,73 @@ export function applyValidatedAuditPatch(
 ): { content: string; note: string; applied: boolean; operations?: AuditPatchOperation[]; reason?: string } {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(unwrapJson(raw));
   } catch {
     return { content: draft, note: "", applied: false, reason: "監査パッチがJSONではありません。" };
   }
-  if (!parsed || typeof parsed !== "object") {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { content: draft, note: "", applied: false, reason: "監査パッチの形式が不正です。" };
   }
+
   const value = parsed as Record<string, unknown>;
   const note = typeof value.note === "string" ? value.note.trim().slice(0, MAX_NOTE_CHARS) : "";
-  const operations = value.operations;
-  if (!Array.isArray(operations) || operations.length > MAX_OPERATIONS) {
+  if (!Array.isArray(value.operations) || value.operations.length > MAX_OPERATIONS) {
     return { content: draft, note, applied: false, reason: "監査パッチの操作数が不正です。" };
   }
-  const normalized: AuditPatchOperation[] = [];
-  for (const item of operations) {
-    if (!item || typeof item !== "object") {
+
+  const located: Array<AuditPatchOperation & { start: number; end: number }> = [];
+  let totalReplacementChars = 0;
+  for (const item of value.operations) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
       return { content: draft, note, applied: false, reason: "監査パッチの操作が不正です。" };
     }
-    const op = item as Record<string, unknown>;
-    const find = op.find;
-    const replacement = op.replacement;
+    const operation = item as Record<string, unknown>;
+    const find = operation.find;
+    const replacement = operation.replacement;
     if (
       typeof find !== "string" ||
-      find.length === 0 ||
-      find.length > MAX_TARGET_CHARS ||
       typeof replacement !== "string" ||
-      replacement.length > MAX_REPLACEMENT_CHARS ||
-      find.length + replacement.length > MAX_OPERATION_CHARS
+      find.length === 0 ||
+      find.length > MAX_FIND_CHARS ||
+      replacement.length > MAX_REPLACEMENT_CHARS
     ) {
       return { content: draft, note, applied: false, reason: "監査パッチの原文または置換文字数が不正です。" };
     }
-    const first = draft.indexOf(find);
-    if (first < 0) {
-      return { content: draft, note, applied: false, reason: "監査パッチの原文が初稿にありません。" };
+
+    const start = draft.indexOf(find);
+    if (start < 0 || draft.indexOf(find, start + 1) >= 0) {
+      return { content: draft, note, applied: false, reason: "監査パッチの原文が一意に一致しません。" };
     }
-    if (draft.indexOf(find, first + 1) >= 0) {
-      return { content: draft, note, applied: false, reason: "監査パッチの原文が初稿内で重複しています。" };
+    totalReplacementChars += replacement.length;
+    if (totalReplacementChars > MAX_TOTAL_REPLACEMENT_CHARS) {
+      return { content: draft, note, applied: false, reason: "監査パッチの置換総量が上限を超えています。" };
     }
-    normalized.push({ find, replacement });
+    located.push({ find, replacement, start, end: start + find.length });
   }
-  const located = normalized
-    .map((op) => ({ ...op, from: draft.indexOf(op.find), to: draft.indexOf(op.find) + op.find.length }))
-    .sort((a, b) => a.from - b.from);
-  let totalReplacementChars = 0;
-  for (let i = 0; i < located.length; i += 1) {
-    totalReplacementChars += located[i].replacement.length;
-    if (i > 0 && located[i - 1].to > located[i].from) {
-      return { content: draft, note, applied: false, reason: "監査パッチの原文範囲が重複しています。" };
+
+  located.sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let index = 1; index < located.length; index += 1) {
+    if (located[index - 1].end > located[index].start) {
+      return { content: draft, note, applied: false, reason: "監査パッチの対象範囲が重複しています。" };
     }
   }
-  if (totalReplacementChars > MAX_TOTAL_REPLACEMENT_CHARS) {
-    return { content: draft, note, applied: false, reason: "監査パッチの置換総量が大きすぎます。" };
+
+  const finalLength = draft.length + located.reduce(
+    (length, operation) => length + operation.replacement.length - operation.find.length,
+    0,
+  );
+  if (finalLength > MAX_FINAL_CHARS) {
+    return { content: draft, note, applied: false, reason: "監査パッチ適用後の回答が上限を超えています。" };
   }
+
   let content = draft;
-  for (let i = located.length - 1; i >= 0; i -= 1) {
-    const op = located[i];
-    content = content.slice(0, op.from) + op.replacement + content.slice(op.to);
+  for (let index = located.length - 1; index >= 0; index -= 1) {
+    const operation = located[index];
+    content =
+      content.slice(0, operation.start) +
+      operation.replacement +
+      content.slice(operation.end);
   }
-  if (content.length > MAX_FINAL_CHARS) {
-    return { content: draft, note, applied: false, reason: "監査パッチ後の本文が長すぎます。" };
-  }
-  if (normalized.length === 0) {
-    return { content: draft, note, applied: false, operations: normalized };
-  }
-  return { content, note, applied: normalized.length > 0, operations: normalized };
+  const operations = located.map(({ find, replacement }) => ({ find, replacement }));
+  return { content, note, applied: operations.length > 0, operations };
 }

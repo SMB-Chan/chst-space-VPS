@@ -1,35 +1,53 @@
 export type ClientPatchOperation = { find: string; replacement: string };
 
+const MAX_OPERATIONS = 8;
+const MAX_FIND_CHARS = 2000;
+const MAX_REPLACEMENT_CHARS = 4000;
+const MAX_TOTAL_REPLACEMENT_CHARS = 8000;
+const MAX_FINAL_CHARS = 20_000;
+
 export function applyClientPatch(draft: string, operations: unknown): string | null {
-  if (!Array.isArray(operations) || operations.length > 8) return null;
-  const ops = operations.filter((op): op is ClientPatchOperation => {
-    if (!op || typeof op !== "object") return false;
-    const item = op as Record<string, unknown>;
+  if (!Array.isArray(operations) || operations.length > MAX_OPERATIONS) return null;
+
+  const located: Array<ClientPatchOperation & { start: number; end: number }> = [];
+  let totalReplacementChars = 0;
+  for (const raw of operations) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const item = raw as Record<string, unknown>;
     const find = item.find;
     const replacement = item.replacement;
-    if (typeof find !== "string" || find.length === 0 || find.length > 4000 ||
-      typeof replacement !== "string" || replacement.length > 4000 ||
-      find.length + replacement.length > 8000) return false;
-    const first = draft.indexOf(find);
-    return first >= 0 && draft.indexOf(find, first + 1) < 0;
-  });
-  if (ops.length !== operations.length) return null;
-  const located = ops
-    .map((op) => ({ ...op, from: draft.indexOf(op.find), to: draft.indexOf(op.find) + op.find.length }))
-    .sort((a, b) => a.from - b.from);
-  let totalReplacementChars = 0;
-  for (let i = 0; i < located.length; i += 1) {
-    totalReplacementChars += located[i].replacement.length;
-    if (i > 0 && located[i - 1].to > located[i].from) return null;
+    if (
+      typeof find !== "string" ||
+      typeof replacement !== "string" ||
+      find.length === 0 ||
+      find.length > MAX_FIND_CHARS ||
+      replacement.length > MAX_REPLACEMENT_CHARS
+    ) return null;
+
+    const start = draft.indexOf(find);
+    if (start < 0 || draft.indexOf(find, start + 1) >= 0) return null;
+    totalReplacementChars += replacement.length;
+    if (totalReplacementChars > MAX_TOTAL_REPLACEMENT_CHARS) return null;
+    located.push({ find, replacement, start, end: start + find.length });
   }
-  if (totalReplacementChars > 12000) {
-    return null;
+
+  located.sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let index = 1; index < located.length; index += 1) {
+    if (located[index - 1].end > located[index].start) return null;
   }
+  const finalLength = draft.length + located.reduce(
+    (length, operation) => length + operation.replacement.length - operation.find.length,
+    0,
+  );
+  if (finalLength > MAX_FINAL_CHARS) return null;
+
   let result = draft;
-  for (let i = located.length - 1; i >= 0; i -= 1) {
-    const op = located[i];
-    result = result.slice(0, op.from) + op.replacement + result.slice(op.to);
+  for (let index = located.length - 1; index >= 0; index -= 1) {
+    const operation = located[index];
+    result =
+      result.slice(0, operation.start) +
+      operation.replacement +
+      result.slice(operation.end);
   }
-  if (result.length > 20000) return null;
   return result;
 }

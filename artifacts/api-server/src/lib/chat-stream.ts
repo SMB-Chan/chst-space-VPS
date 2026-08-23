@@ -346,9 +346,8 @@ export async function streamChatReply(args: {
       // version that may strip file-oriented structure.
       const fileGenerationBaseResponse = fullResponse;
       let audit: { content: string; modelId: string } | undefined;
-      // Run the audit even if the client disconnected mid-stream: the audited
-      // result is still persisted via onComplete, so revisiting the
-      // conversation shows the audited answer instead of the raw draft.
+      // A user stop aborts the shared signal, so no audit or revision work
+      // starts after the client explicitly cancels the turn.
       if (auditModelId && auditModelId !== modelId && !clientAbort.signal.aborted) {
         try {
           const auditor = getClientForModel(auditModelId);
@@ -396,8 +395,10 @@ export async function streamChatReply(args: {
                       }),
                     VISION_BRIDGE_TIMEOUT_MS,
                     "Vision bridge",
+                    clientAbort.signal,
                   );
                 } catch (err) {
+                  if (clientAbort.signal.aborted) throw err;
                   logger.warn({ err, auditModelId }, "Vision bridge for audit failed");
                   imageTranscript = "";
                 }
@@ -433,13 +434,28 @@ export async function streamChatReply(args: {
                     clientAbort.signal,
           );
           if (auditText.trim()) {
-            const parsedAudit = JSON.parse(auditText.trim()) as { note?: unknown };
-            const note = typeof parsedAudit.note === "string" ? parsedAudit.note.trim().slice(0, 2000) : "";
-            if (note && !clientGone) {
-              res.write(`data: ${JSON.stringify({ audit: note })}\n\n`);
+            const patched = applyValidatedAuditPatch(fullResponse, auditText);
+            if (patched.note) {
+              audit = { content: patched.note, modelId: auditModelId };
+              if (!clientGone) {
+                res.write(`data: ${JSON.stringify({ audit: patched.note })}\n\n`);
+              }
             }
-            audit = { content: note, modelId: auditModelId };
-            (audit as { raw?: string }).raw = auditText.trim();
+            if (patched.applied) {
+              fullResponse = patched.content;
+              if (!clientGone) {
+                res.write(
+                  `data: ${JSON.stringify({ status: "revising", patch: patched.operations })}\n\n`,
+                );
+              }
+            } else if (!clientGone && patched.reason) {
+              res.write(
+                `data: ${JSON.stringify({
+                  status: "search_warning",
+                  message: `${patched.reason} 初稿を保持します。`,
+                })}\n\n`,
+              );
+            }
           }
         } catch (err) {
           logger.warn({ err, auditModelId }, "Audit pass failed; returning main answer only");
@@ -451,20 +467,6 @@ export async function streamChatReply(args: {
               })}\n\n`,
             );
           }
-        }
-      }
-
-      if (audit?.content) {
-        const draft = fullResponse;
-        const rawAudit = (audit as { raw?: string }).raw ?? audit.content;
-        const patched = applyValidatedAuditPatch(draft, rawAudit);
-        if (patched.applied) {
-          fullResponse = patched.content;
-          if (!clientGone) {
-            res.write(`data: ${JSON.stringify({ status: "revising", patch: patched.operations })}\n\n`);
-          }
-        } else if (!clientGone && patched.reason) {
-          res.write(`data: ${JSON.stringify({ status: "search_warning", message: `${patched.reason} 初稿を保持します。` })}\n\n`);
         }
       }
 
@@ -519,6 +521,7 @@ export async function streamChatReply(args: {
             }),
           FILE_GENERATION_TIMEOUT_MS,
           "File generation",
+          clientAbort.signal,
         );
       }
 
