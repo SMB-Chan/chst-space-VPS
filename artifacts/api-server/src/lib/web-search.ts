@@ -39,7 +39,7 @@ export { isPrivateAddress };
 export interface WebContext {
   searched: boolean;
   query?: string;
-  sources: { title: string; url: string }[];
+  sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[];
   contextText: string;
   searchWarning?: string;
 }
@@ -144,11 +144,17 @@ const safeAgent = new Agent({
 async function fetchWithTimeout(
   rawUrl: string,
   timeoutMs: number,
-  opts?: { userAgent?: string | null; headers?: Record<string, string> }
+  opts?: { userAgent?: string | null; headers?: Record<string, string>; signal?: AbortSignal }
 ): Promise<{ response: UndiciResponse; cancel: () => void }> {
   const controller = new AbortController();
+  const abortParent = () => controller.abort(opts?.signal?.reason ?? new Error("Operation cancelled"));
+  if (opts?.signal?.aborted) abortParent();
+  else opts?.signal?.addEventListener("abort", abortParent, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const cancel = () => clearTimeout(timer);
+  const cancel = () => {
+    clearTimeout(timer);
+    opts?.signal?.removeEventListener("abort", abortParent);
+  };
   const userAgent = opts && "userAgent" in opts ? opts.userAgent : USER_AGENT;
 
   try {
@@ -205,7 +211,7 @@ async function discardResponseBody(response: UndiciResponse): Promise<void> {
  * Markdown text.  Used only when direct extraction failed and the operator
  * has opted in via WEB_FETCH_RENDER_FALLBACK.
  */
-async function fetchViaRenderProxy(url: string): Promise<string | null> {
+async function fetchViaRenderProxy(url: string, signal?: AbortSignal): Promise<string | null> {
   try {
     // Rendering is slower than a plain fetch, so allow a longer deadline.
     // Note: r.jina.ai's own Cloudflare challenges browser-like User-Agents
@@ -218,6 +224,7 @@ async function fetchViaRenderProxy(url: string): Promise<string | null> {
       {
         userAgent: null,
         headers: jinaKey ? { Authorization: `Bearer ${jinaKey}` } : undefined,
+        signal,
       },
     );
     try {
@@ -246,7 +253,8 @@ async function fetchViaRenderProxy(url: string): Promise<string | null> {
  */
 async function fetchViaFallbacks(
   url: string,
-): Promise<{ title: string; text: string } | null> {
+  signal?: AbortSignal,
+): Promise<{ title: string; text: string; publishedAt?: string | null } | null> {
   if (PLAYWRIGHT_FALLBACK_ENABLED) {
     const rendered = await fetchWithBrowser(url, BROWSER_FETCH_TIMEOUT_MS);
     if (
@@ -254,21 +262,83 @@ async function fetchViaFallbacks(
       rendered.text.length >= MIN_CONTENT_CHARS &&
       !isBotChallengePage(rendered.text)
     ) {
-      return { title: rendered.title, text: rendered.text.slice(0, MAX_PAGE_CHARS) };
+      return { title: rendered.title, text: rendered.text.slice(0, MAX_PAGE_CHARS), publishedAt: null };
     }
   }
   if (RENDER_FALLBACK_ENABLED) {
-    const rendered = await fetchViaRenderProxy(url);
-    if (rendered) return { title: url, text: rendered.slice(0, MAX_PAGE_CHARS) };
+    const rendered = await fetchViaRenderProxy(url, signal);
+    if (rendered) return { title: url, text: rendered.slice(0, MAX_PAGE_CHARS), publishedAt: null };
+  }
+  return null;
+}
+
+
+const PUBLICATION_META_KEYS = new Set([
+  "article:published_time",
+  "og:published_time",
+  "date",
+  "pubdate",
+  "publishdate",
+  "publish_date",
+  "datepublished",
+  "dc.date",
+  "dc.date.issued",
+  "dcterms.issued",
+]);
+
+function htmlAttributes(tag: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const pattern = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))/g;
+  for (const match of tag.matchAll(pattern)) {
+    attributes[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+  return attributes;
+}
+
+function normalizePublishedAt(value: string): string | null {
+  const parsed = new Date(value.trim());
+  if (Number.isNaN(parsed.getTime())) return null;
+  const time = parsed.getTime();
+  if (time < Date.UTC(1900, 0, 1) || time > Date.now() + 24 * 60 * 60 * 1000) return null;
+  return parsed.toISOString();
+}
+
+export function extractPublishedAtFromHtml(html: string): string | null {
+  const candidates: string[] = [];
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    const attributes = htmlAttributes(tag);
+    const key = (
+      attributes.property ??
+      attributes.name ??
+      attributes.itemprop ??
+      ""
+    ).toLowerCase();
+    if (PUBLICATION_META_KEYS.has(key) && attributes.content) candidates.push(attributes.content);
+  }
+  for (const match of html.matchAll(/"datePublished"\s*:\s*"([^"]+)"/gi)) {
+    candidates.push(match[1]);
+  }
+  for (const tag of html.match(/<time\b[^>]*>/gi) ?? []) {
+    const attributes = htmlAttributes(tag);
+    if (!attributes.datetime) continue;
+    const marker = `${attributes.itemprop ?? ""} ${attributes.class ?? ""}`.toLowerCase();
+    if (!marker || /publish|posted|entry-date|datepublished/.test(marker)) {
+      candidates.push(attributes.datetime);
+    }
+  }
+  for (const candidate of candidates) {
+    const normalized = normalizePublishedAt(candidate);
+    if (normalized) return normalized;
   }
   return null;
 }
 
 export async function fetchPageText(
-  url: string
-): Promise<{ title: string; text: string } | null> {
+  url: string,
+  signal?: AbortSignal,
+): Promise<{ title: string; text: string; publishedAt?: string | null } | null> {
   try {
-    const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS);
+    const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS, { signal });
     try {
       if (!res.ok) {
         logger.warn({ status: res.status, url }, "Page fetch rejected");
@@ -276,7 +346,7 @@ export async function fetchPageText(
         // Bot-protection commonly answers with 401/403/429/503; the fallback
         // chain (browser, then proxy) may still be able to read the page.
         if ([401, 403, 429, 503].includes(res.status)) {
-          return await fetchViaFallbacks(url);
+          return await fetchViaFallbacks(url, signal);
         }
         return null;
       }
@@ -296,7 +366,7 @@ export async function fetchPageText(
       // challenge independently of content length: never serve it as an
       // article — go straight to the fallback chain.
       if (isBotChallengePage(html)) {
-        const fallback = await fetchViaFallbacks(url);
+        const fallback = await fetchViaFallbacks(url, signal);
         if (fallback) return fallback;
         logger.warn({ url }, "Bot challenge page; no usable content");
         return null;
@@ -318,15 +388,25 @@ export async function fetchPageText(
       if (text.length < MIN_CONTENT_CHARS) {
         // Still unreadable (JS shell, interstitial): hand over to the
         // browser/proxy fallback chain, keeping the HTML-derived title.
-        const fallback = await fetchViaFallbacks(url);
-        if (fallback) return { title: title === url ? fallback.title : title, text: fallback.text };
+        const fallback = await fetchViaFallbacks(url, signal);
+        if (fallback) {
+          return {
+            title: title === url ? fallback.title : title,
+            text: fallback.text,
+            publishedAt: fallback.publishedAt ?? null,
+          };
+        }
         logger.warn(
           { url },
           "Page content unreadable (JS-rendered or bot-blocked)",
         );
         return null;
       }
-      return { title, text: text.slice(0, MAX_PAGE_CHARS) };
+      return {
+        title,
+        text: text.slice(0, MAX_PAGE_CHARS),
+        publishedAt: extractPublishedAtFromHtml(html),
+      };
     } finally {
       cancel(); // disarm only after body has been fully consumed
     }
@@ -336,8 +416,8 @@ export async function fetchPageText(
   }
 }
 
-async function searchWebOnce(url: string): Promise<SearchResult[]> {
-  const { response: res, cancel } = await fetchWithTimeout(url, SEARCH_FETCH_TIMEOUT_MS);
+async function searchWebOnce(url: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const { response: res, cancel } = await fetchWithTimeout(url, SEARCH_FETCH_TIMEOUT_MS, { signal });
   try {
     if (!res.ok) {
       logger.warn({ status: res.status, url }, "Search endpoint failed");
@@ -351,7 +431,7 @@ async function searchWebOnce(url: string): Promise<SearchResult[]> {
 }
 
 /** Search the web via DuckDuckGo HTML (no API key). Falls back to the lite page. */
-export async function searchWeb(query: string): Promise<ScoredSearchResult[]> {
+export async function searchWeb(query: string, signal?: AbortSignal): Promise<ScoredSearchResult[]> {
   const cached = getCachedResults(query);
   if (cached) {
     logger.debug({ query }, "Search cache hit");
@@ -382,7 +462,7 @@ export async function searchWeb(query: string): Promise<ScoredSearchResult[]> {
     for (const base of endpoints) {
       const url = `${base}${encodeURIComponent(q)}`;
       searchCalls.push(
-        searchWebOnce(url).catch((err) => {
+        searchWebOnce(url, signal).catch((err) => {
           logger.warn({ err, query: q, endpoint: base }, "Web search endpoint error");
           return [];
         }),
@@ -415,7 +495,7 @@ export async function decideSearch(
   model: string,
   provider: "openai" | "dashscope",
   userMessage: string,
-  options?: { forceQuery?: string },
+  options?: { forceQuery?: string; signal?: AbortSignal },
 ): Promise<{ search: boolean; query: string; skippedDueToError?: boolean; usedFallback?: boolean }> {
   if (options?.forceQuery) {
     const query = sanitizeSearchQuery(options.forceQuery);
@@ -427,8 +507,17 @@ export async function decideSearch(
     return { search: true, query: inferred.query };
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   const controller = new AbortController();
+  const abortFromParent = () =>
+    controller.abort(options?.signal?.reason ?? new Error("Operation cancelled"));
+  if (options?.signal?.aborted) abortFromParent();
+  else options?.signal?.addEventListener("abort", abortFromParent, { once: true });
   const timer = setTimeout(() => controller.abort(), DECIDE_TIMEOUT_MS);
 
   try {
@@ -473,6 +562,7 @@ export async function decideSearch(
     }
     return { search: false, query: "" };
   } catch (err) {
+    if (options?.signal?.aborted) throw err;
     const isAbort =
       (err as Error)?.name === "AbortError" ||
       controller.signal.aborted ||
@@ -488,6 +578,7 @@ export async function decideSearch(
     return { search: false, query: "", skippedDueToError: true };
   } finally {
     clearTimeout(timer); // always disarm; abort already fired if it needed to
+    options?.signal?.removeEventListener("abort", abortFromParent);
   }
 }
 
@@ -508,8 +599,13 @@ export async function decideFollowUpSearch(
   userMessage: string,
   previousQuery: string,
   gatheredSummary: string,
+  signal?: AbortSignal,
 ): Promise<{ search: boolean; query: string }> {
   const controller = new AbortController();
+  const abortFromParent = () =>
+    controller.abort(signal?.reason ?? new Error("Operation cancelled"));
+  if (signal?.aborted) abortFromParent();
+  else signal?.addEventListener("abort", abortFromParent, { once: true });
   const timer = setTimeout(() => controller.abort(), FOLLOWUP_DECIDE_TIMEOUT_MS);
 
   try {
@@ -562,6 +658,7 @@ export async function decideFollowUpSearch(
     return { search: false, query: "" };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abortFromParent);
   }
 }
 
@@ -582,10 +679,11 @@ export async function buildWebContext(
   provider: "openai" | "dashscope",
   userMessage: string,
   onStatus: (event: Record<string, unknown>) => void,
-  options?: { forceQuery?: string },
+  options?: { forceQuery?: string; signal?: AbortSignal },
 ): Promise<WebContext> {
-  const sources: { title: string; url: string }[] = [];
+  const sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[] = [];
   const parts: string[] = [];
+  const fetchedAt = new Date().toISOString();
   let searched = false;
   let query: string | undefined;
   let searchWarning: string | undefined;
@@ -597,9 +695,10 @@ export async function buildWebContext(
   }
 
   // Start URL fetching and search-decision in parallel — they are independent
+  const signal = options?.signal;
   const [urlPages, decision] = await Promise.all([
     urls.length > 0
-      ? Promise.all(urls.map((u) => fetchPageText(u)))
+      ? Promise.all(urls.map((u) => fetchPageText(u, signal)))
       : Promise.resolve([] as (Awaited<ReturnType<typeof fetchPageText>>)[]),
     decideSearch(client, model, provider, userMessage, options),
   ]);
@@ -608,7 +707,7 @@ export async function buildWebContext(
   let urlFetchFailed = false;
   urlPages.forEach((page, i) => {
     if (page) {
-      sources.push({ title: page.title, url: urls[i] });
+      sources.push({ title: page.title, url: urls[i], publishedAt: page.publishedAt ?? null, fetchedAt });
       parts.push(`【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`);
     } else if (urls[i]) {
       urlFetchFailed = true;
@@ -638,7 +737,8 @@ export async function buildWebContext(
   const seenSourceUrls = new Set<string>();
   const runSearchRound = async (roundQuery: string): Promise<void> => {
     onStatus({ status: "searching", query: roundQuery });
-    const results = await searchWeb(roundQuery);
+    if (signal?.aborted) return;
+    const results = await searchWeb(roundQuery, signal);
     if (results.length === 0) {
       const warning = "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
       searchWarning = warning;
@@ -650,11 +750,18 @@ export async function buildWebContext(
     // Skip pages already fetched in an earlier round so the follow-up round
     // neither re-fetches nor miscounts them as failures.
     const top = results.slice(0, FETCH_TOP_N).filter((r) => !seenSourceUrls.has(r.url));
-    const pages = await Promise.all(top.map((r) => fetchPageText(r.url)));
+    const pages = await Promise.all(top.map((r) => fetchPageText(r.url, signal)));
     const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
-    for (const r of newResults) {
-      seenSourceUrls.add(r.url);
-      sources.push({ title: r.title, url: r.url });
+    const fetchedPages = new Map(top.map((result, index) => [result.url, pages[index]]));
+    for (const result of newResults) {
+      seenSourceUrls.add(result.url);
+      const page = fetchedPages.get(result.url);
+      sources.push({
+        title: result.title,
+        url: result.url,
+        publishedAt: page?.publishedAt ?? null,
+        fetchedAt,
+      });
     }
     if (newResults.length === 0) return; // follow-up round found only duplicates
 
@@ -694,6 +801,7 @@ export async function buildWebContext(
 
     // One bounded follow-up round: re-search only when the model judges the
     // gathered material insufficient (off-target, thin, or stale).
+    if (signal?.aborted) return { searched, query, sources, contextText: parts.join("\n\n"), searchWarning };
     const followUp = await decideFollowUpSearch(
       client,
       model,
@@ -701,6 +809,7 @@ export async function buildWebContext(
       userMessage,
       decision.query,
       parts.join("\n\n"),
+      signal,
     );
     if (
       followUp.search &&

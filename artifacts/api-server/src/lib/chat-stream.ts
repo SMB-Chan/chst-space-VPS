@@ -18,7 +18,6 @@ import { getClientForModel, modelSupportsVision } from "./ai-clients";
 import {
   AUDIT_SYSTEM_PROMPT,
   buildAuditUserMessage,
-  buildRevisionUserMessage,
 } from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
@@ -39,9 +38,9 @@ import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-rev
 import { describeImagesForTextModel } from "./vision-bridge";
 import { buildTranslationSystemPrompt, type TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
+import { applyValidatedAuditPatch } from "./audit-patch";
 
 const AUDIT_TIMEOUT_MS = 120_000;
-const REVISION_TIMEOUT_MS = 120_000;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
@@ -50,14 +49,21 @@ function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
   ms: number,
   label: string,
+  parentSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal?.reason ?? new Error("Operation cancelled"));
+  if (parentSignal?.aborted) abortFromParent();
+  else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
   const timeout = setTimeout(
     () => controller.abort(new Error(`${label} timed out after ${ms}ms`)),
     ms,
   );
   return Promise.race([
-    createPromise(controller.signal).finally(() => clearTimeout(timeout)),
+    createPromise(controller.signal).finally(() => {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    }),
     new Promise<never>((_, reject) => {
       const onAbort = () => reject(controller.signal.reason);
       if (controller.signal.aborted) {
@@ -140,7 +146,7 @@ export async function streamChatReply(args: {
   requestedFileFormat?: FileFormat | null;
   onComplete?: (result: {
     content: string;
-    sources: { title: string; url: string }[];
+    sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[];
     audit?: { content: string; modelId: string };
     artifacts?: ExtractedArtifact[];
     generatedFiles?: GeneratedFile[];
@@ -180,8 +186,12 @@ export async function streamChatReply(args: {
   // req "close" fires when the POST body is finished — that is NOT a client
   // disconnect. Watch the response socket instead.
   let clientGone = false;
+  const clientAbort = new AbortController();
   res.on("close", () => {
-    if (!res.writableEnded) clientGone = true;
+    if (!res.writableEnded) {
+      clientGone = true;
+      clientAbort.abort(new Error("Client disconnected"));
+    }
   });
 
   let fullResponse = "";
@@ -233,6 +243,7 @@ export async function streamChatReply(args: {
             }),
           VISION_BRIDGE_TIMEOUT_MS,
           "Vision bridge",
+          clientAbort.signal,
         );
         if (imageTranscript) {
           const transcript =
@@ -278,11 +289,16 @@ export async function streamChatReply(args: {
           (event) => {
             if (!clientGone) res.write(`data: ${JSON.stringify(event)}\n\n`);
           },
-          { forceQuery: composeSkillSearchQuery(userText, skills) },
+          { forceQuery: composeSkillSearchQuery(userText, skills), signal: clientAbort.signal },
         );
 
     if (webContext.contextText) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
       workingMessages.push({
         role: "system",
         content:
@@ -305,12 +321,17 @@ export async function streamChatReply(args: {
       onDelta: (added, kind) => {
         if (clientGone) return;
         if (kind === "reasoning") {
-          res.write(`data: ${JSON.stringify({ status: "thinking", reasoning: added })}\n\n`);
+          // Reasoning tokens stay server-side. Only the safe phase label is
+          // exposed to the browser.
+          if (!clientAbort.signal.aborted) {
+            res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
+          }
         } else {
           res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
         }
       },
-      shouldStop: () => clientGone,
+      shouldStop: () => clientGone || clientAbort.signal.aborted,
+      signal: clientAbort.signal,
     });
 
     if (!fullResponse.trim()) {
@@ -325,10 +346,9 @@ export async function streamChatReply(args: {
       // version that may strip file-oriented structure.
       const fileGenerationBaseResponse = fullResponse;
       let audit: { content: string; modelId: string } | undefined;
-      // Run the audit even if the client disconnected mid-stream: the audited
-      // result is still persisted via onComplete, so revisiting the
-      // conversation shows the audited answer instead of the raw draft.
-      if (auditModelId && auditModelId !== modelId) {
+      // A user stop aborts the shared signal, so no audit or revision work
+      // starts after the client explicitly cancels the turn.
+      if (auditModelId && auditModelId !== modelId && !clientAbort.signal.aborted) {
         try {
           const auditor = getClientForModel(auditModelId);
           if (!clientGone) {
@@ -375,8 +395,10 @@ export async function streamChatReply(args: {
                       }),
                     VISION_BRIDGE_TIMEOUT_MS,
                     "Vision bridge",
+                    clientAbort.signal,
                   );
                 } catch (err) {
+                  if (clientAbort.signal.aborted) throw err;
                   logger.warn({ err, auditModelId }, "Vision bridge for audit failed");
                   imageTranscript = "";
                 }
@@ -387,7 +409,7 @@ export async function streamChatReply(args: {
             }
           }
           const auditText = await withTimeout(
-            (signal) =>
+              (signal) =>
               streamModelText({
                 client: auditor.client,
                 provider: auditor.provider,
@@ -400,18 +422,40 @@ export async function streamChatReply(args: {
                     content: auditUserContent,
                   },
                 ],
-                onDelta: (added, kind) => {
-                  if (clientGone || kind !== "content") return;
-                  res.write(`data: ${JSON.stringify({ audit: added })}\n\n`);
-                },
-                shouldStop: () => false,
+                 onDelta: () => {
+                   // Audit JSON is intentionally kept server-side until it has
+                   // passed validation; partial model output must never leak.
+                 },
+                    shouldStop: () => clientGone || clientAbort.signal.aborted,
                 signal,
               }),
             AUDIT_TIMEOUT_MS,
             "Audit pass",
+                    clientAbort.signal,
           );
           if (auditText.trim()) {
-            audit = { content: auditText.trim(), modelId: auditModelId };
+            const patched = applyValidatedAuditPatch(fullResponse, auditText);
+            if (patched.note) {
+              audit = { content: patched.note, modelId: auditModelId };
+              if (!clientGone) {
+                res.write(`data: ${JSON.stringify({ audit: patched.note })}\n\n`);
+              }
+            }
+            if (patched.applied) {
+              fullResponse = patched.content;
+              if (!clientGone) {
+                res.write(
+                  `data: ${JSON.stringify({ status: "revising", patch: patched.operations })}\n\n`,
+                );
+              }
+            } else if (!clientGone && patched.reason) {
+              res.write(
+                `data: ${JSON.stringify({
+                  status: "search_warning",
+                  message: `${patched.reason} 初稿を保持します。`,
+                })}\n\n`,
+              );
+            }
           }
         } catch (err) {
           logger.warn({ err, auditModelId }, "Audit pass failed; returning main answer only");
@@ -426,89 +470,9 @@ export async function streamChatReply(args: {
         }
       }
 
-      // The revision pass runs regardless of clientGone: SSE writes are
-      // skipped after a disconnect, but the revised final answer is what
-      // onComplete persists, so a reload shows the corrected answer.
-      if (audit?.content) {
-        const draft = fullResponse;
-        let replacedDraft = false;
-        try {
-          if (!clientGone) {
-            res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
-          }
-          // The draft already reflects any attached images; resending megabytes
-          // of image data for a text rewrite doubles the failure surface
-          // (payload limits, vision token cost, timeouts), so the revision sees
-          // text only. Attachment names stay visible via their text parts.
-          const revisionMessages = workingMessages.map(
-            (msg): OpenAI.Chat.Completions.ChatCompletionMessageParam => {
-              if (!Array.isArray(msg.content)) return msg;
-              return {
-                ...msg,
-                content: msg.content.filter(
-                  (part): part is OpenAI.Chat.Completions.ChatCompletionContentPartText =>
-                    part.type === "text",
-                ),
-              } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
-            },
-          );
-          const revised = await withTimeout(
-            (signal) =>
-              streamModelText({
-                client,
-                provider,
-                modelId,
-                reasoningLevel,
-                messages: [
-                  ...revisionMessages,
-                  { role: "assistant", content: fullResponse },
-                  {
-                    role: "user",
-                    content: buildRevisionUserMessage({
-                      question: userText,
-                      draft: fullResponse,
-                      audit: audit.content,
-                    }),
-                  },
-                ],
-                onDelta: (added, kind) => {
-                  if (clientGone) return;
-                  if (kind === "reasoning") {
-                    res.write(`data: ${JSON.stringify({ status: "revising", reasoning: added })}\n\n`);
-                    return;
-                  }
-                  if (!replacedDraft) {
-                    replacedDraft = true;
-                    res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
-                  }
-                  res.write(`data: ${JSON.stringify({ content: added, status: "revising" })}\n\n`);
-                },
-                shouldStop: () => false,
-                signal,
-              }),
-            REVISION_TIMEOUT_MS,
-            "Revision pass",
-          );
-          if (revised.trim()) {
-            fullResponse = revised.trim();
-          }
-        } catch (err) {
-          logger.warn({ err, modelId }, "Revision pass failed; keeping draft answer");
-          if (!clientGone) {
-            if (replacedDraft) {
-              res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
-              res.write(`data: ${JSON.stringify({ content: draft, status: "generating" })}\n\n`);
-            }
-            res.write(
-              `data: ${JSON.stringify({
-                status: "search_warning",
-                message: "最終報告の作成に失敗したので、初稿を表示します。",
-              })}\n\n`,
-            );
-          }
-        }
-      }
-
+      // A user stop is a successful partial turn: preserve what was generated,
+      // but never start audit, file generation, or layout review afterwards.
+      const stopped = clientAbort.signal.aborted;
       const extracted = extractArtifacts(fullResponse);
       if (extracted.artifacts.length > 0) {
         fullResponse = extracted.content;
@@ -537,7 +501,7 @@ export async function streamChatReply(args: {
           "File generation format selected",
         );
       }
-      if (fileFormat && conversationId) {
+      if (fileFormat && conversationId && !stopped) {
         generatedFile = await withTimeout(
           (signal) =>
             generateAndReviewFile({
@@ -557,10 +521,11 @@ export async function streamChatReply(args: {
             }),
           FILE_GENERATION_TIMEOUT_MS,
           "File generation",
+          clientAbort.signal,
         );
       }
 
-      if (generatedFile && fileFormat) {
+      if (generatedFile && fileFormat && !stopped) {
         fullResponse = finalizeGeneratedFileResponse(fullResponse);
       }
 
@@ -700,23 +665,27 @@ async function streamModelText(args: {
 
   let full = "";
   let reasoning = "";
-  for await (const chunk of stream) {
-    if (args.shouldStop()) break;
-    const delta = chunk.choices?.[0]?.delta;
-    const reasoningDelta = readReasoningDelta(delta);
-    if (reasoningDelta) {
-      const merged = mergeStreamDelta(reasoning, reasoningDelta);
-      const added = merged.slice(reasoning.length);
-      reasoning = merged;
-      if (added) args.onDelta(added, "reasoning");
+  try {
+    for await (const chunk of stream) {
+      if (args.shouldStop()) break;
+      const delta = chunk.choices?.[0]?.delta;
+      const reasoningDelta = readReasoningDelta(delta);
+      if (reasoningDelta) {
+        const merged = mergeStreamDelta(reasoning, reasoningDelta);
+        const added = merged.slice(reasoning.length);
+        reasoning = merged;
+        // Reasoning is intentionally never sent to the browser.
+      }
+      const contentDelta = readContentDelta(delta);
+      if (contentDelta) {
+        const merged = mergeStreamDelta(full, contentDelta);
+        const added = merged.slice(full.length);
+        full = merged;
+        if (added) args.onDelta(added, "content");
+      }
     }
-    const contentDelta = readContentDelta(delta);
-    if (contentDelta) {
-      const merged = mergeStreamDelta(full, contentDelta);
-      const added = merged.slice(full.length);
-      full = merged;
-      if (added) args.onDelta(added, "content");
-    }
+  } catch (err) {
+    if (!args.signal?.aborted) throw err;
   }
   return splitThinkTags(full).content;
 }

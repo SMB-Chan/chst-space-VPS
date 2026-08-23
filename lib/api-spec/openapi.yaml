@@ -415,6 +415,14 @@ components:
           type: string
         url:
           type: string
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fetchedAt:
+          type: string
+          format: date-time
+          nullable: true
       required:
         - title
         - url

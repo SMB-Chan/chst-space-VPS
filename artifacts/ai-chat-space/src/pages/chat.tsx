@@ -18,6 +18,7 @@ import { conversationTitle, timeGreeting, OPTIMISTIC_USER_ID, STREAMING_ASSISTAN
 import { type ReasoningLevel } from "@/lib/reasoning";
 import { loadSettings, pickAuditModel, saveSettings, subscribeSettings, type TranslationModeSetting } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { applyClientPatch } from "@/lib/audit-patch";
 import {
   compactAttachmentMessageForHistory,
   serializeAttachmentMessage,
@@ -42,16 +43,16 @@ async function streamMessage(
   model: string,
   reasoning: ReasoningLevel,
   onChunk: (text: string) => void,
-  onReasoning: (text: string) => void,
   onDone: () => void,
   onError: (err: Error) => void,
   onStatus: (status: string | null, query?: string) => void,
   onSearchWarning: (message: string) => void,
-  onSources: (sources: { title: string; url: string }[]) => void,
+  onSources: (sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[]) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
   onAudit: (text: string) => void,
   onArtifacts: (artifacts: ChatArtifact[]) => void,
   onResetContent: () => void,
+  onPatch: (operations: unknown) => void,
   onFile: (file: { id: number; filename: string; mimeType: string }) => void,
   artifactBlobUrlCache: React.MutableRefObject<Map<string, string>>,
   signal?: AbortSignal,
@@ -150,6 +151,7 @@ async function streamMessage(
       if (parsed.status === "revising") {
         onStatus("revising");
         if (parsed.resetContent) onResetContent();
+        if (Array.isArray(parsed.patch)) onPatch(parsed.patch);
       }
       if (typeof parsed.audit === "string" && parsed.audit) {
         onStatus("auditing");
@@ -175,7 +177,7 @@ async function streamMessage(
         }
       }
       if (Array.isArray(parsed.sources)) {
-        onSources(parsed.sources as { title: string; url: string }[]);
+        onSources(parsed.sources as { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[]);
       }
       if (Array.isArray(parsed.artifacts)) {
         const artifacts = parsed.artifacts.flatMap((item): ChatArtifact[] => {
@@ -202,10 +204,6 @@ async function streamMessage(
           return artifact.downloadUrl ? [artifact] : [];
         });
         if (artifacts.length > 0) onArtifacts(artifacts);
-      }
-      if (typeof parsed.reasoning === "string" && parsed.reasoning) {
-        onStatus(parsed.status === "revising" ? "revising" : "thinking");
-        onReasoning(parsed.reasoning);
       }
       if (typeof parsed.content === "string" && parsed.content) {
         receivedContent = true;
@@ -280,15 +278,14 @@ export function ChatPage() {
   const [privateMessages, setPrivateMessages] = useState<OpenaiMessage[]>([]);
   const streamSnapshotRef = useRef({
     content: "",
-    sources: [] as { title: string; url: string }[],
+    sources: [] as { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[],
     audit: "",
     artifacts: [] as ChatArtifact[],
   });
   const artifactBlobUrlCache = useRef(new Map<string, string>());
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
-  const [streamingReasoning, setStreamingReasoning] = useState<string>("");
-  const [streamingSources, setStreamingSources] = useState<{ title: string; url: string }[]>([]);
+  const [streamingSources, setStreamingSources] = useState<{ title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[]>([]);
   const [streamingArtifacts, setStreamingArtifacts] = useState<ChatArtifact[]>([]);
   const [streamingFiles, setStreamingFiles] = useState<{ id: number; filename: string; mimeType: string }[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -307,6 +304,60 @@ export function ChatPage() {
     resolvedAuditModel && resolvedAuditModel !== selectedModel ? resolvedAuditModel : undefined;
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
+  const stopStreaming = () => {
+    const targetId = sendingToRef.current ?? conversationId;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    setSearchStatus(null);
+    setStreamingAudit("");
+    setStreamError(null);
+    setSearchWarning(
+      streamingContent
+        ? "生成を停止しました。表示済みの回答を保持しています。"
+        : "生成を停止しました。",
+    );
+
+    if (isPrivate) {
+      const now = new Date().toISOString();
+      const stoppedMessages: OpenaiMessage[] = [];
+      if (optimisticUserMessage) stoppedMessages.push(optimisticUserMessage);
+      if (streamingContent) {
+        stoppedMessages.push({
+          id: STREAMING_ASSISTANT_ID - privateMessages.length - 1,
+          conversationId: 0,
+          role: "assistant",
+          content: stripArtifactBlocks(streamingContent),
+          sources: streamingSources.length > 0 ? streamingSources : null,
+          createdAt: now,
+        } as OpenaiMessage);
+      }
+      if (stoppedMessages.length > 0) {
+        setPrivateMessages((previous) => [...previous, ...stoppedMessages]);
+      }
+      setStreamingContent("");
+      setStreamingSources([]);
+      setStreamingArtifacts([]);
+      setStreamingFiles([]);
+      setOptimisticUserMessage(null);
+      return;
+    }
+
+    if (targetId) {
+      window.setTimeout(() => {
+        void queryClient
+          .invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId) })
+          .finally(() => {
+            setStreamingContent("");
+            setStreamingSources([]);
+            setStreamingArtifacts([]);
+            setStreamingFiles([]);
+            setOptimisticUserMessage(null);
+          });
+      }, 1_000);
+    }
+  };
+
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
@@ -324,7 +375,6 @@ export function ChatPage() {
     abortRef.current = null;
     setIsStreaming(false);
     setStreamingContent("");
-    setStreamingReasoning("");
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
@@ -441,7 +491,6 @@ export function ChatPage() {
 
     setIsStreaming(true);
     setStreamingContent("");
-    setStreamingReasoning("");
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
@@ -474,9 +523,6 @@ export function ChatPage() {
       (chunk) => {
         streamSnapshotRef.current.content += chunk;
         setStreamingContent((prev) => prev + chunk);
-      },
-      (chunk) => {
-        setStreamingReasoning((prev) => prev + chunk);
       },
       async () => {
         setSearchStatus(null);
@@ -515,7 +561,6 @@ export function ChatPage() {
         } finally {
           setIsStreaming(false);
           setStreamingContent("");
-          setStreamingReasoning("");
           setStreamingSources([]);
           setStreamingArtifacts([]);
           setStreamingFiles([]);
@@ -529,7 +574,6 @@ export function ChatPage() {
         setStreamingSources([]);
         setStreamingArtifacts([]);
         setStreamingFiles([]);
-        setStreamingReasoning("");
         setStreamingAudit("");
         setStreamError(err.message);
         if (!isPrivate && targetId) {
@@ -564,6 +608,13 @@ export function ChatPage() {
       () => {
         streamSnapshotRef.current.content = "";
         setStreamingContent("");
+      },
+      (operations) => {
+        const patched = applyClientPatch(streamSnapshotRef.current.content, operations);
+        if (patched !== null) {
+          streamSnapshotRef.current.content = patched;
+          setStreamingContent(patched);
+        }
       },
       (file) => {
         setStreamingFiles((prev) => [...prev, file]);
@@ -672,14 +723,17 @@ export function ChatPage() {
                       : "starting"
                 : null
             }
-            streamingReasoning={streamingReasoning}
             streamingAudit={streamingAudit}
+             isStreaming={isStreaming}
+             onStop={stopStreaming}
+             streamingWarning={searchWarning}
+             onDismissWarning={() => setSearchWarning(null)}
           />
         )}
       </div>
 
       {activeSkills.length > 0 && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+         <div className="mx-4 md:mx-6 mb-2 max-w-4xl mx-auto w-full">
           <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300">
             <span className="text-xs uppercase tracking-wider opacity-80">自動スキル</span>
             {activeSkills.map((skill) => (
@@ -690,26 +744,6 @@ export function ChatPage() {
                 {skill.label}
               </span>
             ))}
-          </div>
-        </div>
-      )}
-
-      {searchStatus && (searchStatus.kind === "searching" || searchStatus.kind === "fetching") && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-muted-foreground">
-            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-            {searchStatus.kind === "searching"
-              ? `Webを検索中${searchStatus.query ? `: 「${searchStatus.query}」` : "..."}`
-              : "ページを読み込み中..."}
-          </div>
-        </div>
-      )}
-
-      {searchWarning && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm">
-            <span className="shrink-0">⚠️</span>
-            {searchWarning}
           </div>
         </div>
       )}
@@ -731,7 +765,7 @@ export function ChatPage() {
       )}
 
       <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background to-transparent">
-        <div className="max-w-3xl mx-auto space-y-2">
+         <div className="max-w-4xl mx-auto space-y-2">
           <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0">
             <ModelSelector
               selectedModel={selectedModel}

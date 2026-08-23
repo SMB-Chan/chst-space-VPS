@@ -45,6 +45,8 @@ export interface OpenaiConversation {
 export interface OpenaiSource {
   title: string;
   url: string;
+  publishedAt?: string | null;
+  fetchedAt?: string | null;
 }
 
 export interface OpenaiArtifact {
