@@ -8,45 +8,74 @@ export interface XlsxSheet {
   rows: XlsxCell[][];
 }
 
-export const XLSX_LIMITS = {
+export interface XlsxWriterLimits {
+  maxSheets: number;
+  maxRowsPerSheet: number;
+  maxColumnsPerSheet: number;
+  maxNonNullCells: number;
+  maxCellCharacters: number;
+  maxTextBytes: number;
+  maxOutputBytes: number;
+}
+
+export const DEFAULT_XLSX_WRITER_LIMITS: Readonly<XlsxWriterLimits> = Object.freeze({
   maxSheets: 100,
   maxRowsPerSheet: 10_000,
   maxColumnsPerSheet: 256,
-  maxCellsPerWorkbook: 200_000,
-  maxCellTextChars: 32_767,
-  maxSheetNameChars: 31,
-  maxInputBytes: 16 * 1024 * 1024,
+  maxNonNullCells: 200_000,
+  maxCellCharacters: 32_767,
+  maxTextBytes: 16 * 1024 * 1024,
   maxOutputBytes: 16 * 1024 * 1024,
-  maxZipEntries: 65_535,
-} as const;
+});
 
 const EXCEL_MAX_ROWS = 1_048_576;
 const EXCEL_MAX_COLUMNS = 16_384;
-const ZIP32_MAX = 0xffff_ffff;
-const ZIP32_MAX_ENTRIES = 0xffff;
-const INVALID_SHEET_NAME = /[\\/*?:[\]]/g;
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
-const encoder = new TextEncoder();
+const EXCEL_MAX_SHEET_NAME_CHARACTERS = 31;
+const ZIP32_MAX_ENTRIES = 65_535;
+const ZIP32_MAX_VALUE = 0xffff_ffff;
+const ZIP_UTF8_FLAG = 0x0800;
+const ZIP_DEFLATE_METHOD = 8;
+const ZIP_DOS_EPOCH_DATE = 33;
 
-export class XlsxLimitError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "XlsxLimitError";
+interface NormalizedSheet {
+  name: string;
+  headers: string[];
+  rows: XlsxCell[][];
+}
+
+interface ZipEntry {
+  name: string;
+  data: Buffer;
+}
+
+function resolveLimits(overrides: Partial<XlsxWriterLimits>): XlsxWriterLimits {
+  const limits = { ...DEFAULT_XLSX_WRITER_LIMITS, ...overrides };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`XLSX ${name} must be a positive safe integer`);
+    }
   }
-}
-
-function assertZip32Integer(value: number, label: string): void {
-  if (!Number.isSafeInteger(value) || value < 0 || value > ZIP32_MAX) {
-    throw new XlsxLimitError(`XLSX ZIP32 ${label} is out of range`);
+  if (limits.maxSheets + 4 > ZIP32_MAX_ENTRIES) {
+    throw new Error("XLSX sheet limit exceeds the ZIP32 entry limit");
   }
+  if (limits.maxRowsPerSheet > EXCEL_MAX_ROWS) {
+    throw new Error("XLSX row limit exceeds the Excel format limit");
+  }
+  if (limits.maxColumnsPerSheet > EXCEL_MAX_COLUMNS) {
+    throw new Error("XLSX column limit exceeds the Excel format limit");
+  }
+  if (limits.maxOutputBytes > ZIP32_MAX_VALUE) {
+    throw new Error("XLSX output limit exceeds the ZIP32 size limit");
+  }
+  return limits;
 }
 
-function utf8Bytes(value: string): number {
-  return encoder.encode(value).byteLength;
+function stripInvalidXmlCharacters(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "");
 }
 
-function xmlEscape(value: string): string {
-  return value
+function escapeXml(value: string): string {
+  return stripInvalidXmlCharacters(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -54,208 +83,323 @@ function xmlEscape(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function xmlText(value: string): string {
-  const escaped = xmlEscape(value.replace(CONTROL_CHARS, ""));
-  return escaped.startsWith(" ") || escaped.endsWith(" ")
-    ? `<t xml:space="preserve">${escaped}</t>`
-    : `<t>${escaped}</t>`;
+function truncateSheetName(value: string, maxCharacters: number): string {
+  return Array.from(value).slice(0, maxCharacters).join("");
 }
 
-function columnName(column: number): string {
-  let result = "";
-  for (let value = column + 1; value > 0; value = Math.floor((value - 1) / 26)) {
-    result = String.fromCharCode(65 + ((value - 1) % 26)) + result;
-  }
-  return result;
+function normalizeSheetNames(names: readonly string[]): string[] {
+  const used = new Set<string>();
+  return names.map((rawName, index) => {
+    const cleaned = stripInvalidXmlCharacters(rawName)
+      .replace(/[\\/:?*\[\]]/g, "_")
+      .trim()
+      .replace(/^'+|'+$/g, "");
+    const fallback = `Sheet${index + 1}`;
+    const base = truncateSheetName(cleaned || fallback, EXCEL_MAX_SHEET_NAME_CHARACTERS);
+    let candidate = base;
+    let suffixNumber = 1;
+    while (used.has(candidate.toLocaleLowerCase("en-US"))) {
+      const suffix = ` (${suffixNumber})`;
+      candidate = `${truncateSheetName(
+        base,
+        EXCEL_MAX_SHEET_NAME_CHARACTERS - Array.from(suffix).length,
+      )}${suffix}`;
+      suffixNumber += 1;
+    }
+    used.add(candidate.toLocaleLowerCase("en-US"));
+    return candidate;
+  });
 }
 
-function cellXml(value: XlsxCell): string {
-  if (value === null) return "";
-  if (typeof value === "string") {
-    // inlineStr cells have no formula element; formula-like input remains text.
-    return `<c t="inlineStr"><is>${xmlText(value)}</is></c>`;
+function validateAndNormalizeSheets(
+  sheets: readonly XlsxSheet[],
+  limits: XlsxWriterLimits,
+): NormalizedSheet[] {
+  if (sheets.length === 0) throw new Error("XLSX workbook must contain at least one sheet");
+  if (sheets.length > limits.maxSheets) {
+    throw new Error(`XLSX workbook exceeds the ${limits.maxSheets}-sheet limit`);
   }
-  if (typeof value === "boolean") {
-    return `<c t="b"><v>${value ? "1" : "0"}</v></c>`;
-  }
-  if (!Number.isFinite(value)) {
-    throw new XlsxLimitError("XLSX numeric cells must be finite numbers");
-  }
-  return `<c><v>${String(value)}</v></c>`;
+
+  const normalizedNames = normalizeSheetNames(sheets.map((sheet) => sheet.name));
+  let nonNullCells = 0;
+  let textBytes = 0;
+
+  const countText = (value: string): void => {
+    if (value.length > limits.maxCellCharacters) {
+      throw new Error(
+        `XLSX cell text exceeds the ${limits.maxCellCharacters}-character limit`,
+      );
+    }
+    textBytes += Buffer.byteLength(value, "utf8");
+    if (textBytes > limits.maxTextBytes) {
+      throw new Error(`XLSX text exceeds the ${limits.maxTextBytes}-byte limit`);
+    }
+  };
+
+  return sheets.map((sheet, sheetIndex) => {
+    const rowCount = 1 + sheet.rows.length;
+    if (rowCount > limits.maxRowsPerSheet || rowCount > EXCEL_MAX_ROWS) {
+      throw new Error(
+        `XLSX sheet exceeds the ${limits.maxRowsPerSheet}-row server limit`,
+      );
+    }
+
+    const rows: XlsxCell[][] = [sheet.headers, ...sheet.rows];
+    for (const row of rows) {
+      if (row.length > limits.maxColumnsPerSheet || row.length > EXCEL_MAX_COLUMNS) {
+        throw new Error(
+          `XLSX sheet exceeds the ${limits.maxColumnsPerSheet}-column server limit`,
+        );
+      }
+      for (const cell of row) {
+        if (cell === null) continue;
+        nonNullCells += 1;
+        if (nonNullCells > limits.maxNonNullCells) {
+          throw new Error(
+            `XLSX workbook exceeds the ${limits.maxNonNullCells}-cell limit`,
+          );
+        }
+        if (typeof cell === "string") countText(cell);
+        else if (typeof cell === "number" && !Number.isFinite(cell)) {
+          throw new Error("XLSX numeric cells must be finite numbers");
+        }
+      }
+    }
+
+    textBytes += Buffer.byteLength(normalizedNames[sheetIndex], "utf8");
+    if (textBytes > limits.maxTextBytes) {
+      throw new Error(`XLSX text exceeds the ${limits.maxTextBytes}-byte limit`);
+    }
+
+    return {
+      name: normalizedNames[sheetIndex],
+      headers: [...sheet.headers],
+      rows: sheet.rows.map((row) => [...row]),
+    };
+  });
 }
 
-function normalizeSheetName(rawName: string, used: Set<string>): string {
-  let name = rawName.replace(INVALID_SHEET_NAME, " ").replace(CONTROL_CHARS, "").trim();
-  if (!name) name = "Sheet";
-  name = name.slice(0, XLSX_LIMITS.maxSheetNameChars).trim() || "Sheet";
-
-  const base = name;
-  let suffix = 1;
-  while (used.has(name.toLowerCase())) {
-    const marker = ` (${suffix++})`;
-    name = `${base.slice(0, XLSX_LIMITS.maxSheetNameChars - marker.length)}${marker}`;
+function columnName(columnIndex: number): string {
+  let value = columnIndex + 1;
+  let name = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    value = Math.floor((value - 1) / 26);
   }
-  used.add(name.toLowerCase());
   return name;
 }
 
-function makeSheetXml(sheet: XlsxSheet, sheetIndex: number): string {
-  const rows = [sheet.headers, ...sheet.rows];
-  const maxColumns = Math.max(0, ...rows.map((row) => row.length));
-  if (rows.length > EXCEL_MAX_ROWS || rows.length > XLSX_LIMITS.maxRowsPerSheet) {
-    throw new XlsxLimitError(
-      `XLSX sheet ${sheetIndex + 1} exceeds the ${XLSX_LIMITS.maxRowsPerSheet}-row server limit`,
-    );
+function cellXml(value: XlsxCell, reference: string): string {
+  if (value === null) return "";
+  if (typeof value === "string") {
+    return `<c r="${reference}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
   }
-  if (maxColumns > EXCEL_MAX_COLUMNS || maxColumns > XLSX_LIMITS.maxColumnsPerSheet) {
-    throw new XlsxLimitError(
-      `XLSX sheet ${sheetIndex + 1} exceeds the ${XLSX_LIMITS.maxColumnsPerSheet}-column server limit`,
-    );
+  if (typeof value === "boolean") {
+    return `<c r="${reference}" t="b"><v>${value ? 1 : 0}</v></c>`;
   }
+  return `<c r="${reference}" t="n"><v>${Object.is(value, -0) ? "0" : String(value)}</v></c>`;
+}
 
-  const rowXml = rows
-    .map((row, rowIndex) => {
-      const cells = row
-        .map((value, columnIndex) => {
-          if (typeof value === "string" && value.length > XLSX_LIMITS.maxCellTextChars) {
-            throw new XlsxLimitError(
-              `XLSX cell ${columnName(columnIndex)}${rowIndex + 1} exceeds the ${XLSX_LIMITS.maxCellTextChars}-character limit`,
-            );
-          }
-          const content = cellXml(value);
-          return content ? `<c r="${columnName(columnIndex)}${rowIndex + 1}"${content.slice(2)}` : "";
-        })
-        .join("");
-      return `<row r="${rowIndex + 1}">${cells}</row>`;
-    })
+function worksheetXml(sheet: NormalizedSheet): string {
+  const chunks = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>',
+  ];
+  const rows: XlsxCell[][] = [sheet.headers, ...sheet.rows];
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const rowNumber = rowIndex + 1;
+    const cells: string[] = [];
+    const row = rows[rowIndex];
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const reference = `${columnName(columnIndex)}${rowNumber}`;
+      const rendered = cellXml(row[columnIndex], reference);
+      if (rendered) cells.push(rendered);
+    }
+    chunks.push(`<row r="${rowNumber}">${cells.join("")}</row>`);
+  }
+  chunks.push("</sheetData></worksheet>");
+  return chunks.join("");
+}
+
+function workbookXml(sheets: readonly NormalizedSheet[]): string {
+  const sheetNodes = sheets
+    .map(
+      (sheet, index) =>
+        `<sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`,
+    )
     .join("");
-
-  const dimension = rows.length && maxColumns
-    ? `<dimension ref="A1:${columnName(maxColumns - 1)}${rows.length}"/>`
-    : "";
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${dimension}<sheetData>${rowXml}</sheetData></worksheet>`;
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ',
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    `<sheets>${sheetNodes}</sheets></workbook>`,
+  ].join("");
 }
 
-function u16(value: number): Buffer {
-  assertZip32Integer(value, "16-bit field");
-  if (value > 0xffff) throw new XlsxLimitError("XLSX ZIP16 field is out of range");
-  const out = Buffer.allocUnsafe(2);
-  out.writeUInt16LE(value);
-  return out;
+function workbookRelationshipsXml(sheetCount: number): string {
+  const relationships = Array.from({ length: sheetCount }, (_, index) =>
+    `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+  ).join("");
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    relationships,
+    "</Relationships>",
+  ].join("");
 }
 
-function u32(value: number): Buffer {
-  assertZip32Integer(value, "32-bit field");
-  const out = Buffer.allocUnsafe(4);
-  out.writeUInt32LE(value);
-  return out;
+function contentTypesXml(sheetCount: number): string {
+  const sheets = Array.from({ length: sheetCount }, (_, index) =>
+    `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+  ).join("");
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+    sheets,
+    "</Types>",
+  ].join("");
 }
+
+const ROOT_RELATIONSHIPS_XML = [
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+  '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>',
+  "</Relationships>",
+].join("");
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
 
 function crc32(buffer: Buffer): number {
   let crc = 0xffff_ffff;
   for (const byte of buffer) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb8_8320 : 0);
-    }
+    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   }
   return (crc ^ 0xffff_ffff) >>> 0;
 }
 
-function zipStore(entries: Array<{ name: string; content: string }>): Buffer {
-  if (entries.length === 0 || entries.length > ZIP32_MAX_ENTRIES || entries.length > XLSX_LIMITS.maxZipEntries) {
-    throw new XlsxLimitError("XLSX ZIP entry count exceeds ZIP32 limits");
+function assertZip32Value(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0 || value > ZIP32_MAX_VALUE) {
+    throw new Error(`XLSX ${label} exceeds the ZIP32 limit`);
+  }
+}
+
+function createZip(entries: readonly ZipEntry[], maxOutputBytes: number): Buffer {
+  if (entries.length === 0 || entries.length > ZIP32_MAX_ENTRIES) {
+    throw new Error("XLSX ZIP entry count is outside the ZIP32 range");
   }
 
   const localParts: Buffer[] = [];
   const centralParts: Buffer[] = [];
-  let offset = 0;
+  let localOffset = 0;
+  let centralSize = 0;
+
   for (const entry of entries) {
     const name = Buffer.from(entry.name, "utf8");
-    const source = Buffer.from(entry.content, "utf8");
-    if (name.length > 0xffff) throw new XlsxLimitError("XLSX ZIP entry name exceeds ZIP16 limits");
-    const compressed = deflateRawSync(source, { level: 6 });
-    assertZip32Integer(source.length, "uncompressed entry size");
-    assertZip32Integer(compressed.length, "compressed entry size");
-    assertZip32Integer(offset, "local entry offset");
+    if (name.length === 0 || name.length > 0xffff) {
+      throw new Error("XLSX ZIP entry name is outside the ZIP32 range");
+    }
+    const compressed = deflateRawSync(entry.data, { level: 6 });
+    assertZip32Value(entry.data.length, "uncompressed entry size");
+    assertZip32Value(compressed.length, "compressed entry size");
+    assertZip32Value(localOffset, "local header offset");
 
-    const crc = crc32(source);
-    const local = Buffer.concat([
-      u32(0x04034b50), u16(20), u16(0x800), u16(8), u16(0), u16(0),
-      u32(crc), u32(compressed.length), u32(source.length), u16(name.length), u16(0),
-      name, compressed,
-    ]);
-    localParts.push(local);
-    centralParts.push(Buffer.concat([
-      u32(0x02014b50), u16(20), u16(20), u16(0x800), u16(8), u16(0), u16(0),
-      u32(crc), u32(compressed.length), u32(source.length), u16(name.length), u16(0),
-      u16(0), u16(0), u16(0), u32(0), u32(offset), name,
-    ]));
-    offset += local.length;
-    assertZip32Integer(offset, "next local entry offset");
+    const crc = crc32(entry.data);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(ZIP_UTF8_FLAG, 6);
+    localHeader.writeUInt16LE(ZIP_DEFLATE_METHOD, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(ZIP_DOS_EPOCH_DATE, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(compressed.length, 18);
+    localHeader.writeUInt32LE(entry.data.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(ZIP_UTF8_FLAG, 8);
+    centralHeader.writeUInt16LE(ZIP_DEFLATE_METHOD, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(ZIP_DOS_EPOCH_DATE, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(compressed.length, 20);
+    centralHeader.writeUInt32LE(entry.data.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(localOffset, 42);
+
+    localParts.push(localHeader, name, compressed);
+    centralParts.push(centralHeader, name);
+    localOffset += localHeader.length + name.length + compressed.length;
+    centralSize += centralHeader.length + name.length;
+    assertZip32Value(localOffset, "central directory offset");
+    assertZip32Value(centralSize, "central directory size");
+
+    if (localOffset + centralSize + 22 > maxOutputBytes) {
+      throw new Error(`XLSX output exceeds the ${maxOutputBytes}-byte limit`);
+    }
   }
 
-  const central = Buffer.concat(centralParts);
-  assertZip32Integer(central.length, "central directory size");
-  assertZip32Integer(offset + central.length, "archive payload size");
-  const output = Buffer.concat([
-    ...localParts,
-    central,
-    u32(0x06054b50), u16(0), u16(0), u16(entries.length), u16(entries.length),
-    u32(central.length), u32(offset), u16(0),
-  ]);
-  assertXlsxOutputWithinLimit(output);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(localOffset, 16);
+  end.writeUInt16LE(0, 20);
+
+  const output = Buffer.concat([...localParts, ...centralParts, end]);
+  if (output.length > maxOutputBytes) {
+    throw new Error(`XLSX output exceeds the ${maxOutputBytes}-byte limit`);
+  }
   return output;
 }
 
-export function assertXlsxOutputWithinLimit(output: Buffer): void {
-  if (output.length > XLSX_LIMITS.maxOutputBytes) {
-    throw new XlsxLimitError(`XLSX output exceeds the ${XLSX_LIMITS.maxOutputBytes}-byte limit`);
-  }
-}
-
-export function normalizeXlsxSheets(sheets: XlsxSheet[]): XlsxSheet[] {
-  if (sheets.length === 0) throw new XlsxLimitError("XLSX workbook must contain at least one sheet");
-  if (sheets.length > XLSX_LIMITS.maxSheets) {
-    throw new XlsxLimitError(`XLSX workbook exceeds the ${XLSX_LIMITS.maxSheets}-sheet server limit`);
-  }
-  const used = new Set<string>();
-  return sheets.map((sheet) => ({ ...sheet, name: normalizeSheetName(sheet.name, used) }));
-}
-
-export function writeXlsx(sheets: XlsxSheet[]): Buffer {
-  const normalizedSheets = normalizeXlsxSheets(sheets);
-  let inputBytes = 0;
-  let totalCells = 0;
-  for (const sheet of normalizedSheets) {
-    inputBytes += utf8Bytes(sheet.name);
-    const rows = [sheet.headers, ...sheet.rows];
-    for (const row of rows) {
-      for (const value of row) {
-        if (typeof value === "string") inputBytes += utf8Bytes(value);
-        if (value !== null) totalCells++;
-      }
-    }
-  }
-  if (inputBytes > XLSX_LIMITS.maxInputBytes) {
-    throw new XlsxLimitError(`XLSX UTF-8 input exceeds the ${XLSX_LIMITS.maxInputBytes}-byte limit`);
-  }
-  if (totalCells > XLSX_LIMITS.maxCellsPerWorkbook) {
-    throw new XlsxLimitError(`XLSX workbook exceeds the ${XLSX_LIMITS.maxCellsPerWorkbook}-cell server limit`);
-  }
-  const worksheets = normalizedSheets.map(makeSheetXml);
-  const workbookSheets = normalizedSheets.map((sheet, index) =>
-    `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
-  const workbookRels = normalizedSheets.map((_, index) =>
-    `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
-  const contentTypes = normalizedSheets.map((_, index) =>
-    `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
-
-  return zipStore([
-    { name: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${contentTypes}</Types>` },
-    { name: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
-    { name: "xl/workbook.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>` },
-    { name: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${workbookRels}</Relationships>` },
-    ...worksheets.map((content, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, content })),
-  ]);
+export function writeXlsxWorkbook(
+  inputSheets: readonly XlsxSheet[],
+  limitOverrides: Partial<XlsxWriterLimits> = {},
+): Buffer {
+  const limits = resolveLimits(limitOverrides);
+  const sheets = validateAndNormalizeSheets(inputSheets, limits);
+  const entries: ZipEntry[] = [
+    {
+      name: "[Content_Types].xml",
+      data: Buffer.from(contentTypesXml(sheets.length), "utf8"),
+    },
+    { name: "_rels/.rels", data: Buffer.from(ROOT_RELATIONSHIPS_XML, "utf8") },
+    { name: "xl/workbook.xml", data: Buffer.from(workbookXml(sheets), "utf8") },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      data: Buffer.from(workbookRelationshipsXml(sheets.length), "utf8"),
+    },
+    ...sheets.map((sheet, index) => ({
+      name: `xl/worksheets/sheet${index + 1}.xml`,
+      data: Buffer.from(worksheetXml(sheet), "utf8"),
+    })),
+  ];
+  return createZip(entries, limits.maxOutputBytes);
 }

@@ -2,7 +2,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import PptxGenJS from "pptxgenjs";
 import { embedFontForText } from "./pdf-fonts";
-import { writeXlsx, type XlsxCell } from "./xlsx-writer";
+import { writeXlsxWorkbook } from "./xlsx-writer";
 
 export type FileFormat = "pdf" | "docx" | "xlsx" | "pptx";
 
@@ -28,7 +28,7 @@ export interface GeneratedFile {
 interface SheetData {
   name: string;
   headers: string[];
-  rows: XlsxCell[][];
+  rows: (string | number | boolean | null)[][];
 }
 
 interface SlideData {
@@ -530,8 +530,7 @@ function normalizeSheets(parsed: ParsedFileData, title: string): SheetData[] {
 }
 
 async function renderXlsx(parsed: ParsedFileData, title: string, format: FileFormat): Promise<GeneratedFile> {
-  const sheets = normalizeSheets(parsed, title);
-  const buffer = writeXlsx(sheets);
+  const buffer = writeXlsxWorkbook(normalizeSheets(parsed, title));
   return {
     buffer,
     filename: generateFilename("xlsx", title),

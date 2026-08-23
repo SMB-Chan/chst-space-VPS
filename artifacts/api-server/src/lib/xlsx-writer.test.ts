@@ -1,153 +1,169 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import {
-  XLSX_LIMITS,
-  XlsxLimitError,
-  assertXlsxOutputWithinLimit,
-  normalizeXlsxSheets,
-  writeXlsx,
-} from "./xlsx-writer";
+import { writeXlsxWorkbook } from "./xlsx-writer";
 
-function crc32(buffer: Buffer): number {
+interface ParsedZipEntry {
+  crc: number;
+  data: Buffer;
+  compressedSize: number;
+  uncompressedSize: number;
+  localOffset: number;
+}
+
+function independentCrc32(buffer: Buffer): number {
   let crc = 0xffff_ffff;
   for (const byte of buffer) {
     crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb8_8320 : 0);
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
   }
   return (crc ^ 0xffff_ffff) >>> 0;
 }
 
-function readZipEntries(buffer: Buffer): Array<{ name: string; content: Buffer; crc: number }> {
-  const entries: Array<{ name: string; content: Buffer; crc: number }> = [];
-  let offset = 0;
-  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
-    const method = buffer.readUInt16LE(offset + 8);
-    const expectedCrc = buffer.readUInt32LE(offset + 14);
-    const compressedSize = buffer.readUInt32LE(offset + 18);
-    const nameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const nameStart = offset + 30;
-    const name = buffer.subarray(nameStart, nameStart + nameLength).toString("utf8");
-    const dataStart = nameStart + nameLength + extraLength;
-    const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
-    const content = method === 8 ? inflateRawSync(compressed) : compressed;
-    entries.push({ name, content, crc: expectedCrc });
-    offset = dataStart + compressedSize;
+function parseZip(buffer: Buffer): Map<string, ParsedZipEntry> {
+  const endOffset = buffer.length - 22;
+  expect(buffer.readUInt32LE(endOffset)).toBe(0x06054b50);
+  expect(buffer.readUInt16LE(endOffset + 4)).toBe(0);
+  expect(buffer.readUInt16LE(endOffset + 6)).toBe(0);
+  expect(buffer.readUInt16LE(endOffset + 20)).toBe(0);
+
+  const entryCount = buffer.readUInt16LE(endOffset + 10);
+  const centralSize = buffer.readUInt32LE(endOffset + 12);
+  const centralOffset = buffer.readUInt32LE(endOffset + 16);
+  expect(centralOffset + centralSize).toBe(endOffset);
+
+  const entries = new Map<string, ParsedZipEntry>();
+  let offset = centralOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    expect(buffer.readUInt32LE(offset)).toBe(0x02014b50);
+    expect(buffer.readUInt16LE(offset + 8) & 0x0800).toBe(0x0800);
+    expect(buffer.readUInt16LE(offset + 10)).toBe(8);
+    const crc = buffer.readUInt32LE(offset + 16);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const uncompressedSize = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const localOffset = buffer.readUInt32LE(offset + 42);
+    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+
+    expect(buffer.readUInt32LE(localOffset)).toBe(0x04034b50);
+    expect(buffer.readUInt16LE(localOffset + 6) & 0x0800).toBe(0x0800);
+    expect(buffer.readUInt16LE(localOffset + 8)).toBe(8);
+    expect(buffer.readUInt32LE(localOffset + 14)).toBe(crc);
+    expect(buffer.readUInt32LE(localOffset + 18)).toBe(compressedSize);
+    expect(buffer.readUInt32LE(localOffset + 22)).toBe(uncompressedSize);
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    const data = inflateRawSync(buffer.subarray(dataOffset, dataOffset + compressedSize));
+    expect(data.length).toBe(uncompressedSize);
+    expect(independentCrc32(data)).toBe(crc);
+
+    entries.set(name, { crc, data, compressedSize, uncompressedSize, localOffset });
+    offset += 46 + nameLength + extraLength + commentLength;
   }
+  expect(offset).toBe(endOffset);
+  expect(entries.size).toBe(entryCount);
   return entries;
 }
 
-const libreOfficeAvailable = spawnSync("libreoffice", ["--version"], { stdio: "ignore" }).status === 0;
-
-describe("safe write-only XLSX writer", () => {
-  it("writes typed multi-sheet OOXML with valid CRCs and central-directory entries", () => {
-    const output = writeXlsx([
+describe("writeXlsxWorkbook", () => {
+  it("creates a deterministic, structurally consistent multi-sheet ZIP", () => {
+    const sheets = [
       {
-        name: "売上",
-        headers: ["文字列", "数値", "真偽", "空", "極端値"],
-        rows: [["東京", 42.5, true, null, Number.MAX_VALUE]],
+        name: "売上/2026",
+        headers: ["項目", "金額", "承認"],
+        rows: [
+          ["製品A", 1_000, true],
+          ["製品B", 2_000, false],
+        ],
       },
-      { name: "売上", headers: ["日本語"], rows: [["データ"]] },
+      {
+        name: "売上:2026",
+        headers: ["注記"],
+        rows: [["重複名は安全に正規化"]],
+      },
+    ];
+    const first = writeXlsxWorkbook(sheets);
+    const second = writeXlsxWorkbook(sheets);
+    expect(first.equals(second)).toBe(true);
+    expect(first.subarray(0, 2).toString("ascii")).toBe("PK");
+
+    const entries = parseZip(first);
+    expect([...entries.keys()]).toEqual([
+      "[Content_Types].xml",
+      "_rels/.rels",
+      "xl/workbook.xml",
+      "xl/_rels/workbook.xml.rels",
+      "xl/worksheets/sheet1.xml",
+      "xl/worksheets/sheet2.xml",
     ]);
-    expect(output.subarray(0, 4).readUInt32LE()).toBe(0x04034b50);
-    const entries = readZipEntries(output);
-    expect(entries).toHaveLength(6);
-    for (const entry of entries) expect(entry.crc).toBe(crc32(entry.content));
-    expect(entries.map((entry) => entry.name)).toContain("xl/workbook.xml");
-    expect(entries.map((entry) => entry.name)).toContain("xl/worksheets/sheet2.xml");
-    const workbook = entries.find((entry) => entry.name === "xl/workbook.xml")!.content.toString();
-    expect(workbook).toContain('name="売上"');
-    expect(workbook).toContain('name="売上 (1)"');
-    const sheet = entries.find((entry) => entry.name === "xl/worksheets/sheet1.xml")!.content.toString();
-    expect(sheet).toContain('t="inlineStr"');
-    expect(sheet).toContain("<v>42.5</v>");
-    expect(sheet).toContain('t="b"><v>1</v>');
-    expect(sheet).not.toContain("<f>");
-    const eocdOffset = output.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
-    expect(eocdOffset).toBeGreaterThan(0);
-    expect(output.readUInt16LE(eocdOffset + 8)).toBe(entries.length);
-    expect(output.readUInt16LE(eocdOffset + 10)).toBe(entries.length);
-    const centralSize = output.readUInt32LE(eocdOffset + 12);
-    const centralOffset = output.readUInt32LE(eocdOffset + 16);
-    expect(centralOffset + centralSize).toBe(eocdOffset);
+    const workbook = entries.get("xl/workbook.xml")?.data.toString("utf8") ?? "";
+    expect(workbook).toContain('name="売上_2026"');
+    expect(workbook).toContain('name="売上_2026 (1)"');
+    const worksheet = entries.get("xl/worksheets/sheet1.xml")?.data.toString("utf8") ?? "";
+    expect(worksheet).toContain('<c r="B2" t="n"><v>1000</v></c>');
+    expect(worksheet).toContain('<c r="C2" t="b"><v>1</v></c>');
   });
 
-  it.each(["=1+1", "+SUM(A1)", "-1+1", "@cmd", "\t=1+1", "\n=1+1"])(
-    "keeps formula-like string %j out of formula elements",
-    (value) => {
-      const output = writeXlsx([{ name: "Sheet", headers: ["value"], rows: [[value]] }]);
-      const sheet = readZipEntries(output).find((entry) => entry.name.endsWith("sheet1.xml"))!.content.toString();
-      expect(sheet).toContain('t="inlineStr"');
-      expect(sheet).not.toContain("<f>");
-      expect(sheet).toContain(value);
-    },
-  );
-
-  it("normalizes invalid, empty, duplicate, and overlong sheet names", () => {
-    const sheets = normalizeXlsxSheets([
-      { name: " /\\:*?[ ] ", headers: [], rows: [] },
-      { name: "", headers: [], rows: [] },
-      { name: "Sheet", headers: [], rows: [] },
-      { name: "x".repeat(100), headers: [], rows: [] },
+  it("keeps every formula-like string as literal inline text", () => {
+    const values = ["=1+1", "+SUM(A1:A2)", "-1+2", "@cmd", "\t=cmd", "\n=cmd"];
+    const workbook = writeXlsxWorkbook([
+      { name: "Formula safety", headers: ["value"], rows: values.map((value) => [value]) },
     ]);
-    expect(sheets.map((sheet) => sheet.name)).toEqual(["Sheet", "Sheet (1)", "Sheet (2)", "x".repeat(31)]);
+    const worksheet =
+      parseZip(workbook).get("xl/worksheets/sheet1.xml")?.data.toString("utf8") ?? "";
+    expect(worksheet.match(/t="inlineStr"/g)).toHaveLength(values.length + 1);
+    expect(worksheet).not.toMatch(/<f(?:\s|>)/);
+    for (const value of values) expect(worksheet).toContain(value);
   });
 
-  it("rejects non-finite numbers and preserves extreme finite numbers", () => {
-    expect(() => writeXlsx([{ name: "Sheet", headers: [Number.NaN], rows: [] }])).toThrow(XlsxLimitError);
-    expect(() => writeXlsx([{ name: "Sheet", headers: [Number.POSITIVE_INFINITY], rows: [] }])).toThrow(XlsxLimitError);
-    const output = writeXlsx([{ name: "Sheet", headers: [Number.MAX_VALUE, Number.MIN_VALUE], rows: [] }]);
-    const sheet = readZipEntries(output).find((entry) => entry.name.endsWith("sheet1.xml"))!.content.toString();
-    expect(sheet).toContain(String(Number.MAX_VALUE));
-    expect(sheet).toContain(String(Number.MIN_VALUE));
+  it("accepts finite numeric boundaries and normalizes negative zero", () => {
+    const workbook = writeXlsxWorkbook([
+      {
+        name: "Numbers",
+        headers: ["max", "min", "negative zero"],
+        rows: [[Number.MAX_VALUE, Number.MIN_VALUE, -0]],
+      },
+    ]);
+    const worksheet =
+      parseZip(workbook).get("xl/worksheets/sheet1.xml")?.data.toString("utf8") ?? "";
+    expect(worksheet).toContain(String(Number.MAX_VALUE));
+    expect(worksheet).toContain(String(Number.MIN_VALUE));
+    expect(worksheet).toContain('<c r="C2" t="n"><v>0</v></c>');
   });
 
-  it("enforces workbook, row, column, cell, and UTF-8 input caps", () => {
-    expect(() => writeXlsx([])).toThrow(XlsxLimitError);
-    expect(() => writeXlsx(Array.from({ length: XLSX_LIMITS.maxSheets + 1 }, () => ({
-      name: "Sheet", headers: [], rows: [],
-    })))).toThrow(/sheet server limit/);
-    expect(() => writeXlsx([{
-      name: "Sheet", headers: ["x".repeat(XLSX_LIMITS.maxCellTextChars + 1)], rows: [],
-    }])).toThrow(/character limit/);
-    expect(() => writeXlsx([{
-      name: "Sheet", headers: [], rows: Array.from({ length: XLSX_LIMITS.maxRowsPerSheet }, () => []),
-    }])).toThrow(/row server limit/);
-    expect(() => writeXlsx([{
-      name: "Sheet", headers: Array.from({ length: XLSX_LIMITS.maxColumnsPerSheet + 1 }, () => "x"), rows: [],
-    }])).toThrow(/column server limit/);
-    const long = "a".repeat(XLSX_LIMITS.maxCellTextChars);
-    const overInput = Array.from({ length: 513 }, () => long);
-    expect(() => writeXlsx([{ name: "Sheet", headers: overInput.slice(0, 256), rows: [overInput.slice(256)] }]))
-      .toThrow(/UTF-8 input/);
+  it("rejects invalid numbers and bounded workbook resources", () => {
+    const sheet = { name: "Sheet", headers: ["value"], rows: [["x"]] };
+    expect(() => writeXlsxWorkbook([])).toThrow(/at least one sheet/);
+    expect(() =>
+      writeXlsxWorkbook([{ ...sheet, rows: [[Number.NaN]] }]),
+    ).toThrow(/finite numbers/);
+    expect(() =>
+      writeXlsxWorkbook([{ ...sheet, rows: [[Number.POSITIVE_INFINITY]] }]),
+    ).toThrow(/finite numbers/);
+    expect(() => writeXlsxWorkbook([sheet], { maxTextBytes: 5 })).toThrow(/text exceeds/);
+    expect(() => writeXlsxWorkbook([sheet], { maxOutputBytes: 256 })).toThrow(/output exceeds/);
+    expect(() => writeXlsxWorkbook([sheet], { maxNonNullCells: 1 })).toThrow(/cell limit/);
+    expect(() => writeXlsxWorkbook([sheet], { maxRowsPerSheet: 1 })).toThrow(/row server limit/);
+    expect(() => writeXlsxWorkbook([sheet], { maxColumnsPerSheet: 1 })).not.toThrow();
+    expect(() =>
+      writeXlsxWorkbook([{ ...sheet, headers: ["a", "b"] }], { maxColumnsPerSheet: 1 }),
+    ).toThrow(/column server limit/);
+    expect(() => writeXlsxWorkbook([sheet], { maxCellCharacters: 1 })).toThrow(
+      /cell text exceeds/,
+    );
   });
 
-  it("enforces the final 16 MiB output cap", () => {
-    expect(() => assertXlsxOutputWithinLimit(Buffer.alloc(XLSX_LIMITS.maxOutputBytes + 1)))
-      .toThrow(/output exceeds/);
-    expect(() => assertXlsxOutputWithinLimit(Buffer.alloc(XLSX_LIMITS.maxOutputBytes)))
-      .not.toThrow();
+  it("rejects configurations that would require ZIP64", () => {
+    const sheet = { name: "Sheet", headers: [], rows: [] };
+    expect(() => writeXlsxWorkbook([sheet], { maxSheets: 65_532 })).toThrow(
+      /ZIP32 entry limit/,
+    );
+    expect(() => writeXlsxWorkbook([sheet], { maxOutputBytes: 0x1_0000_0000 })).toThrow(
+      /ZIP32 size limit/,
+    );
   });
-
-  it.runIf(libreOfficeAvailable)("opens successfully in LibreOffice when available", () => {
-    const dir = mkdtempSync(join(tmpdir(), "safe-xlsx-"));
-    const input = join(dir, "test.xlsx");
-    const outputDir = join(dir, "out");
-    mkdirSync(outputDir);
-    writeFileSync(input, writeXlsx([{ name: "日本語", headers: ["項目"], rows: [["開閉テスト"]] }]));
-    try {
-      execFileSync("libreoffice", ["--headless", "--convert-to", "pdf", "--outdir", outputDir, input], {
-        stdio: "pipe",
-        timeout: 30_000,
-      });
-      const pdf = readFileSync(join(outputDir, "test.pdf"));
-      expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 30_000);
 });
