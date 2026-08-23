@@ -321,7 +321,11 @@ export async function streamChatReply(args: {
       onDelta: (added, kind) => {
         if (clientGone) return;
         if (kind === "reasoning") {
-          res.write(`data: ${JSON.stringify({ status: "thinking", reasoning: added })}\n\n`);
+          // Reasoning tokens stay server-side. Only the safe phase label is
+          // exposed to the browser.
+          if (!clientAbort.signal.aborted) {
+            res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
+          }
         } else {
           res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
         }

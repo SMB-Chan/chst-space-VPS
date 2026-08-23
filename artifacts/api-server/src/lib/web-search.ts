@@ -254,7 +254,7 @@ async function fetchViaRenderProxy(url: string, signal?: AbortSignal): Promise<s
 async function fetchViaFallbacks(
   url: string,
   signal?: AbortSignal,
-): Promise<{ title: string; text: string } | null> {
+): Promise<{ title: string; text: string; publishedAt?: string | null } | null> {
   if (PLAYWRIGHT_FALLBACK_ENABLED) {
     const rendered = await fetchWithBrowser(url, BROWSER_FETCH_TIMEOUT_MS);
     if (
@@ -262,12 +262,12 @@ async function fetchViaFallbacks(
       rendered.text.length >= MIN_CONTENT_CHARS &&
       !isBotChallengePage(rendered.text)
     ) {
-      return { title: rendered.title, text: rendered.text.slice(0, MAX_PAGE_CHARS) };
+      return { title: rendered.title, text: rendered.text.slice(0, MAX_PAGE_CHARS), publishedAt: null };
     }
   }
   if (RENDER_FALLBACK_ENABLED) {
     const rendered = await fetchViaRenderProxy(url, signal);
-    if (rendered) return { title: url, text: rendered.slice(0, MAX_PAGE_CHARS) };
+    if (rendered) return { title: url, text: rendered.slice(0, MAX_PAGE_CHARS), publishedAt: null };
   }
   return null;
 }
@@ -275,7 +275,7 @@ async function fetchViaFallbacks(
 export async function fetchPageText(
   url: string,
   signal?: AbortSignal,
-): Promise<{ title: string; text: string } | null> {
+): Promise<{ title: string; text: string; publishedAt?: string | null } | null> {
   try {
     const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS, { signal });
     try {
@@ -328,14 +328,33 @@ export async function fetchPageText(
         // Still unreadable (JS shell, interstitial): hand over to the
         // browser/proxy fallback chain, keeping the HTML-derived title.
         const fallback = await fetchViaFallbacks(url, signal);
-        if (fallback) return { title: title === url ? fallback.title : title, text: fallback.text };
+        if (fallback) {
+          return {
+            title: title === url ? fallback.title : title,
+            text: fallback.text,
+            publishedAt: fallback.publishedAt ?? null,
+          };
+        }
         logger.warn(
           { url },
           "Page content unreadable (JS-rendered or bot-blocked)",
         );
         return null;
       }
-      return { title, text: text.slice(0, MAX_PAGE_CHARS) };
+      const dateCandidates = [
+        ...Array.from(html.matchAll(/<meta[^>]+(?:property|name)=["'](?:article:published_time|date|pubdate|发布时间)["'][^>]+content=["']([^"']+)["']/gi), (m) => m[1]),
+        ...Array.from(html.matchAll(/<time[^>]+datetime=["']([^"']+)["']/gi), (m) => m[1]),
+        ...Array.from(html.matchAll(/"datePublished"\s*:\s*"([^"]+)"/gi), (m) => m[1]),
+      ];
+      let publishedAt: string | null = null;
+      for (const candidate of dateCandidates) {
+        const parsedDate = new Date(candidate);
+        if (!Number.isNaN(parsedDate.getTime())) {
+          publishedAt = parsedDate.toISOString();
+          break;
+        }
+      }
+      return { title, text: text.slice(0, MAX_PAGE_CHARS), publishedAt };
     } finally {
       cancel(); // disarm only after body has been fully consumed
     }
@@ -436,7 +455,12 @@ export async function decideSearch(
     return { search: true, query: inferred.query };
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DECIDE_TIMEOUT_MS);
 
@@ -595,6 +619,7 @@ export async function buildWebContext(
 ): Promise<WebContext> {
   const sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[] = [];
   const parts: string[] = [];
+  const fetchedAt = new Date().toISOString();
   let searched = false;
   let query: string | undefined;
   let searchWarning: string | undefined;
@@ -618,7 +643,7 @@ export async function buildWebContext(
   let urlFetchFailed = false;
   urlPages.forEach((page, i) => {
     if (page) {
-      sources.push({ title: page.title, url: urls[i], publishedAt: null, fetchedAt: new Date().toISOString() });
+      sources.push({ title: page.title, url: urls[i], publishedAt: page.publishedAt ?? null, fetchedAt });
       parts.push(`【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`);
     } else if (urls[i]) {
       urlFetchFailed = true;
@@ -665,7 +690,7 @@ export async function buildWebContext(
     const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
     for (const r of newResults) {
       seenSourceUrls.add(r.url);
-      sources.push({ title: r.title, url: r.url, publishedAt: null, fetchedAt: new Date().toISOString() });
+      sources.push({ title: r.title, url: r.url, publishedAt: null, fetchedAt });
     }
     if (newResults.length === 0) return; // follow-up round found only duplicates
 

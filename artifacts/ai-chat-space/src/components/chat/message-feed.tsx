@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, Brain, ChevronDown, FileText, Download, ArrowDown, Square } from "lucide-react";
+import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -72,7 +72,6 @@ interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
   streamingPhase?: StreamingPhase;
-  streamingReasoning?: string;
   streamingAudit?: string;
   isStreaming?: boolean;
   onStop?: () => void;
@@ -87,30 +86,6 @@ function PhaseDots() {
       <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
       <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
     </span>
-  );
-}
-
-function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
-  const [open, setOpen] = useState(live);
-  if (!text && !live) return null;
-  return (
-    <div className="w-full rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-300/90 hover:bg-violet-500/10"
-      >
-        <Brain className={cn("w-3.5 h-3.5", live && "animate-pulse")} />
-        <span className="font-medium">{live ? "推論中" : "推論過程"}</span>
-        {live && <PhaseDots />}
-        <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
-      </button>
-       {open && text && (
-         <div className="px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground/90 font-sans">
-           推論の詳細は安全のため表示していません。
-         </div>
-       )}
-    </div>
   );
 }
 
@@ -188,10 +163,12 @@ function FileDownloadButton({ assetId }: { assetId: number }) {
 }
 
 function GenerationBadge({ phase }: { phase: StreamingPhase }) {
-  if (!phase || phase === "searching") return null;
+  if (!phase) return null;
   const label =
     phase === "thinking"
       ? "推論中"
+      : phase === "searching"
+        ? "Webを検索中"
       : phase === "reading-images"
         ? "画像を読み取り中"
         : phase === "generating-file"
@@ -223,7 +200,6 @@ export function MessageFeed({
   messages,
   isLoading,
   streamingPhase = null,
-  streamingReasoning = "",
   streamingAudit = "",
   isStreaming = false,
   onStop,
@@ -282,7 +258,7 @@ export function MessageFeed({
           <ArrowDown className="h-3.5 w-3.5" /> 最新へ戻る
         </button>
       )}
-      <div className="max-w-4xl mx-auto space-y-12">
+      <div className="max-w-5xl mx-auto space-y-12">
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
@@ -338,7 +314,7 @@ export function MessageFeed({
               </div>
               
               <div className={cn(
-                "flex flex-col gap-2 min-w-0 max-w-[88%] md:max-w-[75%]",
+                "flex flex-col gap-2 min-w-0 max-w-[88%] md:max-w-[82%]",
                 isUser ? "items-end" : "items-start"
               )}>
                 {isUser && attachments.length > 0 && (
@@ -355,15 +331,12 @@ export function MessageFeed({
                   </div>
                 )}
                 
-                {!isUser && message.id === STREAMING_ASSISTANT_ID && (
-                  <ReasoningPanel
-                    text={streamingReasoning}
-                    live={streamingPhase === "thinking"}
-                  />
-                )}
-
                 {(!isUser && message.id === STREAMING_ASSISTANT_ID && !displayContent) ? (
-                  streamingReasoning || streamingPhase === "thinking" ? null : (
+                  streamingPhase === "thinking" ? (
+                    <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
+                      <GenerationBadge phase={streamingPhase} />
+                    </div>
+                  ) : (
                     <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
                       <GenerationBadge phase={streamingPhase} />
                     </div>
@@ -406,6 +379,27 @@ export function MessageFeed({
                   <FileGenerationPanel phase={streamingPhase as FileGenerationPhase} />
                 )}
 
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && isStreaming && onStop && (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
+                    aria-label="この回答を停止"
+                  >
+                    <Square className="h-3 w-3 fill-current" /> 停止
+                  </button>
+                )}
+
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && streamingWarning && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <span className="shrink-0">⚠️</span>
+                    <span className="flex-1">{streamingWarning}</span>
+                    <button type="button" onClick={onDismissWarning} className="shrink-0 rounded p-0.5 hover:bg-amber-500/20" aria-label="警告を閉じる">
+                      <span aria-hidden>×</span>
+                    </button>
+                  </div>
+                )}
+
                 {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (
                   <AuditCard
                     content={message.id === STREAMING_ASSISTANT_ID ? streamingAudit || display.auditContent || "" : display.auditContent || ""}
@@ -431,16 +425,6 @@ export function MessageFeed({
                   </div>
                 )}
 
-                {!isUser && message.id === STREAMING_ASSISTANT_ID && streamingWarning && (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                    <span className="shrink-0">⚠️</span>
-                    <span className="flex-1">{streamingWarning}</span>
-                    <button type="button" onClick={onDismissWarning} className="shrink-0 rounded p-0.5 hover:bg-amber-500/20" aria-label="警告を閉じる">
-                      <span aria-hidden>×</span>
-                    </button>
-                  </div>
-                )}
-
                 {!isUser && message.modelId && (
                   <div className="text-[11px] text-muted-foreground/60 px-1 select-none">
                     {getModelLabel(message.modelId)}
@@ -450,18 +434,6 @@ export function MessageFeed({
             </div>
           );
         })}
-        {isStreaming && onStop && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={onStop}
-              className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
-              aria-label="この回答を停止"
-            >
-              <Square className="h-3 w-3 fill-current" /> 停止
-            </button>
-          </div>
-        )}
         <div ref={bottomRef} />
       </div>
     </div>
