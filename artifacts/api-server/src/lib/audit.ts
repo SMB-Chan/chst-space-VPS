@@ -15,8 +15,8 @@ export const AUDIT_SYSTEM_PROMPT = `あなたは会話の記憶を持たない�
 - 売買指示や断定が混じっていないか
 
 出力はJSONのみ。Markdownや前置きは禁止:
-{"note":"判定と短い点検メモ（最大2000文字）","operations":[{"start":0,"end":0,"replacement":"初稿の文字範囲を置換する短い修正"}]}
-operationsは初稿の文字位置に対する最大8件の非重複置換。修正不要なら空配列。初稿全体を再掲しない。`;
+{"note":"判定と短い点検メモ（最大2000文字）","operations":[{"target":"初稿内に一度だけ現れる短い原文","replacement":"置換後の短い本文"}]}
+operationsは初稿内に完全一致で一度だけ現れるtargetを指定する最大8件の置換。targetは短く、初稿全体を再掲しない。target不存在・重複・操作数超過・置換量超過なら全体が棄却される。`;
 
 export function buildAuditUserMessage(args: {
   question: string;

@@ -1,6 +1,5 @@
 export type AuditPatchOperation = {
-  start: number;
-  end: number;
+  target: string;
   replacement: string;
 };
 
@@ -12,6 +11,8 @@ export type AuditPatch = {
 const MAX_OPERATIONS = 8;
 const MAX_REPLACEMENT_CHARS = 4000;
 const MAX_NOTE_CHARS = 2000;
+const MAX_TARGET_CHARS = 4000;
+const MAX_FINAL_CHARS = 20_000;
 
 export function applyValidatedAuditPatch(
   draft: string,
@@ -38,34 +39,42 @@ export function applyValidatedAuditPatch(
       return { content: draft, note, applied: false, reason: "監査パッチの操作が不正です。" };
     }
     const op = item as Record<string, unknown>;
-    const start = op.start;
-    const end = op.end;
+    const target = op.target;
     const replacement = op.replacement;
-    const numericStart = typeof start === "number" && Number.isInteger(start) ? start : null;
-    const numericEnd = typeof end === "number" && Number.isInteger(end) ? end : null;
     if (
-      numericStart === null ||
-      numericEnd === null ||
+      typeof target !== "string" ||
+      target.length === 0 ||
+      target.length > MAX_TARGET_CHARS ||
       typeof replacement !== "string" ||
-      numericStart < 0 ||
-      numericEnd < numericStart ||
-      numericEnd > draft.length ||
       replacement.length > MAX_REPLACEMENT_CHARS
     ) {
-      return { content: draft, note, applied: false, reason: "監査パッチの範囲または置換文字数が不正です。" };
+      return { content: draft, note, applied: false, reason: "監査パッチの原文または置換文字数が不正です。" };
     }
-    normalized.push({ start: numericStart, end: numericEnd, replacement });
+    const first = draft.indexOf(target);
+    if (first < 0) {
+      return { content: draft, note, applied: false, reason: "監査パッチの原文が初稿にありません。" };
+    }
+    if (draft.indexOf(target, first + target.length) >= 0) {
+      return { content: draft, note, applied: false, reason: "監査パッチの原文が初稿内で重複しています。" };
+    }
+    normalized.push({ target, replacement });
   }
-  normalized.sort((a, b) => a.start - b.start || a.end - b.end);
-  for (let i = 1; i < normalized.length; i += 1) {
-    if (normalized[i - 1].end > normalized[i].start) {
-      return { content: draft, note, applied: false, reason: "監査パッチの範囲が重複しています。" };
+  for (let i = 0; i < normalized.length; i += 1) {
+    for (let j = i + 1; j < normalized.length; j += 1) {
+      if (normalized[i].target.includes(normalized[j].target) || normalized[j].target.includes(normalized[i].target)) {
+        return { content: draft, note, applied: false, reason: "監査パッチの原文範囲が重複しています。" };
+      }
     }
   }
   let content = draft;
-  for (let i = normalized.length - 1; i >= 0; i -= 1) {
-    const op = normalized[i];
-    content = content.slice(0, op.start) + op.replacement + content.slice(op.end);
+  for (const op of normalized) {
+    content = content.replace(op.target, op.replacement);
+  }
+  if (content.length > MAX_FINAL_CHARS) {
+    return { content: draft, note, applied: false, reason: "監査パッチ後の本文が長すぎます。" };
+  }
+  if (normalized.length === 0) {
+    return { content: draft, note, applied: false, operations: normalized };
   }
   return { content, note, applied: normalized.length > 0, operations: normalized };
 }

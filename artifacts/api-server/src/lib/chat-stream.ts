@@ -289,11 +289,16 @@ export async function streamChatReply(args: {
           (event) => {
             if (!clientGone) res.write(`data: ${JSON.stringify(event)}\n\n`);
           },
-          { forceQuery: composeSkillSearchQuery(userText, skills) },
+          { forceQuery: composeSkillSearchQuery(userText, skills), signal: clientAbort.signal },
         );
 
     if (webContext.contextText) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
       workingMessages.push({
         role: "system",
         content:
@@ -321,7 +326,8 @@ export async function streamChatReply(args: {
           res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
         }
       },
-      shouldStop: () => clientGone,
+      shouldStop: () => clientGone || clientAbort.signal.aborted,
+      signal: clientAbort.signal,
     });
 
     if (!fullResponse.trim()) {
@@ -339,7 +345,7 @@ export async function streamChatReply(args: {
       // Run the audit even if the client disconnected mid-stream: the audited
       // result is still persisted via onComplete, so revisiting the
       // conversation shows the audited answer instead of the raw draft.
-      if (auditModelId && auditModelId !== modelId) {
+      if (auditModelId && auditModelId !== modelId && !clientAbort.signal.aborted) {
         try {
           const auditor = getClientForModel(auditModelId);
           if (!clientGone) {
@@ -415,7 +421,7 @@ export async function streamChatReply(args: {
                    // Audit JSON is intentionally kept server-side until it has
                    // passed validation; partial model output must never leak.
                  },
-                  shouldStop: () => clientGone || clientAbort.signal.aborted,
+                    shouldStop: () => clientGone || clientAbort.signal.aborted,
                 signal,
               }),
             AUDIT_TIMEOUT_MS,
@@ -458,6 +464,9 @@ export async function streamChatReply(args: {
         }
       }
 
+      // A user stop is a successful partial turn: preserve what was generated,
+      // but never start audit, file generation, or layout review afterwards.
+      const stopped = clientAbort.signal.aborted;
       const extracted = extractArtifacts(fullResponse);
       if (extracted.artifacts.length > 0) {
         fullResponse = extracted.content;
@@ -486,7 +495,7 @@ export async function streamChatReply(args: {
           "File generation format selected",
         );
       }
-      if (fileFormat && conversationId) {
+      if (fileFormat && conversationId && !stopped) {
         generatedFile = await withTimeout(
           (signal) =>
             generateAndReviewFile({
@@ -509,7 +518,7 @@ export async function streamChatReply(args: {
         );
       }
 
-      if (generatedFile && fileFormat) {
+      if (generatedFile && fileFormat && !stopped) {
         fullResponse = finalizeGeneratedFileResponse(fullResponse);
       }
 
@@ -649,23 +658,27 @@ async function streamModelText(args: {
 
   let full = "";
   let reasoning = "";
-  for await (const chunk of stream) {
-    if (args.shouldStop()) break;
-    const delta = chunk.choices?.[0]?.delta;
-    const reasoningDelta = readReasoningDelta(delta);
-    if (reasoningDelta) {
-      const merged = mergeStreamDelta(reasoning, reasoningDelta);
-      const added = merged.slice(reasoning.length);
-      reasoning = merged;
-      if (added) args.onDelta(added, "reasoning");
+  try {
+    for await (const chunk of stream) {
+      if (args.shouldStop()) break;
+      const delta = chunk.choices?.[0]?.delta;
+      const reasoningDelta = readReasoningDelta(delta);
+      if (reasoningDelta) {
+        const merged = mergeStreamDelta(reasoning, reasoningDelta);
+        const added = merged.slice(reasoning.length);
+        reasoning = merged;
+        // Reasoning is intentionally never sent to the browser.
+      }
+      const contentDelta = readContentDelta(delta);
+      if (contentDelta) {
+        const merged = mergeStreamDelta(full, contentDelta);
+        const added = merged.slice(full.length);
+        full = merged;
+        if (added) args.onDelta(added, "content");
+      }
     }
-    const contentDelta = readContentDelta(delta);
-    if (contentDelta) {
-      const merged = mergeStreamDelta(full, contentDelta);
-      const added = merged.slice(full.length);
-      full = merged;
-      if (added) args.onDelta(added, "content");
-    }
+  } catch (err) {
+    if (!args.signal?.aborted) throw err;
   }
   return splitThinkTags(full).content;
 }

@@ -144,11 +144,17 @@ const safeAgent = new Agent({
 async function fetchWithTimeout(
   rawUrl: string,
   timeoutMs: number,
-  opts?: { userAgent?: string | null; headers?: Record<string, string> }
+  opts?: { userAgent?: string | null; headers?: Record<string, string>; signal?: AbortSignal }
 ): Promise<{ response: UndiciResponse; cancel: () => void }> {
   const controller = new AbortController();
+  const abortParent = () => controller.abort(opts?.signal?.reason ?? new Error("Operation cancelled"));
+  if (opts?.signal?.aborted) abortParent();
+  else opts?.signal?.addEventListener("abort", abortParent, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const cancel = () => clearTimeout(timer);
+  const cancel = () => {
+    clearTimeout(timer);
+    opts?.signal?.removeEventListener("abort", abortParent);
+  };
   const userAgent = opts && "userAgent" in opts ? opts.userAgent : USER_AGENT;
 
   try {
@@ -205,7 +211,7 @@ async function discardResponseBody(response: UndiciResponse): Promise<void> {
  * Markdown text.  Used only when direct extraction failed and the operator
  * has opted in via WEB_FETCH_RENDER_FALLBACK.
  */
-async function fetchViaRenderProxy(url: string): Promise<string | null> {
+async function fetchViaRenderProxy(url: string, signal?: AbortSignal): Promise<string | null> {
   try {
     // Rendering is slower than a plain fetch, so allow a longer deadline.
     // Note: r.jina.ai's own Cloudflare challenges browser-like User-Agents
@@ -218,6 +224,7 @@ async function fetchViaRenderProxy(url: string): Promise<string | null> {
       {
         userAgent: null,
         headers: jinaKey ? { Authorization: `Bearer ${jinaKey}` } : undefined,
+        signal,
       },
     );
     try {
@@ -246,6 +253,7 @@ async function fetchViaRenderProxy(url: string): Promise<string | null> {
  */
 async function fetchViaFallbacks(
   url: string,
+  signal?: AbortSignal,
 ): Promise<{ title: string; text: string } | null> {
   if (PLAYWRIGHT_FALLBACK_ENABLED) {
     const rendered = await fetchWithBrowser(url, BROWSER_FETCH_TIMEOUT_MS);
@@ -258,17 +266,18 @@ async function fetchViaFallbacks(
     }
   }
   if (RENDER_FALLBACK_ENABLED) {
-    const rendered = await fetchViaRenderProxy(url);
+    const rendered = await fetchViaRenderProxy(url, signal);
     if (rendered) return { title: url, text: rendered.slice(0, MAX_PAGE_CHARS) };
   }
   return null;
 }
 
 export async function fetchPageText(
-  url: string
+  url: string,
+  signal?: AbortSignal,
 ): Promise<{ title: string; text: string } | null> {
   try {
-    const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS);
+    const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS, { signal });
     try {
       if (!res.ok) {
         logger.warn({ status: res.status, url }, "Page fetch rejected");
@@ -276,7 +285,7 @@ export async function fetchPageText(
         // Bot-protection commonly answers with 401/403/429/503; the fallback
         // chain (browser, then proxy) may still be able to read the page.
         if ([401, 403, 429, 503].includes(res.status)) {
-          return await fetchViaFallbacks(url);
+          return await fetchViaFallbacks(url, signal);
         }
         return null;
       }
@@ -296,7 +305,7 @@ export async function fetchPageText(
       // challenge independently of content length: never serve it as an
       // article — go straight to the fallback chain.
       if (isBotChallengePage(html)) {
-        const fallback = await fetchViaFallbacks(url);
+        const fallback = await fetchViaFallbacks(url, signal);
         if (fallback) return fallback;
         logger.warn({ url }, "Bot challenge page; no usable content");
         return null;
@@ -318,7 +327,7 @@ export async function fetchPageText(
       if (text.length < MIN_CONTENT_CHARS) {
         // Still unreadable (JS shell, interstitial): hand over to the
         // browser/proxy fallback chain, keeping the HTML-derived title.
-        const fallback = await fetchViaFallbacks(url);
+        const fallback = await fetchViaFallbacks(url, signal);
         if (fallback) return { title: title === url ? fallback.title : title, text: fallback.text };
         logger.warn(
           { url },
@@ -336,8 +345,8 @@ export async function fetchPageText(
   }
 }
 
-async function searchWebOnce(url: string): Promise<SearchResult[]> {
-  const { response: res, cancel } = await fetchWithTimeout(url, SEARCH_FETCH_TIMEOUT_MS);
+async function searchWebOnce(url: string, signal?: AbortSignal): Promise<SearchResult[]> {
+  const { response: res, cancel } = await fetchWithTimeout(url, SEARCH_FETCH_TIMEOUT_MS, { signal });
   try {
     if (!res.ok) {
       logger.warn({ status: res.status, url }, "Search endpoint failed");
@@ -351,7 +360,7 @@ async function searchWebOnce(url: string): Promise<SearchResult[]> {
 }
 
 /** Search the web via DuckDuckGo HTML (no API key). Falls back to the lite page. */
-export async function searchWeb(query: string): Promise<ScoredSearchResult[]> {
+export async function searchWeb(query: string, signal?: AbortSignal): Promise<ScoredSearchResult[]> {
   const cached = getCachedResults(query);
   if (cached) {
     logger.debug({ query }, "Search cache hit");
@@ -382,7 +391,7 @@ export async function searchWeb(query: string): Promise<ScoredSearchResult[]> {
     for (const base of endpoints) {
       const url = `${base}${encodeURIComponent(q)}`;
       searchCalls.push(
-        searchWebOnce(url).catch((err) => {
+        searchWebOnce(url, signal).catch((err) => {
           logger.warn({ err, query: q, endpoint: base }, "Web search endpoint error");
           return [];
         }),
@@ -582,7 +591,7 @@ export async function buildWebContext(
   provider: "openai" | "dashscope",
   userMessage: string,
   onStatus: (event: Record<string, unknown>) => void,
-  options?: { forceQuery?: string },
+  options?: { forceQuery?: string; signal?: AbortSignal },
 ): Promise<WebContext> {
   const sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[] = [];
   const parts: string[] = [];
@@ -597,9 +606,10 @@ export async function buildWebContext(
   }
 
   // Start URL fetching and search-decision in parallel — they are independent
+  const signal = options?.signal;
   const [urlPages, decision] = await Promise.all([
     urls.length > 0
-      ? Promise.all(urls.map((u) => fetchPageText(u)))
+      ? Promise.all(urls.map((u) => fetchPageText(u, signal)))
       : Promise.resolve([] as (Awaited<ReturnType<typeof fetchPageText>>)[]),
     decideSearch(client, model, provider, userMessage, options),
   ]);
@@ -638,7 +648,8 @@ export async function buildWebContext(
   const seenSourceUrls = new Set<string>();
   const runSearchRound = async (roundQuery: string): Promise<void> => {
     onStatus({ status: "searching", query: roundQuery });
-    const results = await searchWeb(roundQuery);
+    if (signal?.aborted) return;
+    const results = await searchWeb(roundQuery, signal);
     if (results.length === 0) {
       const warning = "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
       searchWarning = warning;
@@ -650,7 +661,7 @@ export async function buildWebContext(
     // Skip pages already fetched in an earlier round so the follow-up round
     // neither re-fetches nor miscounts them as failures.
     const top = results.slice(0, FETCH_TOP_N).filter((r) => !seenSourceUrls.has(r.url));
-    const pages = await Promise.all(top.map((r) => fetchPageText(r.url)));
+    const pages = await Promise.all(top.map((r) => fetchPageText(r.url, signal)));
     const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
     for (const r of newResults) {
       seenSourceUrls.add(r.url);
@@ -694,6 +705,7 @@ export async function buildWebContext(
 
     // One bounded follow-up round: re-search only when the model judges the
     // gathered material insufficient (off-target, thin, or stale).
+    if (signal?.aborted) return { searched, query, sources, contextText: parts.join("\n\n"), searchWarning };
     const followUp = await decideFollowUpSearch(
       client,
       model,
