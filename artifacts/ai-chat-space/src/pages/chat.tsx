@@ -43,7 +43,6 @@ async function streamMessage(
   model: string,
   reasoning: ReasoningLevel,
   onChunk: (text: string) => void,
-  onReasoning: (text: string) => void,
   onDone: () => void,
   onError: (err: Error) => void,
   onStatus: (status: string | null, query?: string) => void,
@@ -206,10 +205,6 @@ async function streamMessage(
         });
         if (artifacts.length > 0) onArtifacts(artifacts);
       }
-      if (typeof parsed.reasoning === "string" && parsed.reasoning) {
-        onStatus(parsed.status === "revising" ? "revising" : "thinking");
-        onReasoning(parsed.reasoning);
-      }
       if (typeof parsed.content === "string" && parsed.content) {
         receivedContent = true;
         if (parsed.status === "revising") {
@@ -257,8 +252,14 @@ async function streamMessage(
     }
     if (!failed) callDoneOnce();
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") return;
-    if (err instanceof Error && err.name === "AbortError") return;
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onDone();
+      return;
+    }
+    if (err instanceof Error && err.name === "AbortError") {
+      onDone();
+      return;
+    }
     onError(err instanceof Error ? err : new Error(String(err)));
   }
 }
@@ -290,7 +291,6 @@ export function ChatPage() {
   const artifactBlobUrlCache = useRef(new Map<string, string>());
   const [modelRestoredForConv, setModelRestoredForConv] = useState<number | null>(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
-  const [streamingReasoning, setStreamingReasoning] = useState<string>("");
   const [streamingSources, setStreamingSources] = useState<{ title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[]>([]);
   const [streamingArtifacts, setStreamingArtifacts] = useState<ChatArtifact[]>([]);
   const [streamingFiles, setStreamingFiles] = useState<{ id: number; filename: string; mimeType: string }[]>([]);
@@ -313,12 +313,7 @@ export function ChatPage() {
   const stopStreaming = () => {
     abortRef.current?.abort();
     abortRef.current = null;
-    setIsStreaming(false);
-    setSearchStatus(null);
-    setStreamingReasoning("");
-    setStreamingAudit("");
-    setStreamError("回答を停止しました。初稿は保存されていません。");
-    setOptimisticUserMessage(null);
+    setStreamError("回答を停止しました。生成済みの内容を保存しています。");
   };
 
   useEffect(() => {
@@ -338,7 +333,6 @@ export function ChatPage() {
     abortRef.current = null;
     setIsStreaming(false);
     setStreamingContent("");
-    setStreamingReasoning("");
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
@@ -455,7 +449,6 @@ export function ChatPage() {
 
     setIsStreaming(true);
     setStreamingContent("");
-    setStreamingReasoning("");
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
@@ -488,9 +481,6 @@ export function ChatPage() {
       (chunk) => {
         streamSnapshotRef.current.content += chunk;
         setStreamingContent((prev) => prev + chunk);
-      },
-      (chunk) => {
-        setStreamingReasoning((prev) => prev + chunk);
       },
       async () => {
         setSearchStatus(null);
@@ -529,7 +519,6 @@ export function ChatPage() {
         } finally {
           setIsStreaming(false);
           setStreamingContent("");
-          setStreamingReasoning("");
           setStreamingSources([]);
           setStreamingArtifacts([]);
           setStreamingFiles([]);
@@ -543,7 +532,6 @@ export function ChatPage() {
         setStreamingSources([]);
         setStreamingArtifacts([]);
         setStreamingFiles([]);
-        setStreamingReasoning("");
         setStreamingAudit("");
         setStreamError(err.message);
         if (!isPrivate && targetId) {
@@ -693,7 +681,6 @@ export function ChatPage() {
                       : "starting"
                 : null
             }
-            streamingReasoning={streamingReasoning}
             streamingAudit={streamingAudit}
              isStreaming={isStreaming}
              onStop={stopStreaming}
