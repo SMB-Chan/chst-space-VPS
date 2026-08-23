@@ -39,7 +39,7 @@ export { isPrivateAddress };
 export interface WebContext {
   searched: boolean;
   query?: string;
-  sources: { title: string; url: string }[];
+  sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[];
   contextText: string;
   searchWarning?: string;
 }
@@ -584,7 +584,7 @@ export async function buildWebContext(
   onStatus: (event: Record<string, unknown>) => void,
   options?: { forceQuery?: string },
 ): Promise<WebContext> {
-  const sources: { title: string; url: string }[] = [];
+  const sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[] = [];
   const parts: string[] = [];
   let searched = false;
   let query: string | undefined;
@@ -608,7 +608,7 @@ export async function buildWebContext(
   let urlFetchFailed = false;
   urlPages.forEach((page, i) => {
     if (page) {
-      sources.push({ title: page.title, url: urls[i] });
+      sources.push({ title: page.title, url: urls[i], publishedAt: null, fetchedAt: new Date().toISOString() });
       parts.push(`【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`);
     } else if (urls[i]) {
       urlFetchFailed = true;
@@ -654,7 +654,7 @@ export async function buildWebContext(
     const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
     for (const r of newResults) {
       seenSourceUrls.add(r.url);
-      sources.push({ title: r.title, url: r.url });
+      sources.push({ title: r.title, url: r.url, publishedAt: null, fetchedAt: new Date().toISOString() });
     }
     if (newResults.length === 0) return; // follow-up round found only duplicates
 

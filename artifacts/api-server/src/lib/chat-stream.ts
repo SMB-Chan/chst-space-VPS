@@ -18,7 +18,6 @@ import { getClientForModel, modelSupportsVision } from "./ai-clients";
 import {
   AUDIT_SYSTEM_PROMPT,
   buildAuditUserMessage,
-  buildRevisionUserMessage,
 } from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
@@ -42,7 +41,6 @@ import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
 
 const AUDIT_TIMEOUT_MS = 120_000;
-const REVISION_TIMEOUT_MS = 120_000;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
@@ -51,14 +49,21 @@ function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
   ms: number,
   label: string,
+  parentSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal?.reason ?? new Error("Operation cancelled"));
+  if (parentSignal?.aborted) abortFromParent();
+  else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
   const timeout = setTimeout(
     () => controller.abort(new Error(`${label} timed out after ${ms}ms`)),
     ms,
   );
   return Promise.race([
-    createPromise(controller.signal).finally(() => clearTimeout(timeout)),
+    createPromise(controller.signal).finally(() => {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    }),
     new Promise<never>((_, reject) => {
       const onAbort = () => reject(controller.signal.reason);
       if (controller.signal.aborted) {
@@ -141,7 +146,7 @@ export async function streamChatReply(args: {
   requestedFileFormat?: FileFormat | null;
   onComplete?: (result: {
     content: string;
-    sources: { title: string; url: string }[];
+    sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[];
     audit?: { content: string; modelId: string };
     artifacts?: ExtractedArtifact[];
     generatedFiles?: GeneratedFile[];
@@ -238,6 +243,7 @@ export async function streamChatReply(args: {
             }),
           VISION_BRIDGE_TIMEOUT_MS,
           "Vision bridge",
+          clientAbort.signal,
         );
         if (imageTranscript) {
           const transcript =
@@ -297,7 +303,7 @@ export async function streamChatReply(args: {
           `<web_data>\n${webContext.contextText}\n</web_data>`,
       });
       if (webContext.sources.length > 0 && !clientGone) {
-        res.write(`data: ${JSON.stringify({ sources: webContext.sources.map((source) => ({ ...source, fetchedAt: new Date().toISOString() })) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ sources: webContext.sources })}\n\n`);
       }
     }
 
@@ -414,6 +420,7 @@ export async function streamChatReply(args: {
               }),
             AUDIT_TIMEOUT_MS,
             "Audit pass",
+                    clientAbort.signal,
           );
           if (auditText.trim()) {
             const parsedAudit = JSON.parse(auditText.trim()) as { note?: unknown };
@@ -444,8 +451,7 @@ export async function streamChatReply(args: {
         if (patched.applied) {
           fullResponse = patched.content;
           if (!clientGone) {
-            res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
-            res.write(`data: ${JSON.stringify({ content: fullResponse, status: "revising" })}\n\n`);
+            res.write(`data: ${JSON.stringify({ status: "revising", patch: patched.operations })}\n\n`);
           }
         } else if (!clientGone && patched.reason) {
           res.write(`data: ${JSON.stringify({ status: "search_warning", message: `${patched.reason} 初稿を保持します。` })}\n\n`);

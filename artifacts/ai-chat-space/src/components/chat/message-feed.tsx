@@ -76,6 +76,8 @@ interface MessageFeedProps {
   streamingAudit?: string;
   isStreaming?: boolean;
   onStop?: () => void;
+  streamingWarning?: string | null;
+  onDismissWarning?: () => void;
 }
 
 function PhaseDots() {
@@ -225,10 +227,13 @@ export function MessageFeed({
   streamingAudit = "",
   isStreaming = false,
   onStop,
+  streamingWarning,
+  onDismissWarning,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
   const { user } = useUser();
   const userInitial =
     user?.firstName?.[0] ??
@@ -258,15 +263,18 @@ export function MessageFeed({
         const el = containerRef.current;
         if (!el) return;
         const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-        stickToBottomRef.current = distance < 96;
+        const atBottom = distance < 96;
+        stickToBottomRef.current = atBottom;
+        setAwayFromBottom(!atBottom);
       }}
       className="relative flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-[calc(8rem+env(safe-area-inset-bottom))]"
     >
-      {!stickToBottomRef.current && (
+      {awayFromBottom && (
         <button
           type="button"
           onClick={() => {
             stickToBottomRef.current = true;
+            setAwayFromBottom(false);
             bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
           }}
           className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs text-foreground shadow-md"
@@ -398,6 +406,20 @@ export function MessageFeed({
                   <FileGenerationPanel phase={streamingPhase as FileGenerationPhase} />
                 )}
 
+                {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (
+                  <AuditCard
+                    content={message.id === STREAMING_ASSISTANT_ID ? streamingAudit || display.auditContent || "" : display.auditContent || ""}
+                    modelId={display.auditModelId}
+                    live={message.id === STREAMING_ASSISTANT_ID && streamingPhase === "auditing"}
+                  />
+                )}
+
+                {!isUser && sources && sources.length > 0 && (
+                  <div className="w-full px-1">
+                    <SourceCards sources={sources} />
+                  </div>
+                )}
+
                 {!isUser && display.artifacts && display.artifacts.length > 0 && (
                   <ArtifactCards artifacts={display.artifacts} />
                 )}
@@ -409,18 +431,14 @@ export function MessageFeed({
                   </div>
                 )}
 
-                 {!isUser && sources && sources.length > 0 && (
-                   <div className="w-full px-1">
-                     <SourceCards sources={sources} />
-                   </div>
-                 )}
-
-                {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (
-                  <AuditCard
-                    content={message.id === STREAMING_ASSISTANT_ID ? streamingAudit || display.auditContent || "" : display.auditContent || ""}
-                    modelId={display.auditModelId}
-                    live={message.id === STREAMING_ASSISTANT_ID && streamingPhase === "auditing"}
-                  />
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && streamingWarning && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <span className="shrink-0">⚠️</span>
+                    <span className="flex-1">{streamingWarning}</span>
+                    <button type="button" onClick={onDismissWarning} className="shrink-0 rounded p-0.5 hover:bg-amber-500/20" aria-label="警告を閉じる">
+                      <span aria-hidden>×</span>
+                    </button>
+                  </div>
                 )}
 
                 {!isUser && message.modelId && (

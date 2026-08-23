@@ -16,7 +16,7 @@ const MAX_NOTE_CHARS = 2000;
 export function applyValidatedAuditPatch(
   draft: string,
   raw: string,
-): { content: string; note: string; applied: boolean; reason?: string } {
+): { content: string; note: string; applied: boolean; operations?: AuditPatchOperation[]; reason?: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -38,18 +38,23 @@ export function applyValidatedAuditPatch(
       return { content: draft, note, applied: false, reason: "監査パッチの操作が不正です。" };
     }
     const op = item as Record<string, unknown>;
+    const start = op.start;
+    const end = op.end;
+    const replacement = op.replacement;
+    const numericStart = typeof start === "number" && Number.isInteger(start) ? start : null;
+    const numericEnd = typeof end === "number" && Number.isInteger(end) ? end : null;
     if (
-      !Number.isInteger(op.start) ||
-      !Number.isInteger(op.end) ||
-      typeof op.replacement !== "string" ||
-      op.start < 0 ||
-      op.end < op.start ||
-      op.end > draft.length ||
-      op.replacement.length > MAX_REPLACEMENT_CHARS
+      numericStart === null ||
+      numericEnd === null ||
+      typeof replacement !== "string" ||
+      numericStart < 0 ||
+      numericEnd < numericStart ||
+      numericEnd > draft.length ||
+      replacement.length > MAX_REPLACEMENT_CHARS
     ) {
       return { content: draft, note, applied: false, reason: "監査パッチの範囲または置換文字数が不正です。" };
     }
-    normalized.push({ start: op.start as number, end: op.end as number, replacement: op.replacement });
+    normalized.push({ start: numericStart, end: numericEnd, replacement });
   }
   normalized.sort((a, b) => a.start - b.start || a.end - b.end);
   for (let i = 1; i < normalized.length; i += 1) {
@@ -62,5 +67,5 @@ export function applyValidatedAuditPatch(
     const op = normalized[i];
     content = content.slice(0, op.start) + op.replacement + content.slice(op.end);
   }
-  return { content, note, applied: normalized.length > 0 };
+  return { content, note, applied: normalized.length > 0, operations: normalized };
 }
