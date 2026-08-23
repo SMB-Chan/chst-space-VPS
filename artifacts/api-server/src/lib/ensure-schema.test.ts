@@ -57,6 +57,24 @@ describe("ensureAiUsageSchema", () => {
     expect(ENSURE_AI_USAGE_SCHEMA_SQL).toContain("DELETE FROM ai_usage_leases WHERE expires_at <= now()");
   });
 
+  it("reconciles legacy deployment columns without deleting or converting data", () => {
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL).toContain(
+      "ADD COLUMN IF NOT EXISTS updated_at timestamptz",
+    );
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL).toContain(
+      "UPDATE ai_usage_windows SET updated_at = now() WHERE updated_at IS NULL",
+    );
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL).toContain(
+      "ADD COLUMN IF NOT EXISTS created_at timestamptz",
+    );
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL).toContain(
+      "ALTER COLUMN last_renewed_at DROP NOT NULL",
+    );
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL).not.toContain("DROP COLUMN");
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL).not.toMatch(/ALTER COLUMN lease_id TYPE/i);
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL.startsWith("BEGIN;")).toBe(true);
+    expect(ENSURE_AI_USAGE_SCHEMA_SQL.endsWith("COMMIT;")).toBe(true);
+  });
   it("runs the SQL through the provided query function", async () => {
     const query = vi.fn().mockResolvedValue(undefined);
     await ensureAiUsageSchema(query);

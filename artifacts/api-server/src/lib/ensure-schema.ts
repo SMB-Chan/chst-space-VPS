@@ -70,6 +70,8 @@ END $$;
 `.trim();
 
 export const ENSURE_AI_USAGE_SCHEMA_SQL = `
+BEGIN;
+
 CREATE TABLE IF NOT EXISTS ai_usage_windows (
   user_id text PRIMARY KEY,
   window_start_ms bigint NOT NULL,
@@ -77,18 +79,53 @@ CREATE TABLE IF NOT EXISTS ai_usage_windows (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- CREATE TABLE IF NOT EXISTS does not reconcile a legacy deployment.
+-- Add and backfill incrementally introduced columns before enforcing their
+-- current defaults and nullability so existing usage rows are preserved.
+ALTER TABLE ai_usage_windows
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+UPDATE ai_usage_windows SET updated_at = now() WHERE updated_at IS NULL;
+ALTER TABLE ai_usage_windows ALTER COLUMN updated_at SET DEFAULT now();
+ALTER TABLE ai_usage_windows ALTER COLUMN updated_at SET NOT NULL;
+
 CREATE TABLE IF NOT EXISTS ai_usage_leases (
   lease_id text PRIMARY KEY,
   user_id text NOT NULL,
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE ai_usage_leases
+  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+UPDATE ai_usage_leases SET created_at = now() WHERE created_at IS NULL;
+ALTER TABLE ai_usage_leases ALTER COLUMN created_at SET DEFAULT now();
+ALTER TABLE ai_usage_leases ALTER COLUMN created_at SET NOT NULL;
+
+-- Older deployments used last_renewed_at without a default. Keep the column
+-- for backwards compatibility, but make it nullable so current inserts do
+-- not fail. Fresh databases do not have this legacy column.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'ai_usage_leases'
+      AND column_name = 'last_renewed_at'
+  ) THEN
+    ALTER TABLE ai_usage_leases
+      ALTER COLUMN last_renewed_at DROP NOT NULL;
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS ai_usage_leases_user_expires_idx
   ON ai_usage_leases(user_id, expires_at);
 
 -- Crashed instances cannot release their lease. Expired rows are harmless but
 -- clearing them at startup keeps the shared coordination table compact.
 DELETE FROM ai_usage_leases WHERE expires_at <= now();
+
+COMMIT;
 `.trim();
 
 export async function ensureMessageSchema(
