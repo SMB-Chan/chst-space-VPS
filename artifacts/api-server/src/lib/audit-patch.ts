@@ -63,12 +63,12 @@ export function applyValidatedAuditPatch(
     normalized.push({ find, replacement });
   }
   const located = normalized
-    .map((op) => ({ ...op, start: draft.indexOf(op.find), end: draft.indexOf(op.find) + op.find.length }))
-    .sort((a, b) => a.start - b.start);
+    .map((op) => ({ ...op, from: draft.indexOf(op.find), to: draft.indexOf(op.find) + op.find.length }))
+    .sort((a, b) => a.from - b.from);
   let totalReplacementChars = 0;
   for (let i = 0; i < located.length; i += 1) {
     totalReplacementChars += located[i].replacement.length;
-    if (i > 0 && located[i - 1].end > located[i].start) {
+    if (i > 0 && located[i - 1].to > located[i].from) {
       return { content: draft, note, applied: false, reason: "監査パッチの原文範囲が重複しています。" };
     }
   }
@@ -78,7 +78,7 @@ export function applyValidatedAuditPatch(
   let content = draft;
   for (let i = located.length - 1; i >= 0; i -= 1) {
     const op = located[i];
-    content = content.slice(0, op.start) + op.replacement + content.slice(op.end);
+    content = content.slice(0, op.from) + op.replacement + content.slice(op.to);
   }
   if (content.length > MAX_FINAL_CHARS) {
     return { content: draft, note, applied: false, reason: "監査パッチ後の本文が長すぎます。" };
