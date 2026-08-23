@@ -126,20 +126,35 @@ export function getAllowedClerkHost(
   return undefined;
 }
 
+/**
+ * Build the browser-visible proxy URL only after the request host matches a
+ * configured hostname. The scheme and path are invariant, so forwarded
+ * protocol/host values can select a known deployment but cannot create a new
+ * origin.
+ */
+export function getClerkProxyUrlForRequest(
+  req: { headers: IncomingHttpHeaders },
+  allowedHosts: ReadonlySet<string>,
+): string | undefined {
+  const hostname = getAllowedClerkHost(req, allowedHosts);
+  return hostname ? `https://${hostname}${CLERK_PROXY_PATH}` : undefined;
+}
+
 export function clerkProxyMiddleware(): RequestHandler {
   if (process.env.NODE_ENV !== 'production') {
     return (_req, _res, next) => next();
   }
 
   const secretKey = process.env.CLERK_SECRET_KEY;
-  const proxyUrl = getConfiguredClerkProxyUrl();
-  // A Clerk secret alone must not expose a trust-sensitive FAPI proxy. The
-  // canonical public proxy URL has to be explicitly configured as well.
-  if (!secretKey || !proxyUrl) {
+  const allowedHosts = getConfiguredClerkHosts();
+  // A Clerk secret alone must not expose a trust-sensitive FAPI proxy. At
+  // least one canonical deployment hostname must be configured. Replit's
+  // REPLIT_DOMAINS supplies this contract automatically in deployments.
+  if (!secretKey || allowedHosts.size === 0) {
     return (_req, _res, next) => next();
   }
 
-  return createProxyMiddleware({
+  const proxyMiddleware = createProxyMiddleware({
     target: CLERK_FAPI,
     changeOrigin: true,
     selfHandleResponse: true,
@@ -147,6 +162,14 @@ export function clerkProxyMiddleware(): RequestHandler {
       path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ''),
     on: {
       proxyReq: (proxyReq, req) => {
+        const proxyUrl = getClerkProxyUrlForRequest(req, allowedHosts);
+        // The outer guard applies the same synchronous lookup before the
+        // proxy starts. Keep this check fail-closed if request state changes.
+        if (!proxyUrl) {
+          proxyReq.destroy();
+          return;
+        }
+
         proxyReq.setHeader('Clerk-Proxy-Url', proxyUrl);
         proxyReq.setHeader('Clerk-Secret-Key', secretKey);
 
@@ -223,4 +246,9 @@ export function clerkProxyMiddleware(): RequestHandler {
       },
     },
   }) as RequestHandler;
+
+  return (req, res, next) => {
+    if (!getClerkProxyUrlForRequest(req, allowedHosts)) return next();
+    return proxyMiddleware(req, res, next);
+  };
 }

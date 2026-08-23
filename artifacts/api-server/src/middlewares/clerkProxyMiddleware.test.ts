@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import {
   clerkProxyMiddleware,
   getAllowedClerkHost,
+  getClerkProxyUrlForRequest,
   getConfiguredClerkHosts,
   getConfiguredClerkProxyUrl,
 } from "./clerkProxyMiddleware";
@@ -105,10 +106,54 @@ describe("Clerk proxy trust boundary", () => {
     ).toBeUndefined();
   });
 
+  it("derives HTTPS proxy URLs only from configured request hosts", () => {
+    const allowed = new Set(["chat-smb.replit.app", "app.example.com"]);
+
+    expect(
+      getClerkProxyUrlForRequest(
+        {
+          headers: {
+            "x-forwarded-host": "app.example.com",
+            host: "chat-smb.replit.app",
+          },
+        },
+        allowed,
+      ),
+    ).toBe("https://app.example.com/api/__clerk");
+
+    expect(
+      getClerkProxyUrlForRequest(
+        {
+          headers: {
+            "x-forwarded-host": "evil.example, app.example.com",
+            host: "chat-smb.replit.app:443",
+          },
+        },
+        allowed,
+      ),
+    ).toBe("https://chat-smb.replit.app/api/__clerk");
+
+    expect(
+      getClerkProxyUrlForRequest(
+        {
+          headers: {
+            "x-forwarded-host": "evil.example",
+            host: "also-evil.example",
+          },
+        },
+        allowed,
+      ),
+    ).toBeUndefined();
+  });
+
   it("does not expose the production FAPI proxy from CLERK_SECRET_KEY alone", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CLERK_SECRET_KEY", "sk_live_test");
     vi.stubEnv("CLERK_PROXY_URL", "");
+    vi.stubEnv("CLERK_ALLOWED_HOSTS", "");
+    vi.stubEnv("REPLIT_DOMAINS", "");
+    vi.stubEnv("REPLIT_DEV_DOMAIN", "");
+    vi.stubEnv("FRONTEND_URL", "");
 
     const next = vi.fn();
     clerkProxyMiddleware()(
