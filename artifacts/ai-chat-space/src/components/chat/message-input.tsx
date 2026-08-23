@@ -9,6 +9,7 @@ import {
   FileText,
   FileSpreadsheet,
   Presentation,
+  Music as MusicIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compressImageFile, formatBytes } from "@/lib/compress-image";
@@ -17,6 +18,8 @@ export interface OutgoingAttachment {
   name: string;
   content: string;
   isBase64: boolean;
+  /** "image" only for real images; binary documents/audio travel as kind "file". */
+  kind?: "image" | "file";
 }
 
 export type FileFormat = "pdf" | "docx" | "xlsx" | "pptx";
@@ -33,10 +36,22 @@ interface MessageInputProps {
   placeholder?: string;
 }
 
-// 画像のみ対応（PDFなどバイナリは非対応）
+// 画像・テキスト・文書（PDF/ZIP/Office）・音声を受け付け。
+// バイナリはサーバー側でマジックナンバー検証のうえテキスト抽出される。
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const ACCEPTED_TEXT_TYPES = ["text/plain", "text/markdown", "text/csv", "application/json"];
-const MAX_IMAGE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_DOCUMENT_TYPES = [
+  "application/pdf",
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+];
+const ACCEPTED_DOCUMENT_EXTENSIONS = [".pdf", ".zip", ".docx", ".xlsx", ".pptx"];
+const ACCEPTED_AUDIO_EXTENSIONS = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"];
+// 画像・文書・音声に共通の1件あたり上限
+const MAX_DOCUMENT_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT_FILE_SIZE_BYTES = 1 * 1024 * 1024;
 const MAX_TOTAL_TEXT_SIZE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // decoded attachment cap
@@ -58,16 +73,32 @@ function isTextFile(file: Pick<File, "type" | "name">): boolean {
     lowerName.endsWith(".csv") || lowerName.endsWith(".json");
 }
 
+function hasExtension(file: Pick<File, "name">, extensions: string[]): boolean {
+  const lowerName = file.name.toLowerCase();
+  return extensions.some((extension) => lowerName.endsWith(extension));
+}
+
+function isDocumentFile(file: Pick<File, "type" | "name">): boolean {
+  return ACCEPTED_DOCUMENT_TYPES.includes(file.type) || hasExtension(file, ACCEPTED_DOCUMENT_EXTENSIONS);
+}
+
+function isAudioFile(file: Pick<File, "type" | "name">): boolean {
+  return file.type.startsWith("audio/") || hasExtension(file, ACCEPTED_AUDIO_EXTENSIONS);
+}
+
 function validateFile(file: File): string | null {
   const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
   const isText = isTextFile(file);
-  if (!isImage && !isText) {
-    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP）またはテキストファイル（TXT・MD・CSV・JSON）を添付してください。`;
+  const isDocument = isDocumentFile(file);
+  const isAudio = isAudioFile(file);
+  if (!isImage && !isText && !isDocument && !isAudio) {
+    return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP）、テキスト（TXT・MD・CSV・JSON）、文書（PDF・ZIP・DOCX・XLSX・PPTX）、音声（MP3・WAV・M4A・OGG・FLAC・WebM）を添付できます。`;
   }
-  const limit = isImage ? MAX_IMAGE_FILE_SIZE_BYTES : MAX_TEXT_FILE_SIZE_BYTES;
+  const limit = isText ? MAX_TEXT_FILE_SIZE_BYTES : MAX_DOCUMENT_FILE_SIZE_BYTES;
   if (file.size > limit) {
     const limitMb = limit / 1024 / 1024;
-    return `${file.name} は大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。${isImage ? "画像" : "テキストファイル"}は1件${limitMb}MB以下にしてください。`;
+    const label = isImage ? "画像" : isText ? "テキストファイル" : isDocument ? "文書ファイル" : "音声ファイル";
+    return `${file.name} は大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。${label}は1件${limitMb}MB以下にしてください。`;
   }
   return null;
 }
@@ -82,6 +113,8 @@ function totalTextSize(files: StagedFile[]): number {
 
 function readOne(file: File): Promise<OutgoingAttachment> {
   const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
+  // 画像・文書・音声は base64 データURL、テキストはそのまま送信する。
+  const asDataUrl = isImage || !isTextFile(file);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -90,10 +123,15 @@ function readOne(file: File): Promise<OutgoingAttachment> {
         reject(new Error("ファイルの読み込みに失敗しました。"));
         return;
       }
-      resolve({ name: file.name, content: result, isBase64: isImage });
+      resolve({
+        name: file.name,
+        content: result,
+        isBase64: asDataUrl,
+        kind: isImage ? "image" : "file",
+      });
     };
     reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました。"));
-    if (isImage) reader.readAsDataURL(file);
+    if (asDataUrl) reader.readAsDataURL(file);
     else reader.readAsText(file);
   });
 }
@@ -257,6 +295,8 @@ export function MessageInput({
             >
               {item.file.type.startsWith("image/") ? (
                 <ImageIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+              ) : isAudioFile(item.file) ? (
+                <MusicIcon className="w-3.5 h-3.5 text-primary shrink-0" />
               ) : (
                 <FileIcon className="w-3.5 h-3.5 text-primary shrink-0" />
               )}
@@ -310,7 +350,7 @@ export function MessageInput({
           ref={fileInputRef}
           onChange={handleFileChange}
           className="hidden"
-          accept="image/jpeg,image/png,image/gif,image/webp,.txt,.md,.csv,.json"
+          accept="image/jpeg,image/png,image/gif,image/webp,.txt,.md,.csv,.json,.pdf,.zip,.docx,.xlsx,.pptx,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/ogg,audio/flac,audio/webm,.mp3,.wav,.m4a,.ogg,.flac,.webm"
           multiple
         />
 

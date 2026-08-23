@@ -87,9 +87,11 @@ async function streamMessage(
           ...(extra?.attachments?.length
             ? {
                 attachments: extra.attachments.map((attachment) => ({
-                  kind: attachment.isBase64 ? "image" : "file",
+                  // バイナリ文書・音声は base64 でも kind "file"（画像のみ "image"）
+                  kind: attachment.kind ?? (attachment.isBase64 ? "image" : "file"),
                   name: attachment.name,
                   content: attachment.content,
+                  isBase64: attachment.isBase64,
                 })),
               }
             : {}),
@@ -145,6 +147,7 @@ async function streamMessage(
       if (parsed.status === "searching") onStatus("searching", parsed.query as string | undefined);
       if (parsed.status === "fetching") onStatus("fetching");
       if (parsed.status === "reading-images") onStatus("reading-images");
+      if (parsed.status === "reading-files") onStatus("reading-files");
       if (parsed.status === "thinking") onStatus("thinking");
       if (parsed.status === "generating") onStatus("generating");
       if (parsed.status === "auditing") onStatus("auditing");
@@ -444,7 +447,8 @@ export function ChatPage() {
     if (files && files.length > 0) {
       // 画像非対応モデルでも、サーバー側の vision ブリッジが画像をテキスト化する
       // ため送信自体は許可する。精度が落ちる可能性だけ通知する。
-      const hasImage = files.some((file) => file.isBase64);
+      // （文書・音声のバイナリ添付も base64 なので、画像だけを選り分ける）
+      const hasImage = files.some((file) => (file.kind ?? (file.isBase64 ? "image" : "file")) === "image");
       if (hasImage) {
         const model = models.find((m) => m.id === selectedModel);
         if (model && !model.supportsVision) {
@@ -706,6 +710,8 @@ export function ChatPage() {
                   ? "thinking"
                   : searchStatus?.kind === "reading-images"
                     ? "reading-images"
+                  : searchStatus?.kind === "reading-files"
+                    ? "reading-files"
                   : searchStatus?.kind === "revising"
                     ? "revising"
                   : searchStatus?.kind === "auditing"

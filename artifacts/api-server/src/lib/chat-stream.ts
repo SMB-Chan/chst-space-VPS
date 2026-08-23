@@ -45,7 +45,7 @@ const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
 
-function withTimeout<T>(
+export function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
   ms: number,
   label: string,
@@ -178,10 +178,14 @@ export async function streamChatReply(args: {
     publicAiError,
   } = args;
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
+  // The route may have opened the stream already (e.g. to report file
+  // extraction progress); headers must not be set twice.
+  if (!res.headersSent) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+  }
 
   // req "close" fires when the POST body is finished — that is NOT a client
   // disconnect. Watch the response socket instead.
