@@ -171,25 +171,25 @@ export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
           `SELECT window_start_ms, request_count
              FROM ai_usage_windows
             WHERE user_id = $1
+              AND window_start_ms = $2
             FOR UPDATE`,
-          [input.userId],
+          [input.userId, windowStartMs],
         );
         const row = current.rows[0];
         let requestCount = row?.request_count ?? 0;
-        const storedWindowStart = row ? Number(row.window_start_ms) : undefined;
 
         if (!row) {
+          // Legacy deployments keyed windows by (user_id, window_start_ms),
+          // while current deployments keep one row per user. Deleting only
+          // this user's expired windows before inserting the current one is
+          // safe under both schemas and avoids a primary-key rewrite.
+          await client.query(
+            "DELETE FROM ai_usage_windows WHERE user_id = $1",
+            [input.userId],
+          );
           await client.query(
             `INSERT INTO ai_usage_windows (user_id, window_start_ms, request_count, updated_at)
              VALUES ($1, $2, 0, now())`,
-            [input.userId, windowStartMs],
-          );
-          requestCount = 0;
-        } else if (storedWindowStart !== windowStartMs) {
-          await client.query(
-            `UPDATE ai_usage_windows
-                SET window_start_ms = $2, request_count = 0, updated_at = now()
-              WHERE user_id = $1`,
             [input.userId, windowStartMs],
           );
           requestCount = 0;
@@ -207,8 +207,9 @@ export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
         await client.query(
           `UPDATE ai_usage_windows
               SET request_count = request_count + 1, updated_at = now()
-            WHERE user_id = $1`,
-          [input.userId],
+            WHERE user_id = $1
+              AND window_start_ms = $2`,
+          [input.userId, windowStartMs],
         );
       }
 

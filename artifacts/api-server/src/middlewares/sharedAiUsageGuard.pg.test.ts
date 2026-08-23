@@ -91,6 +91,85 @@ describePostgres("PostgresSharedAiUsageStore", () => {
     expect(nextWindow.allowed).toBe(true);
   });
 
+  it("supports legacy composite-key windows without duplicate-key rollover failures", async () => {
+    const userId = testUser("legacy-composite-window");
+    const currentWindowMs = Math.floor(Date.now() / 60_000) * 60_000;
+    const store = new PostgresSharedAiUsageStore();
+
+    await pool.query(
+      "ALTER TABLE ai_usage_windows DROP CONSTRAINT ai_usage_windows_pkey",
+    );
+    await pool.query(
+      `ALTER TABLE ai_usage_windows
+       ADD CONSTRAINT ai_usage_windows_pkey PRIMARY KEY (user_id, window_start_ms)`,
+    );
+
+    try {
+      await pool.query(
+        `INSERT INTO ai_usage_windows
+           (user_id, window_start_ms, request_count, updated_at)
+         VALUES ($1, $2, 4, now()), ($1, $3, 7, now())`,
+        [userId, currentWindowMs - 60_000, currentWindowMs],
+      );
+
+      const current = await store.acquire({
+        userId,
+        nowMs: currentWindowMs + 1_000,
+        windowMs: 60_000,
+        maxRequests: 20,
+        maxConcurrent: 0,
+        leaseTtlMs: 30_000,
+      });
+      expect(current.allowed).toBe(true);
+
+      const currentRows = await pool.query<{
+        window_start_ms: string;
+        request_count: number;
+      }>(
+        `SELECT window_start_ms, request_count
+           FROM ai_usage_windows
+          WHERE user_id = $1
+          ORDER BY window_start_ms`,
+        [userId],
+      );
+      expect(currentRows.rows).toEqual([
+        { window_start_ms: String(currentWindowMs - 60_000), request_count: 4 },
+        { window_start_ms: String(currentWindowMs), request_count: 8 },
+      ]);
+
+      const next = await store.acquire({
+        userId,
+        nowMs: currentWindowMs + 61_000,
+        windowMs: 60_000,
+        maxRequests: 20,
+        maxConcurrent: 0,
+        leaseTtlMs: 30_000,
+      });
+      expect(next.allowed).toBe(true);
+
+      const rolledRows = await pool.query<{
+        window_start_ms: string;
+        request_count: number;
+      }>(
+        `SELECT window_start_ms, request_count
+           FROM ai_usage_windows
+          WHERE user_id = $1`,
+        [userId],
+      );
+      expect(rolledRows.rows).toEqual([
+        { window_start_ms: String(currentWindowMs + 60_000), request_count: 1 },
+      ]);
+    } finally {
+      await pool.query("DELETE FROM ai_usage_windows WHERE user_id = $1", [userId]);
+      await pool.query(
+        "ALTER TABLE ai_usage_windows DROP CONSTRAINT ai_usage_windows_pkey",
+      );
+      await pool.query(
+        `ALTER TABLE ai_usage_windows
+         ADD CONSTRAINT ai_usage_windows_pkey PRIMARY KEY (user_id)`,
+      );
+    }
+  });
   it("recovers an abandoned concurrency lease after its TTL", async () => {
     const userId = testUser("stale");
     const nowMs = Date.now();
