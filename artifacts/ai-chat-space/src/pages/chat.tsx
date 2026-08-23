@@ -307,6 +307,17 @@ export function ChatPage() {
     resolvedAuditModel && resolvedAuditModel !== selectedModel ? resolvedAuditModel : undefined;
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
 
+  const stopStreaming = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    setSearchStatus(null);
+    setStreamingReasoning("");
+    setStreamingAudit("");
+    setStreamError("回答を停止しました。初稿は保存されていません。");
+    setOptimisticUserMessage(null);
+  };
+
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
@@ -674,6 +685,8 @@ export function ChatPage() {
             }
             streamingReasoning={streamingReasoning}
             streamingAudit={streamingAudit}
+             isStreaming={isStreaming}
+             onStop={stopStreaming}
           />
         )}
       </div>

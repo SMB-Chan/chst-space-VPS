@@ -3,6 +3,8 @@ import { ExternalLink, Globe2 } from "lucide-react";
 export interface Source {
   title: string;
   url: string;
+  publishedAt?: string | null;
+  fetchedAt?: string | null;
 }
 
 interface SourceCardsProps {
@@ -47,11 +49,14 @@ export function SourceCards({ sources }: SourceCardsProps) {
                   third party would disclose every cited domain to that party. */}
               <Globe2 className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
               <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-medium text-foreground truncate leading-snug">
-                  {source.title || domain}
+                <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2 break-words">
+                  {(source.title || domain).slice(0, 180)}
                 </div>
                 <div className="text-[10px] text-muted-foreground/70 truncate leading-snug">
                   {domain}
+                </div>
+                <div className="text-[10px] text-muted-foreground/60 leading-snug">
+                  公開日: {source.publishedAt ? formatDate(source.publishedAt) : "不明"} ・ 取得: {formatDate(source.fetchedAt)}
                 </div>
               </div>
               <ExternalLink className="w-3 h-3 shrink-0 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
@@ -61,4 +66,16 @@ export function SourceCards({ sources }: SourceCardsProps) {
       </div>
     </div>
   );
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return "不明";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "不明" : date.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

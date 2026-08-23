@@ -39,6 +39,7 @@ import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-rev
 import { describeImagesForTextModel } from "./vision-bridge";
 import { buildTranslationSystemPrompt, type TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
+import { applyValidatedAuditPatch } from "./audit-patch";
 
 const AUDIT_TIMEOUT_MS = 120_000;
 const REVISION_TIMEOUT_MS = 120_000;
@@ -180,8 +181,12 @@ export async function streamChatReply(args: {
   // req "close" fires when the POST body is finished — that is NOT a client
   // disconnect. Watch the response socket instead.
   let clientGone = false;
+  const clientAbort = new AbortController();
   res.on("close", () => {
-    if (!res.writableEnded) clientGone = true;
+    if (!res.writableEnded) {
+      clientGone = true;
+      clientAbort.abort(new Error("Client disconnected"));
+    }
   });
 
   let fullResponse = "";
@@ -292,7 +297,7 @@ export async function streamChatReply(args: {
           `<web_data>\n${webContext.contextText}\n</web_data>`,
       });
       if (webContext.sources.length > 0 && !clientGone) {
-        res.write(`data: ${JSON.stringify({ sources: webContext.sources })}\n\n`);
+        res.write(`data: ${JSON.stringify({ sources: webContext.sources.map((source) => ({ ...source, fetchedAt: new Date().toISOString() })) })}\n\n`);
       }
     }
 
@@ -387,7 +392,7 @@ export async function streamChatReply(args: {
             }
           }
           const auditText = await withTimeout(
-            (signal) =>
+              (signal) =>
               streamModelText({
                 client: auditor.client,
                 provider: auditor.provider,
@@ -400,18 +405,24 @@ export async function streamChatReply(args: {
                     content: auditUserContent,
                   },
                 ],
-                onDelta: (added, kind) => {
-                  if (clientGone || kind !== "content") return;
-                  res.write(`data: ${JSON.stringify({ audit: added })}\n\n`);
-                },
-                shouldStop: () => false,
+                 onDelta: () => {
+                   // Audit JSON is intentionally kept server-side until it has
+                   // passed validation; partial model output must never leak.
+                 },
+                  shouldStop: () => clientGone || clientAbort.signal.aborted,
                 signal,
               }),
             AUDIT_TIMEOUT_MS,
             "Audit pass",
           );
           if (auditText.trim()) {
-            audit = { content: auditText.trim(), modelId: auditModelId };
+            const parsedAudit = JSON.parse(auditText.trim()) as { note?: unknown };
+            const note = typeof parsedAudit.note === "string" ? parsedAudit.note.trim().slice(0, 2000) : "";
+            if (note && !clientGone) {
+              res.write(`data: ${JSON.stringify({ audit: note })}\n\n`);
+            }
+            audit = { content: note, modelId: auditModelId };
+            (audit as { raw?: string }).raw = auditText.trim();
           }
         } catch (err) {
           logger.warn({ err, auditModelId }, "Audit pass failed; returning main answer only");
@@ -426,86 +437,18 @@ export async function streamChatReply(args: {
         }
       }
 
-      // The revision pass runs regardless of clientGone: SSE writes are
-      // skipped after a disconnect, but the revised final answer is what
-      // onComplete persists, so a reload shows the corrected answer.
       if (audit?.content) {
         const draft = fullResponse;
-        let replacedDraft = false;
-        try {
+        const rawAudit = (audit as { raw?: string }).raw ?? audit.content;
+        const patched = applyValidatedAuditPatch(draft, rawAudit);
+        if (patched.applied) {
+          fullResponse = patched.content;
           if (!clientGone) {
-            res.write(`data: ${JSON.stringify({ status: "revising" })}\n\n`);
+            res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
+            res.write(`data: ${JSON.stringify({ content: fullResponse, status: "revising" })}\n\n`);
           }
-          // The draft already reflects any attached images; resending megabytes
-          // of image data for a text rewrite doubles the failure surface
-          // (payload limits, vision token cost, timeouts), so the revision sees
-          // text only. Attachment names stay visible via their text parts.
-          const revisionMessages = workingMessages.map(
-            (msg): OpenAI.Chat.Completions.ChatCompletionMessageParam => {
-              if (!Array.isArray(msg.content)) return msg;
-              return {
-                ...msg,
-                content: msg.content.filter(
-                  (part): part is OpenAI.Chat.Completions.ChatCompletionContentPartText =>
-                    part.type === "text",
-                ),
-              } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
-            },
-          );
-          const revised = await withTimeout(
-            (signal) =>
-              streamModelText({
-                client,
-                provider,
-                modelId,
-                reasoningLevel,
-                messages: [
-                  ...revisionMessages,
-                  { role: "assistant", content: fullResponse },
-                  {
-                    role: "user",
-                    content: buildRevisionUserMessage({
-                      question: userText,
-                      draft: fullResponse,
-                      audit: audit.content,
-                    }),
-                  },
-                ],
-                onDelta: (added, kind) => {
-                  if (clientGone) return;
-                  if (kind === "reasoning") {
-                    res.write(`data: ${JSON.stringify({ status: "revising", reasoning: added })}\n\n`);
-                    return;
-                  }
-                  if (!replacedDraft) {
-                    replacedDraft = true;
-                    res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
-                  }
-                  res.write(`data: ${JSON.stringify({ content: added, status: "revising" })}\n\n`);
-                },
-                shouldStop: () => false,
-                signal,
-              }),
-            REVISION_TIMEOUT_MS,
-            "Revision pass",
-          );
-          if (revised.trim()) {
-            fullResponse = revised.trim();
-          }
-        } catch (err) {
-          logger.warn({ err, modelId }, "Revision pass failed; keeping draft answer");
-          if (!clientGone) {
-            if (replacedDraft) {
-              res.write(`data: ${JSON.stringify({ status: "revising", resetContent: true })}\n\n`);
-              res.write(`data: ${JSON.stringify({ content: draft, status: "generating" })}\n\n`);
-            }
-            res.write(
-              `data: ${JSON.stringify({
-                status: "search_warning",
-                message: "最終報告の作成に失敗したので、初稿を表示します。",
-              })}\n\n`,
-            );
-          }
+        } else if (!clientGone && patched.reason) {
+          res.write(`data: ${JSON.stringify({ status: "search_warning", message: `${patched.reason} 初稿を保持します。` })}\n\n`);
         }
       }
 

@@ -14,12 +14,9 @@ export const AUDIT_SYSTEM_PROMPT = `あなたは会話の記憶を持たない�
 - 反対意見やリスクの欠落
 - 売買指示や断定が混じっていないか
 
-出力の型:
-1. 判定（妥当 / 要注意 / 不十分）を先に1行
-2. 問題点（箇条書き。無ければ「重大な問題は見当たらない」）
-3. 根拠が弱い箇所
-4. 抜けている視点
-5. 修正するなら何を足すか（短く）`;
+出力はJSONのみ。Markdownや前置きは禁止:
+{"note":"判定と短い点検メモ（最大2000文字）","operations":[{"start":0,"end":0,"replacement":"初稿の文字範囲を置換する短い修正"}]}
+operationsは初稿の文字位置に対する最大8件の非重複置換。修正不要なら空配列。初稿全体を再掲しない。`;
 
 export function buildAuditUserMessage(args: {
   question: string;

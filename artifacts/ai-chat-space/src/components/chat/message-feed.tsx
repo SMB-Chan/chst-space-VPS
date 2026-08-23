@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, Brain, ChevronDown, FileText, Download } from "lucide-react";
+import { Loader2, Paperclip, Bot, Brain, ChevronDown, FileText, Download, ArrowDown, Square } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -74,6 +74,8 @@ interface MessageFeedProps {
   streamingPhase?: StreamingPhase;
   streamingReasoning?: string;
   streamingAudit?: string;
+  isStreaming?: boolean;
+  onStop?: () => void;
 }
 
 function PhaseDots() {
@@ -101,11 +103,11 @@ function ReasoningPanel({ text, live }: { text: string; live: boolean }) {
         {live && <PhaseDots />}
         <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
       </button>
-      {open && text && (
-        <div className="px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground/90 whitespace-pre-wrap max-h-40 md:max-h-48 overflow-y-auto font-sans break-words [overflow-wrap:anywhere]">
-          {text}
-        </div>
-      )}
+       {open && text && (
+         <div className="px-3 pb-3 text-[12px] leading-relaxed text-muted-foreground/90 font-sans">
+           推論の詳細は安全のため表示していません。
+         </div>
+       )}
     </div>
   );
 }
@@ -221,6 +223,8 @@ export function MessageFeed({
   streamingPhase = null,
   streamingReasoning = "",
   streamingAudit = "",
+  isStreaming = false,
+  onStop,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -256,9 +260,21 @@ export function MessageFeed({
         const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
         stickToBottomRef.current = distance < 96;
       }}
-      className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-[calc(8rem+env(safe-area-inset-bottom))]"
+      className="relative flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-[calc(8rem+env(safe-area-inset-bottom))]"
     >
-      <div className="max-w-3xl mx-auto space-y-12">
+      {!stickToBottomRef.current && (
+        <button
+          type="button"
+          onClick={() => {
+            stickToBottomRef.current = true;
+            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          }}
+          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs text-foreground shadow-md"
+        >
+          <ArrowDown className="h-3.5 w-3.5" /> 最新へ戻る
+        </button>
+      )}
+      <div className="max-w-4xl mx-auto space-y-12">
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
@@ -382,12 +398,6 @@ export function MessageFeed({
                   <FileGenerationPanel phase={streamingPhase as FileGenerationPhase} />
                 )}
 
-                {!isUser && sources && sources.length > 0 && (
-                  <div className="w-full px-1">
-                    <SourceCards sources={sources} />
-                  </div>
-                )}
-
                 {!isUser && display.artifacts && display.artifacts.length > 0 && (
                   <ArtifactCards artifacts={display.artifacts} />
                 )}
@@ -398,6 +408,12 @@ export function MessageFeed({
                     ))}
                   </div>
                 )}
+
+                 {!isUser && sources && sources.length > 0 && (
+                   <div className="w-full px-1">
+                     <SourceCards sources={sources} />
+                   </div>
+                 )}
 
                 {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (
                   <AuditCard
@@ -416,6 +432,18 @@ export function MessageFeed({
             </div>
           );
         })}
+        {isStreaming && onStop && (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={onStop}
+              className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
+              aria-label="この回答を停止"
+            >
+              <Square className="h-3 w-3 fill-current" /> 停止
+            </button>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>
