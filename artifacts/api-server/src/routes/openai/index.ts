@@ -16,11 +16,17 @@ import {
   parseReasoningLevel,
   getClientForModel,
 } from "../../lib/ai-clients";
-import { streamChatReply } from "../../lib/chat-stream";
+import { streamChatReply, withTimeout } from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
 import { parseTranslationMode } from "../../lib/translation";
 import { logger } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
+import {
+  FILE_EXTRACTION_TIMEOUT_MS,
+  FileExtractionError,
+  resolveBinaryAttachments,
+} from "../../lib/file-extraction";
+import { TranscriptionError } from "../../lib/audio-transcription";
 import { normalizeConversationTitle } from "../../lib/conversation-title";
 import {
   deleteOwnedMessagesAndAssets,
@@ -139,6 +145,53 @@ function sendMessageContentError(res: Response, error: unknown): boolean {
   if (!(error instanceof UserMessageContentError)) return false;
   res.status(error.status).json({ error: error.publicMessage });
   return true;
+}
+
+function extractionPublicError(err: unknown): string {
+  if (err instanceof FileExtractionError || err instanceof TranscriptionError) {
+    return err.publicMessage;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  if (/timed out/i.test(message)) {
+    return "添付ファイルの解析がタイムアウトしました。ファイルを小さくするか、件数を減らして再試行してください。";
+  }
+  return "添付ファイルの解析に失敗しました。もう一度添付してください。";
+}
+
+/**
+ * Binary attachments (PDF/ZIP/Office/audio) are reduced to capped text on the
+ * server before anything reaches a model. Extraction can take tens of
+ * seconds (audio transcription), so progress is reported over SSE; the route
+ * therefore opens the stream here when needed.
+ */
+async function resolveMessageBinaries(
+  message: ParsedUserMessageContent,
+  res: Response,
+): Promise<ParsedUserMessageContent> {
+  if (!message.hasBinaries) return message;
+  if (!res.headersSent) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+  }
+  if (!res.writableEnded) {
+    res.write(`data: ${JSON.stringify({ status: "reading-files" })}\n\n`);
+  }
+  return withTimeout(
+    (signal) =>
+      resolveBinaryAttachments(
+        message,
+        (name) => {
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ status: "reading-files", name })}\n\n`);
+          }
+        },
+        signal,
+      ),
+    FILE_EXTRACTION_TIMEOUT_MS,
+    "File extraction",
+  );
 }
 
 router.use("/openai/artifacts", requireAuth);
@@ -410,6 +463,20 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       return;
     }
 
+    try {
+      newMessage = await resolveMessageBinaries(newMessage, res);
+    } catch (err) {
+      logger.warn({ err, conversationId }, "Attachment extraction failed");
+      const message = extractionPublicError(err);
+      if (!res.headersSent) {
+        res.status(400).json({ error: message });
+      } else if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+
     const history = await db
       .select()
       .from(messages)
@@ -592,14 +659,31 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
+    try {
+      newMessage = await resolveMessageBinaries(newMessage, res);
+    } catch (err) {
+      logger.warn({ err }, "Attachment extraction failed");
+      const message = extractionPublicError(err);
+      if (!res.headersSent) {
+        res.status(400).json({ error: message });
+      } else if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+
     const historicalImageBudget = createHistoricalImageBudget();
     const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
     for (const hist of [...(parsed.data.history ?? [])].reverse()) {
       if (hist.role === "user") {
         try {
-          const parsedHistory = parseUserMessageContent(
-            hist.content,
-            hist.attachments as IncomingAttachment[] | undefined,
+          const parsedHistory = await resolveMessageBinaries(
+            parseUserMessageContent(
+              hist.content,
+              hist.attachments as IncomingAttachment[] | undefined,
+            ),
+            res,
           );
           historicalChatMessages.push({
             role: "user",

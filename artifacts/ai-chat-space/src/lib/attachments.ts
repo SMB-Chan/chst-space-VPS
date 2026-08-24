@@ -4,6 +4,8 @@ export interface SerializableAttachment {
   name: string;
   content: string;
   isBase64: boolean;
+  /** Binary documents/audio are base64 but kind "file"; images are "image". */
+  kind?: "image" | "file";
 }
 
 export type AttachmentChip = { kind: "image" | "file"; name: string };
@@ -21,7 +23,7 @@ export function serializeAttachmentMessage(
   return `${ATTACHMENTS_V1_PREFIX}${JSON.stringify({
     question,
     attachments: attachments.map((attachment) => ({
-      kind: attachment.isBase64 ? "image" : "file",
+      kind: attachment.kind ?? (attachment.isBase64 ? "image" : "file"),
       name: attachment.name,
       content: attachment.content,
       isBase64: attachment.isBase64,
@@ -44,7 +46,11 @@ export function parseAttachmentMessageForDisplay(
         if (!item || typeof item !== "object") return [];
         const rec = item as { kind?: unknown; type?: unknown; name?: unknown; isBase64?: unknown };
         if (typeof rec.name !== "string") return [];
-        const isImage = rec.kind === "image" || rec.type === "image" || rec.isBase64 === true;
+        // kind/type があればそれが正（バイナリ文書・音声は base64 でも "file"）。
+        // どちらもない旧データだけ isBase64 で推定する。
+        const declared = rec.kind ?? rec.type;
+        const isImage =
+          declared !== undefined ? declared === "image" : rec.isBase64 === true;
         return [{ kind: isImage ? "image" : "file", name: rec.name }];
       });
       return { displayContent, attachments };

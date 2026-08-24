@@ -30,6 +30,20 @@ describe("attachment message storage format", () => {
     });
   });
 
+  it("keeps binary documents/audio as file chips even though they are base64", () => {
+    const stored = serializeAttachmentMessage("要約して", [
+      { name: "report.pdf", content: "data:application/pdf;base64,AAAA", isBase64: true, kind: "file" },
+      { name: "memo.mp3", content: "data:audio/mpeg;base64,AAAA", isBase64: true, kind: "file" },
+    ]);
+    expect(parseAttachmentMessageForDisplay(stored)).toEqual({
+      displayContent: "要約して",
+      attachments: [
+        { kind: "file", name: "report.pdf" },
+        { kind: "file", name: "memo.mp3" },
+      ],
+    });
+  });
+
   it("compacts private history without resending attachment payloads", () => {
     const stored = serializeAttachmentMessage("比較して", [
       { name: "diagram.png", content: "data:image/png;base64,SECRET", isBase64: true },
