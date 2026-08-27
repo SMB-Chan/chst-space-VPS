@@ -89,8 +89,10 @@ describe("specialist capability registry", () => {
       "/api/v1/services/aigc/image-generation/generation",
     );
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      model: "qwen-image-plus",
-      input: { prompt: "a small blue bird" },
+      model: "qwen-image-3.0-pro",
+      input: {
+        messages: [{ content: [{ text: "a small blue bird" }] }],
+      },
     });
   });
 });

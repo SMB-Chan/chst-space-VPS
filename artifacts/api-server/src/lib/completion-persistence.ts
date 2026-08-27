@@ -4,6 +4,7 @@ import { assets, artifacts, conversations, messages } from "@workspace/db/schema
 import type { ExtractedArtifact } from "./artifacts";
 import type { GeneratedFile } from "./file-generation";
 import type { GeneratedAsset } from "./specialist-capabilities";
+import { validateGeneratedAsset } from "./generated-assets";
 import { logger } from "./logger";
 
 export const DEFAULT_MAX_USER_GENERATED_FILE_BYTES = 50 * 1024 * 1024;
@@ -84,12 +85,12 @@ export async function persistChatCompletion(
   const generatedAssets = input.generatedAssets ?? [];
   for (const file of generatedFiles) validateGeneratedFile(file);
   for (const asset of generatedAssets) {
-    if (
-      !Number.isSafeInteger(asset.size) ||
-      asset.size <= 0 ||
-      asset.buffer.length !== asset.size ||
-      (asset.capability !== "image-generate" && asset.capability !== "image-edit")
-    ) {
+    try {
+      validateGeneratedAsset(asset);
+    } catch {
+      throw new Error("Generated specialist asset metadata is invalid");
+    }
+    if (asset.capability !== "image-generate" && asset.capability !== "image-edit") {
       throw new Error("Generated specialist asset metadata is invalid");
     }
   }

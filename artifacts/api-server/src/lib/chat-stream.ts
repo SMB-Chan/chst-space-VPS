@@ -45,6 +45,10 @@ import {
   type GeneratedAsset,
   type SpecialistToolCall,
 } from "./specialist-capabilities";
+import {
+  planCapabilityTool,
+  type CapabilityToolPlan,
+} from "./capability-broker";
 
 const AUDIT_TIMEOUT_MS = 120_000;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
@@ -121,6 +125,31 @@ function wantsArtifact(userText: string): boolean {
 
 function wantsGeneratedFile(userText: string): boolean {
   return /(pdf|docx|xlsx|pptx|word|excel|powerpoint|エクセル|パワーポイント|ワード)/i.test(userText);
+}
+
+function specialistCallFromPlan(plan: CapabilityToolPlan): SpecialistToolCall | undefined {
+  if (plan.tool === "none") return undefined;
+  if (plan.tool === "audio.transcribe") {
+    return {
+      id: "capability-broker-audio-1",
+      name: "transcribe_audio",
+      arguments: JSON.stringify({
+        attachmentName: plan.attachmentName,
+        ...(plan.modelId ? { modelId: plan.modelId } : {}),
+      }),
+    };
+  }
+  return {
+    id: `capability-broker-${plan.tool.replace(".", "-")}-1`,
+    name: plan.tool === "image.edit" ? "edit_image" : "generate_image",
+    arguments: JSON.stringify({
+      prompt: plan.prompt,
+      ...(plan.imageName ? { imageName: plan.imageName } : {}),
+      ...(plan.modelId ? { modelId: plan.modelId } : {}),
+      ...(plan.size ? { size: plan.size.replace("*", "x") } : {}),
+      ...(plan.n ? { n: plan.n } : {}),
+    }),
+  };
 }
 
 export async function streamChatReply(args: {
@@ -328,8 +357,32 @@ export async function streamChatReply(args: {
       }
     }
 
+    let brokerToolCall: SpecialistToolCall | undefined;
+    if (!translationMode) {
+      const plan = await planCapabilityTool({
+        client,
+        provider,
+        modelId,
+        userText,
+        hasReferenceImages: (imageAttachmentsForTools?.length ?? 0) > 0,
+        referenceImageNames: imageAttachmentsForTools?.map((image) => image.name),
+        audioAttachmentNames: audioAttachmentsForTools?.map((audio) => audio.name),
+        signal: clientAbort.signal,
+      });
+      brokerToolCall = specialistCallFromPlan(plan);
+      if (brokerToolCall && !clientGone) {
+        res.write(
+          `data: ${JSON.stringify({
+            status: "specialist",
+            capability: brokerToolCall.name,
+            phase: "planned",
+          })}\n\n`,
+        );
+      }
+    }
+
     const specialistToolCalls: SpecialistToolCall[] = [];
-    const specialistTools = translationMode
+    const specialistTools = translationMode || brokerToolCall
       ? []
       : getSpecialistTools({
           imageAttachments: imageAttachmentsForTools,
@@ -361,9 +414,12 @@ export async function streamChatReply(args: {
     });
 
     let generatedAssets: GeneratedAsset[] = [];
-    if (specialistToolCalls.length > 0 && !clientAbort.signal.aborted && !translationMode) {
-      const [toolCall] = specialistToolCalls;
-      if (specialistToolCalls.length > 1 && !clientGone) {
+    const effectiveToolCalls = brokerToolCall
+      ? [brokerToolCall]
+      : specialistToolCalls;
+    if (effectiveToolCalls.length > 0 && !clientAbort.signal.aborted && !translationMode) {
+      const [toolCall] = effectiveToolCalls;
+      if (effectiveToolCalls.length > 1 && !clientGone) {
         res.write(
           `data: ${JSON.stringify({
             status: "specialist_warning",

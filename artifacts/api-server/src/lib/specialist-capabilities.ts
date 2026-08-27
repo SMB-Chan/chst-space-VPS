@@ -5,6 +5,9 @@ import {
   type ModelProvider,
 } from "./ai-clients";
 import { transcribeDashScopeAudio } from "./audio-transcription";
+import { generateAlibabaImage } from "./alibaba-image";
+import type { GeneratedAsset as StoredGeneratedAsset } from "./generated-assets";
+import { ALIBABA_MODEL_CATALOG } from "./alibaba-capabilities";
 
 export const CAPABILITY_IDS = [
   "chat",
@@ -36,50 +39,44 @@ export interface CapabilityDescriptor {
   models: string[];
 }
 
-const SPECIALIST_MODELS: CapabilityModel[] = [
-  {
-    id: "qwen-image-plus",
-    label: "Qwen Image Plus",
-    provider: "dashscope",
-    capabilities: ["image-generate"],
+const SPECIALIST_MODELS: CapabilityModel[] = ALIBABA_MODEL_CATALOG
+  .filter((model) => model.kind !== "chat")
+  .map((model) => ({
+    id: model.id,
+    label: model.label,
+    provider: "dashscope" as const,
+    capabilities: model.capabilities.flatMap((capability): CapabilityId[] => {
+      switch (capability) {
+        case "image.generate":
+          return ["image-generate"];
+        case "image.edit":
+          return ["image-edit"];
+        case "audio.asr":
+          return ["speech-to-text"];
+        case "audio.tts":
+          return ["audio-synthesis"];
+        case "audio.realtime":
+          return ["realtime"];
+        case "video.t2v":
+        case "video.i2v":
+        case "video.r2v":
+          return ["video"];
+        default:
+          return [];
+      }
+    }),
     configured: Boolean(dashscopeClient),
-  },
-  {
-    id: "qwen-image-2.0-pro",
-    label: "Qwen Image 2.0 Pro",
-    provider: "dashscope",
-    capabilities: ["image-edit"],
-    configured: Boolean(dashscopeClient),
-  },
-  {
-    id: "paraformer-v2",
-    label: "Paraformer V2",
-    provider: "dashscope",
-    capabilities: ["speech-to-text"],
-    configured: Boolean(dashscopeClient),
-  },
-  {
-    id: "qwen-tts",
-    label: "Qwen TTS",
-    provider: "dashscope",
-    capabilities: ["audio-synthesis"],
-    configured: Boolean(dashscopeClient),
-  },
-  {
-    id: "qwen-omni-turbo",
-    label: "Qwen Omni Turbo",
-    provider: "dashscope",
-    capabilities: ["realtime"],
-    configured: Boolean(dashscopeClient),
-  },
-  {
-    id: "wan2.2-t2v-plus",
-    label: "Wan 2.2 Video",
-    provider: "dashscope",
-    capabilities: ["video"],
-    configured: Boolean(dashscopeClient),
-  },
-];
+  }));
+
+// Paraformer remains the compatibility fallback for installations where the
+// newer Qwen Audio model is not enabled on the account.
+SPECIALIST_MODELS.push({
+  id: "paraformer-v2",
+  label: "Paraformer V2",
+  provider: "dashscope",
+  capabilities: ["speech-to-text"],
+  configured: Boolean(dashscopeClient),
+});
 
 const CAPABILITY_DETAILS: Record<CapabilityId, Omit<CapabilityDescriptor, "id" | "models">> = {
   chat: {
@@ -234,13 +231,9 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
   return { capabilities, models };
 }
 
-export interface GeneratedAsset {
-  buffer: Buffer;
-  filename: string;
-  mimeType: string;
-  size: number;
+export type GeneratedAsset = StoredGeneratedAsset & {
   capability: "image-generate" | "image-edit";
-}
+};
 
 export interface SpecialistToolResult {
   ok: boolean;
@@ -274,15 +267,21 @@ export interface SpecialistToolDefinition {
 const imageGenerationArgs = z.object({
   prompt: z.string().trim().min(1).max(4_000),
   size: z.enum(["1024x1024", "1536x1024", "1024x1536"]).default("1024x1024"),
+  modelId: z.string().trim().max(100).optional(),
+  n: z.number().int().min(1).max(6).optional(),
 });
 
 const imageEditArgs = z.object({
   imageName: z.string().trim().min(1).max(255),
   prompt: z.string().trim().min(1).max(4_000),
+  size: z.enum(["1024x1024", "1536x1024", "1024x1536"]).optional(),
+  modelId: z.string().trim().max(100).optional(),
+  n: z.number().int().min(1).max(6).optional(),
 });
 
 const transcribeArgs = z.object({
   attachmentName: z.string().trim().min(1).max(255),
+  modelId: z.string().trim().max(100).optional(),
 });
 
 export function getSpecialistTools(context: SpecialistToolContext): SpecialistToolDefinition[] {
@@ -336,6 +335,7 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
           type: "object",
           properties: {
             attachmentName: { type: "string", minLength: 1, maxLength: 255 },
+            modelId: { type: "string", maxLength: 100 },
           },
           required: ["attachmentName"],
           additionalProperties: false,
@@ -346,149 +346,44 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
   return tools;
 }
 
-function decodeImageDataUrl(dataUrl: string): { mime: string; buffer: Buffer } {
-  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/]*={0,2})$/i);
-  if (!match) throw new Error("編集対象の画像形式が不正です");
-  const buffer = Buffer.from(match[2], "base64");
-  if (buffer.length === 0 || buffer.length > 10 * 1024 * 1024) {
-    throw new Error("編集対象の画像サイズが上限を超えています");
-  }
-  return { mime: match[1].toLowerCase(), buffer };
-}
-
-function dataUrlToBuffer(value: string): Buffer | null {
-  const match = value.match(/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/]*={0,2})$/i);
-  return match ? Buffer.from(match[1], "base64") : null;
-}
-
-async function imageResponseToAsset(
-  response: unknown,
-  capability: "image-generate" | "image-edit",
-  signal?: AbortSignal,
-): Promise<GeneratedAsset> {
-  const body = response as {
-    output?: { results?: { url?: unknown }[]; result_url?: unknown };
-    data?: { url?: unknown; b64_json?: unknown }[];
-  };
-  const first = body.output?.results?.[0]?.url;
-  const legacy = body.output?.result_url;
-  const openAiData = body.data?.[0];
-  const imageUrl =
-    typeof first === "string" ? first : typeof legacy === "string" ? legacy : undefined;
-  let buffer = typeof openAiData?.b64_json === "string"
-    ? Buffer.from(openAiData.b64_json, "base64")
-    : typeof openAiData?.url === "string"
-      ? dataUrlToBuffer(openAiData.url)
-      : null;
-  if (!buffer && imageUrl) {
-    if (imageUrl.startsWith("data:")) {
-      buffer = dataUrlToBuffer(imageUrl);
-    } else {
-      const parsedUrl = new URL(imageUrl);
-      if (
-        parsedUrl.protocol !== "https:" ||
-        !(
-          parsedUrl.hostname === "aliyuncs.com" ||
-          parsedUrl.hostname.endsWith(".aliyuncs.com")
-        )
-      ) {
-        throw new Error("画像モデルが許可されていない取得先を返しました");
-      }
-      const imageResponse = await fetch(parsedUrl, { signal });
-      if (!imageResponse.ok) throw new Error("生成画像の取得に失敗しました");
-      buffer = Buffer.from(await imageResponse.arrayBuffer());
-    }
-  }
-  if (!buffer) throw new Error("画像モデルが安全に取得できる画像データを返しませんでした");
-  if (buffer.length === 0 || buffer.length > 10 * 1024 * 1024) {
-    throw new Error("生成画像のサイズが上限を超えています");
-  }
-  return {
-    buffer,
-    filename: capability === "image-edit" ? "edited-image.png" : "generated-image.png",
-    mimeType: "image/png",
-    size: buffer.length,
-    capability,
-  };
-}
-
-function dashScopeEndpoint(path: string): string {
-  const configured = process.env.DASHSCOPE_BASE_URL?.trim() ||
-    "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
-  const base = new URL(configured);
-  return `${base.origin}${path}`;
-}
-
-async function callDashScopeImageApi(
-  body: Record<string, unknown>,
-  path: string,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  if (!apiKey) throw new Error("Alibaba Model Studioが設定されていません");
-  const response = await fetch(dashScopeEndpoint(path), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-  const payload = (await response.json()) as Record<string, unknown>;
-  if (!response.ok) {
-    const message =
-      typeof payload.message === "string" ? payload.message : "Alibaba画像APIの呼び出しに失敗しました";
-    throw new Error(message.slice(0, 500));
-  }
-  return payload;
-}
-
 async function generateImage(
   prompt: string,
   size: "1024x1024" | "1536x1024" | "1024x1536",
+  modelId?: string,
+  n?: number,
   signal?: AbortSignal,
 ): Promise<GeneratedAsset> {
   if (!dashscopeClient) throw new Error("Alibaba Model Studioが設定されていません");
-  const response = await callDashScopeImageApi(
-    {
-      model: "qwen-image-plus",
-      input: { prompt },
-      parameters: {
-        size: size.replace("x", "*"),
-        n: 1,
-        watermark: false,
-        prompt_extend: true,
-      },
-    },
-    "/api/v1/services/aigc/image-generation/generation",
+  const [asset] = await generateAlibabaImage({
+    prompt,
+    size: size.replace("x", "*"),
+    modelId,
+    n,
     signal,
-  );
-  return imageResponseToAsset(response, "image-generate", signal);
+  });
+  if (!asset) throw new Error("画像モデルが画像を返しませんでした");
+  return { ...asset, capability: "image-generate" };
 }
 
 async function editImage(
   image: { name: string; content: string },
   prompt: string,
+  size?: "1024x1024" | "1536x1024" | "1024x1536",
+  modelId?: string,
+  n?: number,
   signal?: AbortSignal,
 ): Promise<GeneratedAsset> {
   if (!dashscopeClient) throw new Error("Alibaba Model Studioが設定されていません");
-  decodeImageDataUrl(image.content);
-  const response = await callDashScopeImageApi(
-    {
-      model: "qwen-image-2.0-pro",
-      input: {
-        messages: [{
-          role: "user",
-          content: [{ image: image.content }, { text: prompt }],
-        }],
-      },
-      parameters: { n: 1, watermark: false, prompt_extend: true },
-    },
-    "/api/v1/services/aigc/multimodal-generation/generation",
+  const [asset] = await generateAlibabaImage({
+    prompt,
+    referenceImages: [image.content],
+    size: size?.replace("x", "*"),
+    modelId,
+    n,
     signal,
-  );
-  return imageResponseToAsset(response, "image-edit", signal);
+  });
+  if (!asset) throw new Error("画像モデルが編集画像を返しませんでした");
+  return { ...asset, capability: "image-edit" };
 }
 
 function parseToolArgs<T>(schema: z.ZodType<T>, raw: string): T {
@@ -510,7 +405,13 @@ export async function executeSpecialistTool(
   try {
     if (call.name === "generate_image") {
       const args = parseToolArgs(imageGenerationArgs, call.arguments);
-      const asset = await generateImage(args.prompt, args.size ?? "1024x1024", context.signal);
+      const asset = await generateImage(
+        args.prompt,
+        args.size ?? "1024x1024",
+        args.modelId,
+        args.n,
+        context.signal,
+      );
       return {
         ok: true,
         capability: "image-generate",
@@ -522,7 +423,14 @@ export async function executeSpecialistTool(
       const args = parseToolArgs(imageEditArgs, call.arguments);
       const image = context.imageAttachments?.find((item) => item.name === args.imageName);
       if (!image) throw new Error("指定された編集対象の画像が見つかりません");
-      const asset = await editImage(image, args.prompt, context.signal);
+      const asset = await editImage(
+        image,
+        args.prompt,
+        args.size,
+        args.modelId,
+        args.n,
+        context.signal,
+      );
       return {
         ok: true,
         capability: "image-edit",
@@ -539,7 +447,7 @@ export async function executeSpecialistTool(
         filename: audio.name,
         mime: audio.mime,
         signal: context.signal,
-      });
+      }, args.modelId);
       return {
         ok: true,
         capability: "speech-to-text",

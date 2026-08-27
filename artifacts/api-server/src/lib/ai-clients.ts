@@ -53,11 +53,15 @@ export const AVAILABLE_MODELS = [
   { id: "o4-mini",       label: "o4-mini",        provider: "openai" as ModelProvider, description: "高度な推論", supportsVision: true, supportsReasoning: true, reasoning: "openai" as ReasoningKind },
   // Alibaba Cloud Model Studio (Token Plan endpoint)
   // Qwen 3.6/3.7 and GLM 5.2 enable thinking by default — always send enable_thinking explicitly.
-  { id: "qwen3.8-max",           label: "Qwen3.8 Max",       provider: "dashscope" as ModelProvider, description: "Alibaba最高性能", supportsVision: true, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "qwen3.7-plus",          label: "Qwen3.7 Plus",      provider: "dashscope" as ModelProvider, description: "高速・バランス", supportsVision: true, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "qwen3.6-flash",         label: "Qwen3.6 Flash",     provider: "dashscope" as ModelProvider, description: "最速・低コスト", supportsVision: true, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "deepseek-v4-pro",       label: "DeepSeek V4 Pro",   provider: "dashscope" as ModelProvider, description: "推論特化", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "glm-5.2",               label: "GLM-5.2",           provider: "dashscope" as ModelProvider, description: "汎用", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "qwen3.8-max",             label: "Qwen3.8 Max",             provider: "dashscope" as ModelProvider, description: "Alibaba最高性能", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "qwen3.8-flash",           label: "Qwen3.8 Flash",           provider: "dashscope" as ModelProvider, description: "高速・画像理解", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "qwen3.7-plus",            label: "Qwen3.7 Plus",            provider: "dashscope" as ModelProvider, description: "高速・バランス", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "qwen3.7-max",             label: "Qwen3.7 Max",             provider: "dashscope" as ModelProvider, description: "高性能テキスト推論", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "qwen3.6-flash",           label: "Qwen3.6 Flash",           provider: "dashscope" as ModelProvider, description: "最速・低コスト", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "deepseek-v4-pro-0813",    label: "DeepSeek V4 Pro 0813",   provider: "dashscope" as ModelProvider, description: "推論特化スナップショット", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "deepseek-v4-pro",         label: "DeepSeek V4 Pro",         provider: "dashscope" as ModelProvider, description: "推論特化", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "deepseek-v4-flash-0731",  label: "DeepSeek V4 Flash 0731",  provider: "dashscope" as ModelProvider, description: "高速推論スナップショット", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
+  { id: "glm-5.2",                 label: "GLM-5.2",                 provider: "dashscope" as ModelProvider, description: "汎用", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
 ] as const;
 
 export type ModelId = typeof AVAILABLE_MODELS[number]["id"];

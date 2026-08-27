@@ -68,14 +68,14 @@ export async function transcribeDashScopeAudio(args: {
   filename: string;
   mime: string;
   signal?: AbortSignal;
-}): Promise<string> {
+}, model = DASHSCOPE_TRANSCRIBE_MODEL): Promise<string> {
   if (!dashscopeClient) {
     throw new TranscriptionError("Alibaba Model Studioが設定されていません。");
   }
   try {
-    const text = await callTranscription(dashscopeClient, DASHSCOPE_TRANSCRIBE_MODEL, args);
+    const text = await callTranscription(dashscopeClient, model, args);
     logger.info(
-      { model: DASHSCOPE_TRANSCRIBE_MODEL, filename: args.filename, outputCharacters: text.length },
+      { model, filename: args.filename, outputCharacters: text.length },
       "Audio transcription completed via DashScope",
     );
     return text;
