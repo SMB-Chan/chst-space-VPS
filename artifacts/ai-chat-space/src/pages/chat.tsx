@@ -46,6 +46,7 @@ async function streamMessage(
   onDone: () => void,
   onError: (err: Error) => void,
   onStatus: (status: string | null, query?: string) => void,
+  onSpecialist: (event: { capability: string; phase: string; message?: string }) => void,
   onSearchWarning: (message: string) => void,
   onSources: (sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[]) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
@@ -150,6 +151,21 @@ async function streamMessage(
       if (parsed.status === "reading-files") onStatus("reading-files");
       if (parsed.status === "thinking") onStatus("thinking");
       if (parsed.status === "generating") onStatus("generating");
+      if (
+        (parsed.status === "specialist" || parsed.status === "specialist_warning") &&
+        typeof parsed.capability === "string" &&
+        typeof parsed.phase === "string"
+      ) {
+        onSpecialist({
+          capability: parsed.capability,
+          phase: parsed.phase,
+          message: typeof parsed.message === "string" ? parsed.message : undefined,
+        });
+        onStatus("specialist");
+        if (parsed.status === "specialist_warning" && typeof parsed.message === "string") {
+          onSearchWarning(parsed.message);
+        }
+      }
       if (parsed.status === "auditing") onStatus("auditing");
       if (parsed.status === "revising") {
         onStatus("revising");
@@ -196,13 +212,17 @@ async function streamMessage(
             content: typeof raw.content === "string" ? raw.content : undefined,
           };
           if (!artifact.downloadUrl && artifact.content) {
-            const cacheKey = `${artifact.filename}:${artifact.content.length}:${artifact.mime}`;
-            let url = artifactBlobUrlCache.current.get(cacheKey);
-            if (!url) {
-              url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.mime }));
-              artifactBlobUrlCache.current.set(cacheKey, url);
-            }
-            artifact.downloadUrl = url;
+             if (artifact.mime.startsWith("image/") && artifact.content.startsWith("data:")) {
+               artifact.downloadUrl = artifact.content;
+             } else {
+               const cacheKey = `${artifact.filename}:${artifact.content.length}:${artifact.mime}`;
+               let url = artifactBlobUrlCache.current.get(cacheKey);
+               if (!url) {
+                 url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.mime }));
+                 artifactBlobUrlCache.current.set(cacheKey, url);
+               }
+               artifact.downloadUrl = url;
+             }
           }
           return artifact.downloadUrl ? [artifact] : [];
         });
@@ -294,6 +314,11 @@ export function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{ kind: string; query?: string } | null>(null);
+  const [specialistProgress, setSpecialistProgress] = useState<{
+    capability: string;
+    phase: string;
+    message?: string;
+  } | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [activeSkills, setActiveSkills] = useState<{ id: string; label: string }[]>([]);
   const [auditEnabled, setAuditEnabled] = useState(initialSettings.auditEnabled);
@@ -313,6 +338,7 @@ export function ChatPage() {
     abortRef.current = null;
     setIsStreaming(false);
     setSearchStatus(null);
+    setSpecialistProgress(null);
     setStreamingAudit("");
     setStreamError(null);
     setSearchWarning(
@@ -499,6 +525,7 @@ export function ChatPage() {
     setStreamingArtifacts([]);
     setStreamingFiles([]);
     setSearchStatus({ kind: "starting" });
+    setSpecialistProgress(null);
     streamSnapshotRef.current = { content: "", sources: [], audit: "", artifacts: [] };
 
     abortRef.current?.abort();
@@ -569,6 +596,7 @@ export function ChatPage() {
           setStreamingArtifacts([]);
           setStreamingFiles([]);
           setStreamingAudit("");
+           setSpecialistProgress(null);
           setOptimisticUserMessage(null);
         }
       },
@@ -579,6 +607,7 @@ export function ChatPage() {
         setStreamingArtifacts([]);
         setStreamingFiles([]);
         setStreamingAudit("");
+         setSpecialistProgress(null);
         setStreamError(err.message);
         if (!isPrivate && targetId) {
           void queryClient
@@ -590,6 +619,9 @@ export function ChatPage() {
       },
       (status, query) => {
         setSearchStatus(status ? { kind: status, query } : null);
+      },
+      (event) => {
+        setSpecialistProgress(event.phase === "failed" ? event : event.phase === "completed" ? null : event);
       },
       (message) => {
         setSearchWarning(message);
@@ -730,6 +762,7 @@ export function ChatPage() {
                 : null
             }
             streamingAudit={streamingAudit}
+             specialistProgress={specialistProgress}
              isStreaming={isStreaming}
              onStop={stopStreaming}
              streamingWarning={searchWarning}

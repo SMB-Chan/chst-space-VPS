@@ -39,11 +39,18 @@ import { describeImagesForTextModel } from "./vision-bridge";
 import { buildTranslationSystemPrompt, type TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
+import {
+  executeSpecialistTool,
+  getSpecialistTools,
+  type GeneratedAsset,
+  type SpecialistToolCall,
+} from "./specialist-capabilities";
 
 const AUDIT_TIMEOUT_MS = 120_000;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
+const SPECIALIST_TIMEOUT_MS = 120_000;
 
 export function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -137,6 +144,8 @@ export async function streamChatReply(args: {
    * vision-capable model transcribes them to text before the main call.
    */
   visionBridgeImages?: string[];
+  imageAttachmentsForTools?: { name: string; content: string; bytes: number }[];
+  audioAttachmentsForTools?: { name: string; buffer: Buffer; mime: string }[];
   /** Translation mode: every user message is translated instead of answered. */
   translationMode?: TranslationMode;
   includeArtifactContent?: boolean;
@@ -150,6 +159,7 @@ export async function streamChatReply(args: {
     audit?: { content: string; modelId: string };
     artifacts?: ExtractedArtifact[];
     generatedFiles?: GeneratedFile[];
+    generatedAssets?: GeneratedAsset[];
   }) => Promise<{
     artifacts?: { sourceIndex: number; id: number; filename: string; mime: string; size: number }[];
     assets?: { id: number; filename: string; mimeType: string; size: number }[];
@@ -170,6 +180,8 @@ export async function streamChatReply(args: {
     auditModelId,
     attachmentsForAudit,
     visionBridgeImages,
+    imageAttachmentsForTools,
+    audioAttachmentsForTools,
     translationMode,
     includeArtifactContent = false,
     conversationId,
@@ -316,12 +328,22 @@ export async function streamChatReply(args: {
       }
     }
 
+    const specialistToolCalls: SpecialistToolCall[] = [];
+    const specialistTools = translationMode
+      ? []
+      : getSpecialistTools({
+          imageAttachments: imageAttachmentsForTools,
+          audioAttachments: audioAttachmentsForTools,
+        });
+
     fullResponse = await streamModelText({
       client,
       provider,
       modelId,
       reasoningLevel,
       messages: workingMessages,
+      tools: specialistTools,
+      onToolCalls: (calls) => specialistToolCalls.push(...calls),
       onDelta: (added, kind) => {
         if (clientGone) return;
         if (kind === "reasoning") {
@@ -337,6 +359,99 @@ export async function streamChatReply(args: {
       shouldStop: () => clientGone || clientAbort.signal.aborted,
       signal: clientAbort.signal,
     });
+
+    let generatedAssets: GeneratedAsset[] = [];
+    if (specialistToolCalls.length > 0 && !clientAbort.signal.aborted && !translationMode) {
+      const [toolCall] = specialistToolCalls;
+      if (specialistToolCalls.length > 1 && !clientGone) {
+        res.write(
+          `data: ${JSON.stringify({
+            status: "specialist_warning",
+            message: "安全上の上限により、同じターンでは専門能力を1回だけ実行しました。",
+          })}\n\n`,
+        );
+      }
+      if (!clientGone) {
+        res.write(
+          `data: ${JSON.stringify({
+            status: "specialist",
+            capability: toolCall.name,
+            phase: "running",
+          })}\n\n`,
+        );
+      }
+      const specialistResult = await withTimeout(
+        (signal) =>
+          executeSpecialistTool(toolCall, {
+            imageAttachments: imageAttachmentsForTools,
+            audioAttachments: audioAttachmentsForTools,
+            signal,
+          }),
+        SPECIALIST_TIMEOUT_MS,
+        "Specialist capability",
+        clientAbort.signal,
+      );
+      if (specialistResult.asset) generatedAssets = [specialistResult.asset];
+      if (!clientGone) {
+        res.write(
+          `data: ${JSON.stringify({
+            status: specialistResult.ok ? "specialist" : "specialist_warning",
+            capability: specialistResult.capability,
+            phase: specialistResult.ok ? "completed" : "failed",
+            message: specialistResult.summary,
+          })}\n\n`,
+        );
+      }
+
+      workingMessages.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: toolCall.id,
+            type: "function",
+            function: { name: toolCall.name, arguments: toolCall.arguments },
+          },
+        ],
+      } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      workingMessages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({
+          ok: specialistResult.ok,
+          capability: specialistResult.capability,
+          summary: specialistResult.summary,
+          text: specialistResult.text,
+          generatedAsset: specialistResult.asset
+            ? {
+                filename: specialistResult.asset.filename,
+                mimeType: specialistResult.asset.mimeType,
+                size: specialistResult.asset.size,
+              }
+            : undefined,
+        }),
+      });
+      const continuation = await streamModelText({
+        client,
+        provider,
+        modelId,
+        reasoningLevel,
+        messages: workingMessages,
+        onDelta: (added, kind) => {
+          if (clientGone) return;
+          if (kind === "reasoning") {
+            if (!clientAbort.signal.aborted) {
+              res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
+            }
+          } else {
+            res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
+          }
+        },
+        shouldStop: () => clientGone || clientAbort.signal.aborted,
+        signal: clientAbort.signal,
+      });
+      fullResponse += continuation;
+    }
 
     if (!fullResponse.trim()) {
       if (!clientGone) {
@@ -548,7 +663,8 @@ export async function streamChatReply(args: {
               sources: webContext.sources,
               audit,
               artifacts: extracted.artifacts,
-              generatedFiles: generatedFile ? [generatedFile] : undefined,
+               generatedFiles: generatedFile ? [generatedFile] : undefined,
+               generatedAssets: generatedAssets.length > 0 ? generatedAssets : undefined,
             })
           : undefined;
       } catch (err) {
@@ -585,6 +701,16 @@ export async function streamChatReply(args: {
             })}\n\n`,
           );
         }
+      }
+
+      if (generatedAssets.length > 0 && !completion?.assets?.length && !clientGone) {
+        const inlineAssets = generatedAssets.map((asset) => ({
+          filename: asset.filename,
+          mime: asset.mimeType,
+          size: asset.size,
+          content: `data:${asset.mimeType};base64,${asset.buffer.toString("base64")}`,
+        }));
+        res.write(`data: ${JSON.stringify({ artifacts: inlineAssets })}\n\n`);
       }
 
       if (extracted.artifacts.length > 0 && !clientGone) {
@@ -626,6 +752,15 @@ async function streamModelText(args: {
   modelId: string;
   reasoningLevel: ReasoningLevel;
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  tools?: {
+    type: "function";
+    function: {
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    };
+  }[];
+  onToolCalls?: (calls: SpecialistToolCall[]) => void;
   onDelta: (text: string, kind: "content" | "reasoning") => void;
   shouldStop: () => boolean;
   signal?: AbortSignal;
@@ -634,6 +769,7 @@ async function streamModelText(args: {
     model: args.modelId,
     messages: args.messages,
     stream: true,
+    ...(args.tools?.length ? { tools: args.tools, tool_choice: "auto" } : {}),
   };
   applyGenerationParams(
     streamOptions as unknown as Record<string, unknown>,
@@ -669,10 +805,25 @@ async function streamModelText(args: {
 
   let full = "";
   let reasoning = "";
+  const toolCalls = new Map<number, SpecialistToolCall>();
   try {
     for await (const chunk of stream) {
       if (args.shouldStop()) break;
       const delta = chunk.choices?.[0]?.delta;
+      const rawToolCalls = (delta as unknown as {
+        tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[];
+      } | undefined)?.tool_calls;
+      if (rawToolCalls) {
+        for (const raw of rawToolCalls) {
+          const index = Number.isSafeInteger(raw.index) ? raw.index! : toolCalls.size;
+          const previous = toolCalls.get(index) ?? { id: "", name: "", arguments: "" };
+          toolCalls.set(index, {
+            id: raw.id ?? previous.id,
+            name: raw.function?.name ?? previous.name,
+            arguments: previous.arguments + (raw.function?.arguments ?? ""),
+          });
+        }
+      }
       const reasoningDelta = readReasoningDelta(delta);
       if (reasoningDelta) {
         const merged = mergeStreamDelta(reasoning, reasoningDelta);
@@ -690,6 +841,9 @@ async function streamModelText(args: {
     }
   } catch (err) {
     if (!args.signal?.aborted) throw err;
+  }
+  if (toolCalls.size > 0) {
+    args.onToolCalls?.([...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call));
   }
   return splitThinkTags(full).content;
 }

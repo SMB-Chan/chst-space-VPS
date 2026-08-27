@@ -33,6 +33,27 @@ export const ListOpenaiModelsResponse = zod.array(ListOpenaiModelsResponseItem)
 
 
 /**
+ * @summary List chat and specialist AI capabilities
+ */
+export const ListOpenaiCapabilitiesResponse = zod.object({
+  "capabilities": zod.array(zod.object({
+  "id": zod.enum(['chat', 'reasoning', 'vision', 'image-generate', 'image-edit', 'speech-to-text', 'audio-synthesis', 'realtime', 'video']),
+  "label": zod.string(),
+  "description": zod.string(),
+  "status": zod.enum(['available', 'catalog-only']),
+  "models": zod.array(zod.string())
+})),
+  "models": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "provider": zod.enum(['openai', 'dashscope']),
+  "capabilities": zod.array(zod.enum(['chat', 'reasoning', 'vision', 'image-generate', 'image-edit', 'speech-to-text', 'audio-synthesis', 'realtime', 'video'])),
+  "configured": zod.boolean()
+}))
+})
+
+
+/**
  * @summary Download a generated artifact
  */
 

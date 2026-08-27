@@ -16,6 +16,10 @@ import {
   parseReasoningLevel,
   getClientForModel,
 } from "../../lib/ai-clients";
+import {
+  getAvailableChatModels,
+  getCapabilityRegistryWithAvailability,
+} from "../../lib/specialist-capabilities";
 import { streamChatReply, withTimeout } from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
 import { parseTranslationMode } from "../../lib/translation";
@@ -196,8 +200,12 @@ async function resolveMessageBinaries(
 
 router.use("/openai/artifacts", requireAuth);
 
-router.get("/openai/models", (_req, res) => {
-  res.json(AVAILABLE_MODELS);
+router.get("/openai/models", async (_req, res) => {
+  res.json(await getAvailableChatModels());
+});
+
+router.get("/openai/capabilities", async (_req, res) => {
+  res.json(await getCapabilityRegistryWithAvailability());
 });
 
 router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) => {
@@ -463,6 +471,14 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       return;
     }
 
+    const audioAttachmentsForTools = newMessage.binaries
+      .filter((attachment) => attachment.family === "audio")
+      .map((attachment) => ({
+        name: attachment.name,
+        buffer: attachment.buffer,
+        mime: attachment.mime,
+      }));
+
     try {
       newMessage = await resolveMessageBinaries(newMessage, res);
     } catch (err) {
@@ -544,6 +560,8 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       visionBridgeImages: useVisionBridge
         ? newMessage.images.map((image) => image.content)
         : undefined,
+      imageAttachmentsForTools: newMessage.images,
+      audioAttachmentsForTools,
       translationMode,
       conversationId,
       requestedFileFormat,
@@ -554,6 +572,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         audit,
         artifacts: extractedArtifacts,
         generatedFiles,
+          generatedAssets,
       }) => {
         const persisted = await persistChatCompletion({
           userId,
@@ -564,6 +583,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
           sources,
           audit,
           generatedFiles,
+           generatedAssets,
           extractedArtifacts,
         });
         return {
@@ -659,6 +679,14 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
+    const audioAttachmentsForTools = newMessage.binaries
+      .filter((attachment) => attachment.family === "audio")
+      .map((attachment) => ({
+        name: attachment.name,
+        buffer: attachment.buffer,
+        mime: attachment.mime,
+      }));
+
     try {
       newMessage = await resolveMessageBinaries(newMessage, res);
     } catch (err) {
@@ -737,6 +765,8 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       visionBridgeImages: useVisionBridge
         ? newMessage.images.map((image) => image.content)
         : undefined,
+      imageAttachmentsForTools: newMessage.images,
+      audioAttachmentsForTools,
       translationMode,
       includeArtifactContent: true,
       publicAiError,

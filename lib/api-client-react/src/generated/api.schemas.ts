@@ -36,6 +36,73 @@ export interface OpenaiModel {
   reasoning: OpenaiModelReasoning;
 }
 
+export type CapabilityDescriptorId = typeof CapabilityDescriptorId[keyof typeof CapabilityDescriptorId];
+
+
+export const CapabilityDescriptorId = {
+  chat: 'chat',
+  reasoning: 'reasoning',
+  vision: 'vision',
+  'image-generate': 'image-generate',
+  'image-edit': 'image-edit',
+  'speech-to-text': 'speech-to-text',
+  'audio-synthesis': 'audio-synthesis',
+  realtime: 'realtime',
+  video: 'video',
+} as const;
+
+export type CapabilityDescriptorStatus = typeof CapabilityDescriptorStatus[keyof typeof CapabilityDescriptorStatus];
+
+
+export const CapabilityDescriptorStatus = {
+  available: 'available',
+  'catalog-only': 'catalog-only',
+} as const;
+
+export interface CapabilityDescriptor {
+  id: CapabilityDescriptorId;
+  label: string;
+  description: string;
+  status: CapabilityDescriptorStatus;
+  models: string[];
+}
+
+export type CapabilityModelProvider = typeof CapabilityModelProvider[keyof typeof CapabilityModelProvider];
+
+
+export const CapabilityModelProvider = {
+  openai: 'openai',
+  dashscope: 'dashscope',
+} as const;
+
+export type CapabilityModelCapabilitiesItem = typeof CapabilityModelCapabilitiesItem[keyof typeof CapabilityModelCapabilitiesItem];
+
+
+export const CapabilityModelCapabilitiesItem = {
+  chat: 'chat',
+  reasoning: 'reasoning',
+  vision: 'vision',
+  'image-generate': 'image-generate',
+  'image-edit': 'image-edit',
+  'speech-to-text': 'speech-to-text',
+  'audio-synthesis': 'audio-synthesis',
+  realtime: 'realtime',
+  video: 'video',
+} as const;
+
+export interface CapabilityModel {
+  id: string;
+  label: string;
+  provider: CapabilityModelProvider;
+  capabilities: CapabilityModelCapabilitiesItem[];
+  configured: boolean;
+}
+
+export interface CapabilityRegistry {
+  capabilities: CapabilityDescriptor[];
+  models: CapabilityModel[];
+}
+
 export interface OpenaiConversation {
   id: number;
   title: string;

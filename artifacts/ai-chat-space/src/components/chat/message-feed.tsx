@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square } from "lucide-react";
+import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -73,11 +73,39 @@ interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
   streamingPhase?: StreamingPhase;
+  specialistProgress?: { capability: string; phase: string; message?: string } | null;
   streamingAudit?: string;
   isStreaming?: boolean;
   onStop?: () => void;
   streamingWarning?: string | null;
   onDismissWarning?: () => void;
+}
+
+function SpecialistProgress({
+  progress,
+}: {
+  progress: { capability: string; phase: string; message?: string };
+}) {
+  const labels: Record<string, string> = {
+    generate_image: "画像生成",
+    edit_image: "画像編集",
+    transcribe_audio: "音声認識",
+  };
+  const label = labels[progress.capability] ?? "専門能力";
+  const failed = progress.phase === "failed";
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+        failed
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+      )}
+    >
+      {failed ? <Sparkles className="h-3.5 w-3.5 shrink-0" /> : <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+      <span>{progress.message ?? `${label}を${progress.phase === "running" ? "実行中" : "完了しました"}`}</span>
+    </div>
+  );
 }
 
 function PhaseDots() {
@@ -126,24 +154,28 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
   return (
     <div className="w-full grid gap-2">
       {artifacts.map((artifact, index) => (
-        <a
-          key={artifact.id ?? `${artifact.filename}-${index}`}
-          href={artifact.downloadUrl}
-          download={artifact.filename}
-          className={cn(
-            "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
-            artifact.downloadUrl ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-70 pointer-events-none",
-          )}
-        >
-          <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <FileText className="w-[1.125rem] h-[1.125rem]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium truncate">{artifact.filename}</div>
-            <div className="text-[11px] text-muted-foreground truncate">{artifact.mime} ・ {formatBytes(artifact.size)}</div>
-          </div>
-          <Download className="w-4 h-4 text-muted-foreground shrink-0" />
-        </a>
+        <div key={artifact.id ?? `${artifact.filename}-${index}`} className="grid gap-2">
+          {artifact.mime.startsWith("image/") && artifact.downloadUrl ? (
+            <img src={artifact.downloadUrl} alt={artifact.filename} className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain" />
+          ) : null}
+          <a
+            href={artifact.downloadUrl}
+            download={artifact.filename}
+            className={cn(
+              "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
+              artifact.downloadUrl ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-70 pointer-events-none",
+            )}
+          >
+            <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <FileText className="w-[1.125rem] h-[1.125rem]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium truncate">{artifact.filename}</div>
+              <div className="text-[11px] text-muted-foreground truncate">{artifact.mime} ・ {formatBytes(artifact.size)}</div>
+            </div>
+            <Download className="w-4 h-4 text-muted-foreground shrink-0" />
+          </a>
+        </div>
       ))}
     </div>
   );
@@ -203,6 +235,7 @@ export function MessageFeed({
   messages,
   isLoading,
   streamingPhase = null,
+  specialistProgress = null,
   streamingAudit = "",
   isStreaming = false,
   onStop,
@@ -368,6 +401,10 @@ export function MessageFeed({
                   displayContent &&
                   (streamingPhase === "generating" || streamingPhase === "revising") && (
                   <GenerationBadge phase={streamingPhase} />
+                )}
+
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && specialistProgress && (
+                  <SpecialistProgress progress={specialistProgress} />
                 )}
 
                 {!isUser &&

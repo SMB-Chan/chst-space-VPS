@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CapabilityRegistry,
   HealthStatus,
   OpenaiConversation,
   OpenaiConversationInput,
@@ -203,6 +204,83 @@ export function useListOpenaiModels<TData = Awaited<ReturnType<typeof listOpenai
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListOpenaiModelsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListOpenaiCapabilitiesUrl = () => {
+
+
+
+
+  return `/api/openai/capabilities`
+}
+
+/**
+ * @summary List chat and specialist AI capabilities
+ */
+export const listOpenaiCapabilities = async ( options?: Parameters<typeof customFetch>[1]): Promise<CapabilityRegistry> => {
+
+  return customFetch<CapabilityRegistry>(getListOpenaiCapabilitiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpenaiCapabilitiesQueryKey = () => {
+    return [
+    `/api/openai/capabilities`
+    ] as const;
+    }
+
+
+export const getListOpenaiCapabilitiesQueryOptions = <TData = Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpenaiCapabilitiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpenaiCapabilities>>> = ({ signal }) => listOpenaiCapabilities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOpenaiCapabilitiesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpenaiCapabilities>>>
+export type ListOpenaiCapabilitiesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List chat and specialist AI capabilities
+ */
+
+export function useListOpenaiCapabilities<TData = Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOpenaiCapabilitiesQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -6,6 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './capabilityDescriptor';
+export * from './capabilityDescriptorId';
+export * from './capabilityDescriptorStatus';
+export * from './capabilityModel';
+export * from './capabilityModelCapabilitiesItem';
+export * from './capabilityModelProvider';
+export * from './capabilityRegistry';
 export * from './healthStatus';
 export * from './openaiArtifact';
 export * from './openaiAttachment';

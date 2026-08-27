@@ -63,6 +63,30 @@ async function callTranscription(
   return text.trim();
 }
 
+export async function transcribeDashScopeAudio(args: {
+  buffer: Buffer;
+  filename: string;
+  mime: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (!dashscopeClient) {
+    throw new TranscriptionError("Alibaba Model Studioが設定されていません。");
+  }
+  try {
+    const text = await callTranscription(dashscopeClient, DASHSCOPE_TRANSCRIBE_MODEL, args);
+    logger.info(
+      { model: DASHSCOPE_TRANSCRIBE_MODEL, filename: args.filename, outputCharacters: text.length },
+      "Audio transcription completed via DashScope",
+    );
+    return text;
+  } catch (err) {
+    if (args.signal?.aborted) throw args.signal.reason ?? new Error("aborted");
+    throw new TranscriptionError(
+      "Alibaba Model Studioで音声を文字起こしできませんでした。",
+    );
+  }
+}
+
 export async function transcribeAudio(args: {
   buffer: Buffer;
   filename: string;
@@ -91,11 +115,7 @@ export async function transcribeAudio(args: {
 
   if (dashscopeClient) {
     try {
-      const text = await callTranscription(dashscopeClient, DASHSCOPE_TRANSCRIBE_MODEL, args);
-      logger.info(
-        { model: DASHSCOPE_TRANSCRIBE_MODEL, filename: args.filename },
-        "Audio transcription completed via DashScope",
-      );
+      const text = await transcribeDashScopeAudio(args);
       return text;
     } catch (err) {
       if (args.signal?.aborted) throw args.signal.reason ?? new Error("aborted");

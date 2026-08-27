@@ -40,6 +40,18 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/OpenaiModel"
+  /openai/capabilities:
+    get:
+      operationId: listOpenaiCapabilities
+      tags: [openai]
+      summary: List chat and specialist AI capabilities
+      responses:
+        "200":
+          description: Capability registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityRegistry"
   /openai/artifacts/{id}:
     get:
       operationId: downloadOpenaiArtifact
@@ -394,6 +406,54 @@ components:
         - supportsVision
         - supportsReasoning
         - reasoning
+    CapabilityRegistry:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityDescriptor"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityModel"
+      required: [capabilities, models]
+    CapabilityDescriptor:
+      type: object
+      properties:
+        id:
+          type: string
+          enum: [chat, reasoning, vision, image-generate, image-edit, speech-to-text, audio-synthesis, realtime, video]
+        label:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [available, catalog-only]
+        models:
+          type: array
+          items:
+            type: string
+      required: [id, label, description, status, models]
+    CapabilityModel:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        provider:
+          type: string
+          enum: [openai, dashscope]
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [chat, reasoning, vision, image-generate, image-edit, speech-to-text, audio-synthesis, realtime, video]
+        configured:
+          type: boolean
+      required: [id, label, provider, capabilities, configured]
     OpenaiConversation:
       type: object
       properties:
