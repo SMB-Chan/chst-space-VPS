@@ -124,6 +124,14 @@ export interface OpenaiArtifact {
   downloadUrl: string;
 }
 
+export interface OpenaiGeneratedAsset {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  downloadUrl: string;
+}
+
 export interface OpenaiMessage {
   id: number;
   conversationId: number;
@@ -135,6 +143,7 @@ export interface OpenaiMessage {
   auditContent?: string | null;
   auditModelId?: string | null;
   assetIds?: number[] | null;
+  generatedAssets?: OpenaiGeneratedAsset[] | null;
   createdAt: string;
 }
 

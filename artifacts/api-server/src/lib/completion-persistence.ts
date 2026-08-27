@@ -90,7 +90,11 @@ export async function persistChatCompletion(
     } catch {
       throw new Error("Generated specialist asset metadata is invalid");
     }
-    if (asset.capability !== "image-generate" && asset.capability !== "image-edit") {
+    if (
+      asset.capability !== "image-generate" &&
+      asset.capability !== "image-edit" &&
+      asset.capability !== "audio-synthesis"
+    ) {
       throw new Error("Generated specialist asset metadata is invalid");
     }
   }

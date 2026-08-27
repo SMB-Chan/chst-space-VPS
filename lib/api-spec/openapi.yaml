@@ -505,6 +505,25 @@ components:
         - mime
         - size
         - downloadUrl
+    OpenaiGeneratedAsset:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+        downloadUrl:
+          type: string
+      required:
+        - id
+        - filename
+        - mimeType
+        - size
+        - downloadUrl
     OpenaiMessage:
       type: object
       properties:
@@ -539,6 +558,11 @@ components:
           type: array
           items:
             type: integer
+          nullable: true
+        generatedAssets:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenaiGeneratedAsset'
           nullable: true
         createdAt:
           type: string

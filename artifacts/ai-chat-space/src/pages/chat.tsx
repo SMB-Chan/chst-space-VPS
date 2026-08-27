@@ -212,7 +212,10 @@ async function streamMessage(
             content: typeof raw.content === "string" ? raw.content : undefined,
           };
           if (!artifact.downloadUrl && artifact.content) {
-             if (artifact.mime.startsWith("image/") && artifact.content.startsWith("data:")) {
+             if (
+               (artifact.mime.startsWith("image/") || artifact.mime.startsWith("audio/")) &&
+               artifact.content.startsWith("data:")
+             ) {
                artifact.downloadUrl = artifact.content;
              } else {
                const cacheKey = `${artifact.filename}:${artifact.content.length}:${artifact.mime}`;
@@ -763,6 +766,7 @@ export function ChatPage() {
             }
             streamingAudit={streamingAudit}
              specialistProgress={specialistProgress}
+             streamingFiles={streamingFiles}
              isStreaming={isStreaming}
              onStop={stopStreaming}
              streamingWarning={searchWarning}

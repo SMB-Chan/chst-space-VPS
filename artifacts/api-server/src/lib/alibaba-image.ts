@@ -2,12 +2,12 @@ import {
   ALIBABA_CAPABILITY_DEFAULTS,
   modelHasAlibabaCapability,
 } from "./alibaba-capabilities";
+import {
+  getAlibabaSpecialistConfig,
+  resolveAlibabaSpecialistHttpUrl,
+} from "./alibaba-specialist-config";
 import { logger } from "./logger";
 
-const DEFAULT_MULTIMODAL_URL =
-  "https://token-plan.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
-const DEFAULT_IMAGE_URL =
-  "https://token-plan.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/image-generation/generation";
 const MAX_PROMPT_CHARS = 16_000;
 const MAX_REFERENCE_IMAGES = 3;
 const MAX_REFERENCE_DATA_URL_CHARS = 16 * 1024 * 1024;
@@ -203,11 +203,11 @@ export async function generateAlibabaImage(
   request: AlibabaImageRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AlibabaGeneratedImage[]> {
-  const apiKey = env.DASHSCOPE_API_KEY?.trim();
-  if (!apiKey) {
+  const specialist = getAlibabaSpecialistConfig(env);
+  if (!specialist) {
     throw new AlibabaImageError(
-      "DASHSCOPE_API_KEY is not configured",
-      "Alibaba Cloud APIキーが設定されていないため画像を生成できません。",
+      "Regular Model Studio specialist credentials are not configured",
+      "サーバー用の通常の Alibaba Model Studio API 資格情報が設定されていないため画像を生成できません。",
     );
   }
 
@@ -252,14 +252,18 @@ export async function generateAlibabaImage(
   }
   if (request.seed !== undefined) parameters.seed = request.seed;
 
-  const endpoint =
-    (editing ? env.DASHSCOPE_MULTIMODAL_URL : env.DASHSCOPE_IMAGE_URL)?.trim() ||
-    (editing ? DEFAULT_MULTIMODAL_URL : DEFAULT_IMAGE_URL);
+  const endpoint = resolveAlibabaSpecialistHttpUrl(
+    editing
+      ? "services/aigc/multimodal-generation/generation"
+      : "services/aigc/image-generation/generation",
+    env,
+  );
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${specialist.apiKey}`,
       "Content-Type": "application/json",
+      ...(specialist.workspaceId ? { "X-DashScope-WorkSpace": specialist.workspaceId } : {}),
     },
     body: JSON.stringify({
       model: modelId,

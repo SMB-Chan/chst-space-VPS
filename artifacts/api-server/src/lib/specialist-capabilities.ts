@@ -6,6 +6,14 @@ import {
 } from "./ai-clients";
 import { transcribeDashScopeAudio } from "./audio-transcription";
 import { generateAlibabaImage } from "./alibaba-image";
+import {
+  QWEN_AUDIO_TTS_PLUS_VOICES,
+  synthesizeAlibabaSpeech,
+} from "./alibaba-tts";
+import {
+  isAlibabaSpecialistConfigured,
+  isAlibabaTokenPlanKey,
+} from "./alibaba-specialist-config";
 import type { GeneratedAsset as StoredGeneratedAsset } from "./generated-assets";
 import { ALIBABA_MODEL_CATALOG } from "./alibaba-capabilities";
 
@@ -39,7 +47,7 @@ export interface CapabilityDescriptor {
   models: string[];
 }
 
-const SPECIALIST_MODELS: CapabilityModel[] = ALIBABA_MODEL_CATALOG
+const SPECIALIST_MODEL_BASE: CapabilityModel[] = ALIBABA_MODEL_CATALOG
   .filter((model) => model.kind !== "chat")
   .map((model) => ({
     id: model.id,
@@ -65,64 +73,56 @@ const SPECIALIST_MODELS: CapabilityModel[] = ALIBABA_MODEL_CATALOG
           return [];
       }
     }),
-    configured: Boolean(dashscopeClient),
+    configured: false,
   }));
 
-// Paraformer remains the compatibility fallback for installations where the
-// newer Qwen Audio model is not enabled on the account.
-SPECIALIST_MODELS.push({
+// Paraformer remains a compatibility fallback for regular Model Studio
+// installations. Token Plan keys are deliberately not accepted for custom
+// backend specialist traffic.
+SPECIALIST_MODEL_BASE.push({
   id: "paraformer-v2",
   label: "Paraformer V2",
   provider: "dashscope",
   capabilities: ["speech-to-text"],
-  configured: Boolean(dashscopeClient),
+  configured: false,
 });
 
-const CAPABILITY_DETAILS: Record<CapabilityId, Omit<CapabilityDescriptor, "id" | "models">> = {
+const CAPABILITY_DETAILS: Record<CapabilityId, Omit<CapabilityDescriptor, "id" | "models" | "status">> = {
   chat: {
     label: "チャット",
     description: "会話応答を生成するモデル",
-    status: "available",
   },
   reasoning: {
     label: "推論",
     description: "深い推論と計画を行うモデル",
-    status: "available",
   },
   vision: {
     label: "画像理解",
     description: "画像を読み取り、内容を説明するモデル",
-    status: "available",
   },
   "image-generate": {
     label: "画像生成",
     description: "テキストから画像を生成する専門モデル",
-    status: dashscopeClient ? "available" : "catalog-only",
   },
   "image-edit": {
     label: "画像編集",
     description: "添付画像を指示に沿って編集する専門モデル",
-    status: dashscopeClient ? "available" : "catalog-only",
   },
   "speech-to-text": {
     label: "音声認識",
     description: "音声をテキストへ変換する専門モデル",
-    status: dashscopeClient ? "available" : "catalog-only",
   },
   "audio-synthesis": {
     label: "音声合成",
-    description: "テキストから音声を生成する能力",
-    status: "catalog-only",
+    description: "テキストから音声を生成する専門モデル",
   },
   realtime: {
     label: "リアルタイム音声",
     description: "低遅延の音声対話能力",
-    status: "catalog-only",
   },
   video: {
     label: "動画生成",
     description: "テキストや画像から動画を生成する能力",
-    status: "catalog-only",
   },
 };
 
@@ -159,8 +159,6 @@ async function readDashScopeModelIds(): Promise<Set<string> | null> {
     dashScopeModelCache = { ids, expiresAt: Date.now() + 5 * 60_000 };
     return ids;
   } catch {
-    // The static catalog remains the safe fallback when model discovery is
-    // unavailable or a Token Plan deployment does not expose /models.
     dashScopeModelCache = { ids: null, expiresAt: Date.now() + 60_000 };
     return null;
   } finally {
@@ -176,6 +174,32 @@ function chatModelCapabilities(model: (typeof AVAILABLE_MODELS)[number]): Capabi
   ];
 }
 
+function regularDashScopeTranscriptionConfigured(): boolean {
+  const key = process.env.DASHSCOPE_API_KEY?.trim();
+  return Boolean(dashscopeClient && key && !isAlibabaTokenPlanKey(key));
+}
+
+function specialistModelConfigured(model: CapabilityModel): boolean {
+  if (model.id === "paraformer-v2") return regularDashScopeTranscriptionConfigured();
+  if (model.id === "qwen-audio-3.0-asr-flash") return false;
+  if (model.capabilities.includes("image-generate") || model.capabilities.includes("image-edit")) {
+    return isAlibabaSpecialistConfigured();
+  }
+  if (model.id === "qwen-audio-3.0-tts-plus" && model.capabilities.includes("audio-synthesis")) {
+    return isAlibabaSpecialistConfigured();
+  }
+  // Realtime audio and HappyHorse transports are registered but intentionally
+  // remain catalog-only until their dedicated orchestration is implemented.
+  return false;
+}
+
+function capabilityStatus(id: CapabilityId, models: CapabilityModel[]): "available" | "catalog-only" {
+  if (id === "chat" || id === "reasoning" || id === "vision") return "available";
+  return models.some((model) => model.configured && model.capabilities.includes(id))
+    ? "available"
+    : "catalog-only";
+}
+
 export function getCapabilityModels(): CapabilityModel[] {
   const chatModels = AVAILABLE_MODELS.map((model) => ({
     id: model.id,
@@ -184,7 +208,11 @@ export function getCapabilityModels(): CapabilityModel[] {
     capabilities: chatModelCapabilities(model),
     configured: model.provider === "openai" || Boolean(dashscopeClient),
   }));
-  return [...chatModels, ...SPECIALIST_MODELS];
+  const specialistModels = SPECIALIST_MODEL_BASE.map((model) => ({
+    ...model,
+    configured: specialistModelConfigured(model),
+  }));
+  return [...chatModels, ...specialistModels];
 }
 
 export function getCapabilityRegistry(): {
@@ -195,6 +223,7 @@ export function getCapabilityRegistry(): {
   const capabilities = CAPABILITY_IDS.map((id) => ({
     id,
     ...CAPABILITY_DETAILS[id],
+    status: capabilityStatus(id, models),
     models: models.filter((model) => model.capabilities.includes(id)).map((model) => model.id),
   }));
   return { capabilities, models };
@@ -213,31 +242,29 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
   models: CapabilityModel[];
 }> {
   const ids = await readDashScopeModelIds();
-  const models = getCapabilityModels().map((model) => ({
-    ...model,
-    configured: model.provider === "openai" ? true : Boolean(dashscopeClient) && (!ids || ids.has(model.id)),
-  }));
+  const models = getCapabilityModels().map((model) => {
+    if (model.provider === "openai") return { ...model, configured: true };
+    if (model.capabilities.includes("chat")) {
+      return { ...model, configured: Boolean(dashscopeClient) && (!ids || ids.has(model.id)) };
+    }
+    return model;
+  });
   const capabilities = CAPABILITY_IDS.map((id) => ({
     id,
     ...CAPABILITY_DETAILS[id],
-    status:
-      CAPABILITY_DETAILS[id].status === "available" &&
-      (id === "chat" || id === "reasoning" || id === "vision" || !ids ||
-        models.some((model) => model.capabilities.includes(id) && model.configured))
-        ? "available" as const
-        : CAPABILITY_DETAILS[id].status,
+    status: capabilityStatus(id, models),
     models: models.filter((model) => model.capabilities.includes(id)).map((model) => model.id),
   }));
   return { capabilities, models };
 }
 
 export type GeneratedAsset = StoredGeneratedAsset & {
-  capability: "image-generate" | "image-edit";
+  capability: "image-generate" | "image-edit" | "audio-synthesis";
 };
 
 export interface SpecialistToolResult {
   ok: boolean;
-  capability: "image-generate" | "image-edit" | "speech-to-text";
+  capability: "image-generate" | "image-edit" | "speech-to-text" | "audio-synthesis";
   summary: string;
   text?: string;
   asset?: GeneratedAsset;
@@ -284,15 +311,29 @@ const transcribeArgs = z.object({
   modelId: z.string().trim().max(100).optional(),
 });
 
+const synthesizeSpeechArgs = z.object({
+  text: z.string().trim().min(1).max(10_000),
+  modelId: z.literal("qwen-audio-3.0-tts-plus").optional(),
+  voice: z.enum(QWEN_AUDIO_TTS_PLUS_VOICES).optional(),
+  instruction: z.string().trim().max(1_000).optional(),
+  languageHint: z.enum(["zh", "en"]).optional(),
+  rate: z.number().min(0.5).max(2).optional(),
+  pitch: z.number().min(0.5).max(2).optional(),
+  volume: z.number().min(0).max(100).optional(),
+});
+
 export function getSpecialistTools(context: SpecialistToolContext): SpecialistToolDefinition[] {
-  if (!dashscopeClient) return [];
-  const tools: SpecialistToolDefinition[] = [
-    {
+  const specialistConfigured = isAlibabaSpecialistConfigured();
+  if (!specialistConfigured && !regularDashScopeTranscriptionConfigured()) return [];
+  const tools: SpecialistToolDefinition[] = [];
+
+  if (specialistConfigured) {
+    tools.push({
       type: "function",
       function: {
         name: "generate_image",
         description:
-          "Alibaba Model Studioで画像を1枚生成します。画像が必要な場合だけ使い、同じターンで一度だけ呼び出してください。",
+          "Alibaba Model Studioで画像を1枚生成します。ユーザーが実際の画像生成を求めた場合だけ使ってください。",
         parameters: {
           type: "object",
           properties: {
@@ -303,9 +344,32 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
           additionalProperties: false,
         },
       },
-    },
-  ];
-  if (context.imageAttachments?.length) {
+    });
+    tools.push({
+      type: "function",
+      function: {
+        name: "synthesize_speech",
+        description:
+          "Alibaba Model StudioのQwen Audio TTS Plusで中国語または英語のテキストをMP3音声にします。実際の読み上げ・音声化を求められた場合だけ使ってください。",
+        parameters: {
+          type: "object",
+          properties: {
+            text: { type: "string", minLength: 1, maxLength: 10_000 },
+            voice: { type: "string", enum: [...QWEN_AUDIO_TTS_PLUS_VOICES] },
+            instruction: { type: "string", maxLength: 1_000 },
+            languageHint: { type: "string", enum: ["zh", "en"] },
+            rate: { type: "number", minimum: 0.5, maximum: 2 },
+            pitch: { type: "number", minimum: 0.5, maximum: 2 },
+            volume: { type: "number", minimum: 0, maximum: 100 },
+          },
+          required: ["text"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
+  if (specialistConfigured && context.imageAttachments?.length) {
     tools.push({
       type: "function",
       function: {
@@ -324,13 +388,13 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
       },
     });
   }
-  if (context.audioAttachments?.length) {
+  if (regularDashScopeTranscriptionConfigured() && context.audioAttachments?.length) {
     tools.push({
       type: "function",
       function: {
         name: "transcribe_audio",
         description:
-          "添付音声をAlibaba Model Studioで文字起こしします。音声の内容確認が必要な場合だけ使ってください。",
+          "添付音声を通常のAlibaba Model Studio資格情報で文字起こしします。音声の内容確認が必要な場合だけ使ってください。",
         parameters: {
           type: "object",
           properties: {
@@ -353,7 +417,6 @@ async function generateImage(
   n?: number,
   signal?: AbortSignal,
 ): Promise<GeneratedAsset> {
-  if (!dashscopeClient) throw new Error("Alibaba Model Studioが設定されていません");
   const [asset] = await generateAlibabaImage({
     prompt,
     size: size.replace("x", "*"),
@@ -373,7 +436,6 @@ async function editImage(
   n?: number,
   signal?: AbortSignal,
 ): Promise<GeneratedAsset> {
-  if (!dashscopeClient) throw new Error("Alibaba Model Studioが設定されていません");
   const [asset] = await generateAlibabaImage({
     prompt,
     referenceImages: [image.content],
@@ -455,6 +517,27 @@ export async function executeSpecialistTool(
         text: text || "音声から認識できる内容が見つかりませんでした。",
       };
     }
+    if (call.name === "synthesize_speech") {
+      const args = parseToolArgs(synthesizeSpeechArgs, call.arguments);
+      const speech = await synthesizeAlibabaSpeech({
+        text: args.text,
+        modelId: args.modelId,
+        voice: args.voice,
+        instruction: args.instruction,
+        languageHint: args.languageHint,
+        rate: args.rate,
+        pitch: args.pitch,
+        volume: args.volume,
+        signal: context.signal,
+      });
+      const asset: GeneratedAsset = { ...speech, capability: "audio-synthesis" };
+      return {
+        ok: true,
+        capability: "audio-synthesis",
+        summary: "MP3音声を生成しました。",
+        asset,
+      };
+    }
     throw new Error("許可されていない専門能力です");
   } catch (error) {
     return {
@@ -464,7 +547,9 @@ export async function executeSpecialistTool(
           ? "image-edit"
           : call.name === "transcribe_audio"
             ? "speech-to-text"
-            : "image-generate",
+            : call.name === "synthesize_speech"
+              ? "audio-synthesis"
+              : "image-generate",
       summary: error instanceof Error ? error.message : "専門能力の実行に失敗しました",
     };
   }

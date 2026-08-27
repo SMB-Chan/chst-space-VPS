@@ -21,6 +21,7 @@ export * from './openaiConversation';
 export * from './openaiConversationInput';
 export * from './openaiConversationWithMessages';
 export * from './openaiError';
+export * from './openaiGeneratedAsset';
 export * from './openaiMessage';
 export * from './openaiMessageDeleteInput';
 export * from './openaiMessageInput';

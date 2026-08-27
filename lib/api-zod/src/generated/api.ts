@@ -137,6 +137,13 @@ export const GetOpenaiConversationResponse = zod.object({
   "auditContent": zod.string().nullish(),
   "auditModelId": zod.string().nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
+  "generatedAssets": zod.array(zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mimeType": zod.string(),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+})).nullish(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -212,6 +219,13 @@ export const ListOpenaiMessagesResponseItem = zod.object({
   "auditContent": zod.string().nullish(),
   "auditModelId": zod.string().nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
+  "generatedAssets": zod.array(zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mimeType": zod.string(),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+})).nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListOpenaiMessagesResponse = zod.array(ListOpenaiMessagesResponseItem)

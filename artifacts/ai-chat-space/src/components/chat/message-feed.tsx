@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles } from "lucide-react";
+import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles, Volume2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -39,6 +39,13 @@ type DisplayMessage = OpenaiMessage & {
   auditModelId?: string | null;
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
+  generatedAssets?: {
+    id: number;
+    filename: string;
+    mimeType: string;
+    size: number;
+    downloadUrl?: string;
+  }[] | null;
 };
 
 function normalizeSources(value: unknown): { title: string; url: string }[] | null {
@@ -74,6 +81,7 @@ interface MessageFeedProps {
   isLoading: boolean;
   streamingPhase?: StreamingPhase;
   specialistProgress?: { capability: string; phase: string; message?: string } | null;
+  streamingFiles?: { id: number; filename: string; mimeType: string }[];
   streamingAudit?: string;
   isStreaming?: boolean;
   onStop?: () => void;
@@ -90,6 +98,7 @@ function SpecialistProgress({
     generate_image: "画像生成",
     edit_image: "画像編集",
     transcribe_audio: "音声認識",
+    synthesize_speech: "音声合成",
   };
   const label = labels[progress.capability] ?? "専門能力";
   const failed = progress.phase === "failed";
@@ -158,6 +167,15 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
           {artifact.mime.startsWith("image/") && artifact.downloadUrl ? (
             <img src={artifact.downloadUrl} alt={artifact.filename} className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain" />
           ) : null}
+          {artifact.mime.startsWith("audio/") && artifact.downloadUrl ? (
+            <audio
+              controls
+              preload="metadata"
+              src={artifact.downloadUrl}
+              className="w-full max-w-xl"
+              aria-label={`音声 ${artifact.filename}`}
+            />
+          ) : null}
           <a
             href={artifact.downloadUrl}
             download={artifact.filename}
@@ -167,7 +185,11 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
             )}
           >
             <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <FileText className="w-[1.125rem] h-[1.125rem]" />
+              {artifact.mime.startsWith("audio/") ? (
+                <Volume2 className="w-[1.125rem] h-[1.125rem]" />
+              ) : (
+                <FileText className="w-[1.125rem] h-[1.125rem]" />
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium truncate">{artifact.filename}</div>
@@ -181,17 +203,41 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
   );
 }
 
-function FileDownloadButton({ assetId }: { assetId: number }) {
+function FileDownloadButton({
+  assetId,
+  filename,
+  mimeType,
+}: {
+  assetId: number;
+  filename?: string;
+  mimeType?: string;
+}) {
+  const downloadUrl = getGetOpenaiAssetUrl(assetId);
   return (
-    <a
-      href={getGetOpenaiAssetUrl(assetId)}
-      download
-      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
-    >
-      <FileText className="w-4 h-4 text-primary" />
-      <span className="font-medium truncate max-w-[180px]">生成ファイルをダウンロード</span>
-      <Download className="w-3.5 h-3.5 text-muted-foreground" />
-    </a>
+    <div className="grid gap-2">
+      {mimeType?.startsWith("audio/") ? (
+        <audio
+          controls
+          preload="metadata"
+          src={downloadUrl}
+          className="w-full max-w-xl"
+          aria-label={`音声 ${filename ?? "生成音声"}`}
+        />
+      ) : null}
+      <a
+        href={downloadUrl}
+        download={filename}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
+      >
+        {mimeType?.startsWith("audio/") ? (
+          <Volume2 className="w-4 h-4 text-primary" />
+        ) : (
+          <FileText className="w-4 h-4 text-primary" />
+        )}
+        <span className="font-medium truncate max-w-[180px]">{filename ?? "生成ファイルをダウンロード"}</span>
+        <Download className="w-3.5 h-3.5 text-muted-foreground" />
+      </a>
+    </div>
   );
 }
 
@@ -236,6 +282,7 @@ export function MessageFeed({
   isLoading,
   streamingPhase = null,
   specialistProgress = null,
+  streamingFiles = [],
   streamingAudit = "",
   isStreaming = false,
   onStop,
@@ -306,6 +353,7 @@ export function MessageFeed({
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
           let sources = normalizeSources(message.sources);
           const assetIds = normalizeAssetIds(message.assetIds);
+          const generatedAssets = display.generatedAssets ?? [];
           if (!isUser) {
             if (!sources || sources.length === 0) {
               // Try to extract legacy sources from the inline block
@@ -453,10 +501,27 @@ export function MessageFeed({
                 {!isUser && display.artifacts && display.artifacts.length > 0 && (
                   <ArtifactCards artifacts={display.artifacts} />
                 )}
-                {!isUser && assetIds && assetIds.length > 0 && (
+                {!isUser && generatedAssets.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {generatedAssets.map((asset) => (
+                      <FileDownloadButton
+                        key={asset.id}
+                        assetId={asset.id}
+                        filename={asset.filename}
+                        mimeType={asset.mimeType}
+                      />
+                    ))}
+                  </div>
+                )}
+                {!isUser && generatedAssets.length === 0 && assetIds && assetIds.length > 0 && (
                   <div className="flex flex-wrap gap-2 px-1">
                     {assetIds.map((assetId) => (
-                      <FileDownloadButton key={assetId} assetId={assetId} />
+                      <FileDownloadButton
+                        key={assetId}
+                        assetId={assetId}
+                        filename={streamingFiles.find((file) => file.id === assetId)?.filename}
+                        mimeType={streamingFiles.find((file) => file.id === assetId)?.mimeType}
+                      />
                     ))}
                   </div>
                 )}

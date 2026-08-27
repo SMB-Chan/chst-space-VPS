@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OpenaiArtifact } from './openaiArtifact';
+import type { OpenaiGeneratedAsset } from './openaiGeneratedAsset';
 import type { OpenaiSource } from './openaiSource';
 
 export interface OpenaiMessage {
@@ -19,5 +20,6 @@ export interface OpenaiMessage {
   auditContent?: string | null;
   auditModelId?: string | null;
   assetIds?: number[] | null;
+  generatedAssets?: OpenaiGeneratedAsset[] | null;
   createdAt: Date;
 }

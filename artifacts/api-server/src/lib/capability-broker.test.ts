@@ -66,10 +66,45 @@ describe("capability broker", () => {
     });
   });
 
+  it("plans bounded English speech synthesis for an explicit request", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"audio.synthesize","text":"Welcome to Chat Space.","modelId":"qwen-audio-3.0-tts-plus","voice":"longanlufeng","languageHint":"en","rate":1.1,"pitch":0.95,"volume":60}',
+    );
+    const result = await planCapabilityTool({
+      client, provider: "openai", modelId: "gpt-5.6-terra",
+      userText: "Read this aloud as an English voice: Welcome to Chat Space.",
+      hasReferenceImages: false,
+    });
+    expect(result).toEqual({
+      tool: "audio.synthesize",
+      text: "Welcome to Chat Space.",
+      modelId: "qwen-audio-3.0-tts-plus",
+      voice: "longanlufeng",
+      languageHint: "en",
+      rate: 1.1,
+      pitch: 0.95,
+      volume: 60,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unsupported language hints for the built-in English/Chinese voices", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"audio.synthesize","text":"こんにちは、Chat Spaceです。","languageHint":"ja"}',
+    );
+    const result = await planCapabilityTool({
+      client, provider: "openai", modelId: "gpt-5.6-terra",
+      userText: "この文章を日本語で読み上げて", hasReferenceImages: false,
+    });
+    expect(result).toEqual({ tool: "none" });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it("detects Japanese and English image/audio intent", () => {
     expect(couldNeedCapabilityTool("画像を生成して")).toBe(true);
     expect(couldNeedCapabilityTool("Please create an illustration of a fox")).toBe(true);
     expect(couldNeedCapabilityTool("この画像の内容を説明して")).toBe(false);
     expect(couldNeedCapabilityTool("transcribe this audio")).toBe(true);
+    expect(couldNeedCapabilityTool("Please synthesize this text to speech")).toBe(true);
   });
 });

@@ -131,11 +131,31 @@ async function getHydratedMessages(conversationId: number, userId: string) {
     .from(artifacts)
     .where(and(eq(artifacts.conversationId, conversationId), eq(artifacts.userId, userId)))
     .orderBy(asc(artifacts.id));
+  const generatedAssetRows = await db
+    .select({
+      id: assets.id,
+      messageId: assets.messageId,
+      filename: assets.filename,
+      mimeType: assets.mimeType,
+      size: assets.size,
+    })
+    .from(assets)
+    .where(eq(assets.conversationId, conversationId))
+    .orderBy(asc(assets.id));
 
   return messageRows.map((message) => ({
     ...message,
     sources: parseStoredSources(message.sources),
     assetIds: parseStoredAssetIds(message.assetIds),
+    generatedAssets: generatedAssetRows
+      .filter((asset) => asset.messageId === message.id)
+      .map((asset) => ({
+        id: asset.id,
+        filename: asset.filename,
+        mimeType: asset.mimeType,
+        size: asset.size,
+        downloadUrl: `/api/openai/assets/${asset.id}`,
+      })),
     artifacts: artifactRows
       .filter((artifact) => artifact.messageId === message.id)
       .map(({ messageId: _messageId, ...artifact }) => ({
@@ -823,7 +843,9 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
     res.setHeader("Content-Type", asset.mimeType);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
+      asset.mimeType.startsWith("audio/")
+        ? "inline"
+        : `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
     );
     res.setHeader("Content-Length", String(buffer.length));
     res.setHeader("Cache-Control", "private, no-store");

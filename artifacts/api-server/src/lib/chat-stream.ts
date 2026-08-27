@@ -139,6 +139,22 @@ function specialistCallFromPlan(plan: CapabilityToolPlan): SpecialistToolCall | 
       }),
     };
   }
+  if (plan.tool === "audio.synthesize") {
+    return {
+      id: "capability-broker-audio-synthesize-1",
+      name: "synthesize_speech",
+      arguments: JSON.stringify({
+        text: plan.text,
+        ...(plan.modelId ? { modelId: plan.modelId } : {}),
+        ...(plan.voice ? { voice: plan.voice } : {}),
+        ...(plan.instruction ? { instruction: plan.instruction } : {}),
+        ...(plan.languageHint ? { languageHint: plan.languageHint } : {}),
+        ...(plan.rate !== undefined ? { rate: plan.rate } : {}),
+        ...(plan.pitch !== undefined ? { pitch: plan.pitch } : {}),
+        ...(plan.volume !== undefined ? { volume: plan.volume } : {}),
+      }),
+    };
+  }
   return {
     id: `capability-broker-${plan.tool.replace(".", "-")}-1`,
     name: plan.tool === "image.edit" ? "edit_image" : "generate_image",
