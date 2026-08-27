@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS alibaba_video_jobs (
   asset_id integer REFERENCES assets(id) ON DELETE SET NULL,
   provider_task_id text NOT NULL,
   provider_request_id text,
+  idempotency_key text,
   model_id text NOT NULL,
   mode text NOT NULL,
   status text NOT NULL DEFAULT 'PENDING',
@@ -96,6 +97,14 @@ CREATE TABLE IF NOT EXISTS alibaba_video_jobs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS alibaba_video_jobs_provider_task_id_uidx
   ON alibaba_video_jobs(provider_task_id);
+ALTER TABLE alibaba_video_jobs
+  ADD COLUMN IF NOT EXISTS idempotency_key text;
+UPDATE alibaba_video_jobs
+SET idempotency_key = 'legacy-' || id::text
+WHERE idempotency_key IS NULL;
+ALTER TABLE alibaba_video_jobs ALTER COLUMN idempotency_key SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS alibaba_video_jobs_user_idempotency_key_uidx
+  ON alibaba_video_jobs(user_id, idempotency_key);
 CREATE INDEX IF NOT EXISTS alibaba_video_jobs_user_created_at_idx
   ON alibaba_video_jobs(user_id, created_at);
 CREATE INDEX IF NOT EXISTS alibaba_video_jobs_due_idx

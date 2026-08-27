@@ -237,6 +237,157 @@ export interface OpenaiConversationWithMessages {
   messages: OpenaiMessage[];
 }
 
+export interface RealtimeSessionInput {
+  /** @minimum 1 */
+  conversationId?: number;
+  /** @minLength 1 */
+  modelId: string;
+}
+
+export type RealtimeSessionModelId = typeof RealtimeSessionModelId[keyof typeof RealtimeSessionModelId];
+
+
+export const RealtimeSessionModelId = {
+  'qwen-audio-30-realtime-plus': 'qwen-audio-3.0-realtime-plus',
+} as const;
+
+export type RealtimeSessionWebsocketPath = typeof RealtimeSessionWebsocketPath[keyof typeof RealtimeSessionWebsocketPath];
+
+
+export const RealtimeSessionWebsocketPath = {
+  '/api/openai/realtime': '/api/openai/realtime',
+} as const;
+
+export type RealtimeSessionMaxSessionSeconds = typeof RealtimeSessionMaxSessionSeconds[keyof typeof RealtimeSessionMaxSessionSeconds];
+
+
+export const RealtimeSessionMaxSessionSeconds = {
+  NUMBER_300: 300,
+} as const;
+
+export interface RealtimeSession {
+  token: string;
+  expiresAt: number;
+  modelId: RealtimeSessionModelId;
+  websocketPath: RealtimeSessionWebsocketPath;
+  maxSessionSeconds: RealtimeSessionMaxSessionSeconds;
+}
+
+export type OpenaiVideoJobInputMode = typeof OpenaiVideoJobInputMode[keyof typeof OpenaiVideoJobInputMode];
+
+
+export const OpenaiVideoJobInputMode = {
+  t2v: 't2v',
+  i2v: 'i2v',
+  r2v: 'r2v',
+} as const;
+
+export type OpenaiVideoJobInputResolution = typeof OpenaiVideoJobInputResolution[keyof typeof OpenaiVideoJobInputResolution];
+
+
+export const OpenaiVideoJobInputResolution = {
+  '720P': '720P',
+  '1080P': '1080P',
+} as const;
+
+export type OpenaiVideoJobInputRatio = typeof OpenaiVideoJobInputRatio[keyof typeof OpenaiVideoJobInputRatio];
+
+
+export const OpenaiVideoJobInputRatio = {
+  '16:9': '16:9',
+  '9:16': '9:16',
+  '1:1': '1:1',
+  '4:3': '4:3',
+  '3:4': '3:4',
+  '4:5': '4:5',
+  '5:4': '5:4',
+  '9:21': '9:21',
+  '21:9': '21:9',
+} as const;
+
+export interface OpenaiVideoJobInput {
+  /**
+     * @minLength 1
+     * @maxLength 5000
+     */
+  prompt: string;
+  mode: OpenaiVideoJobInputMode;
+  modelId?: string;
+  /** @maxItems 9 */
+  referenceImages?: string[];
+  resolution?: OpenaiVideoJobInputResolution;
+  ratio?: OpenaiVideoJobInputRatio;
+  /**
+     * @minimum 3
+     * @maximum 15
+     */
+  duration?: number;
+  watermark?: boolean;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  seed?: number;
+  confirmation: true;
+  /**
+     * @minLength 16
+     * @maxLength 128
+     */
+  idempotencyKey: string;
+}
+
+export type OpenaiVideoJobAssetMimeType = typeof OpenaiVideoJobAssetMimeType[keyof typeof OpenaiVideoJobAssetMimeType];
+
+
+export const OpenaiVideoJobAssetMimeType = {
+  'video/mp4': 'video/mp4',
+} as const;
+
+export interface OpenaiVideoJobAsset {
+  id: number;
+  filename: string;
+  mimeType: OpenaiVideoJobAssetMimeType;
+  size: number;
+  downloadUrl: string;
+}
+
+export type OpenaiVideoJobMode = typeof OpenaiVideoJobMode[keyof typeof OpenaiVideoJobMode];
+
+
+export const OpenaiVideoJobMode = {
+  t2v: 't2v',
+  i2v: 'i2v',
+  r2v: 'r2v',
+} as const;
+
+export type OpenaiVideoJobStatus = typeof OpenaiVideoJobStatus[keyof typeof OpenaiVideoJobStatus];
+
+
+export const OpenaiVideoJobStatus = {
+  SUBMITTING: 'SUBMITTING',
+  PENDING: 'PENDING',
+  RUNNING: 'RUNNING',
+  SUCCEEDED: 'SUCCEEDED',
+  FAILED: 'FAILED',
+  CANCELED: 'CANCELED',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+
+export interface OpenaiVideoJob {
+  id: number;
+  conversationId: number;
+  requestMessageId: number;
+  modelId: string;
+  mode: OpenaiVideoJobMode;
+  status: OpenaiVideoJobStatus;
+  failureCode: string | null;
+  failureMessage: string | null;
+  resultAsset: OpenaiVideoJobAsset | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
 export interface OpenaiError {
   error: string;
 }

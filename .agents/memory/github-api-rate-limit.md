@@ -14,3 +14,9 @@ The workspace's GitHub HTTPS remote can reject normal git fetch/push authenticat
 **Why:** The authenticated connector and the shell git remote do not necessarily share credentials in Replit workspaces.
 
 **How to apply:** Never force-update an unexpected ref; create the commit with the verified target SHA as its parent, update the named branch with `force: false`, and re-read the branch and PR afterward.
+
+For large multi-file syncs, GitHub GraphQL `createCommitOnBranch` with `expectedHeadOid` and inline base64 additions is a more reliable atomic alternative to many REST blob calls.
+
+**Why:** Even sequential connector blob calls can encounter transient HTML/rate-limit responses; GraphQL keeps the ref update atomic and avoids partial branch movement.
+
+**How to apply:** Read all workspace files first, re-check the branch head in the same operation, then create the commit with the observed head as `expectedHeadOid`; never force-update.

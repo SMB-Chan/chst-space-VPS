@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState } from "react";
-import { OpenaiMessage, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
+import { OpenaiMessage, OpenaiVideoJob, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles, Volume2 } from "lucide-react";
+import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles, Volume2, Video, Ban } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -87,6 +87,80 @@ interface MessageFeedProps {
   onStop?: () => void;
   streamingWarning?: string | null;
   onDismissWarning?: () => void;
+  videoJob?: OpenaiVideoJob | null;
+  onCancelVideo?: () => void;
+}
+
+function VideoJobCard({
+  job,
+  onCancel,
+}: {
+  job: OpenaiVideoJob;
+  onCancel?: () => void;
+}) {
+  const busy = job.status === "SUBMITTING" || job.status === "PENDING" || job.status === "RUNNING";
+  const statusLabel: Record<OpenaiVideoJob["status"], string> = {
+    SUBMITTING: "送信中",
+    PENDING: "待機中",
+    RUNNING: "生成中",
+    SUCCEEDED: "完了",
+    FAILED: "失敗",
+    CANCELED: "キャンセル済み",
+    UNKNOWN: "不明",
+  };
+  const asset = job.resultAsset;
+  return (
+    <div className={cn(
+      "rounded-2xl border px-4 py-4 shadow-sm",
+      busy
+        ? "border-violet-500/30 bg-violet-500/5"
+        : job.status === "FAILED" || job.status === "UNKNOWN"
+          ? "border-amber-500/30 bg-amber-500/5"
+          : "border-border bg-card",
+    )}>
+      <div className="flex items-center gap-2 text-sm">
+        {busy ? <Loader2 className="h-4 w-4 animate-spin text-violet-500" /> : <Video className="h-4 w-4 text-violet-500" />}
+        <span className="font-medium">HappyHorse 動画生成</span>
+        <span className="text-xs text-muted-foreground">{job.mode.toUpperCase()}・{statusLabel[job.status]}</span>
+        {job.status === "PENDING" && onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/20"
+          >
+            <Ban className="h-3 w-3" /> キャンセル
+          </button>
+        ) : null}
+      </div>
+      {busy ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {job.status === "SUBMITTING" ? "生成サービスに送信しています。" : job.status === "PENDING" ? "生成キューで順番を待っています。" : "動画を生成しています。完了するとここに表示されます。"}
+        </p>
+      ) : null}
+      {job.failureMessage ? (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{job.failureMessage}</p>
+      ) : null}
+      {asset ? (
+        <div className="mt-3 grid gap-2">
+          <video
+            controls
+            preload="metadata"
+            src={asset.downloadUrl || getGetOpenaiAssetUrl(asset.id)}
+            className="w-full max-w-2xl rounded-xl border border-border bg-black"
+            aria-label={`生成動画 ${asset.filename}`}
+          />
+          <a
+            href={asset.downloadUrl || getGetOpenaiAssetUrl(asset.id)}
+            download={asset.filename}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-primary/40 hover:bg-primary/5"
+          >
+            <Download className="h-4 w-4 text-primary" />
+            <span className="max-w-[240px] truncate">{asset.filename}</span>
+          </a>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SpecialistProgress({
@@ -309,6 +383,8 @@ export function MessageFeed({
   onStop,
   streamingWarning,
   onDismissWarning,
+  videoJob = null,
+  onCancelVideo,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -556,6 +632,7 @@ export function MessageFeed({
             </div>
           );
         })}
+        {videoJob ? <VideoJobCard job={videoJob} onCancel={onCancelVideo} /> : null}
         <div ref={bottomRef} />
       </div>
     </div>

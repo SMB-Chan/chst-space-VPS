@@ -191,8 +191,8 @@ function specialistModelConfigured(model: CapabilityModel): boolean {
   if (model.id === "qwen-audio-3.0-realtime-plus" && model.capabilities.includes("realtime")) {
     return isAlibabaSpecialistConfigured();
   }
-  // HappyHorse transports remain catalog-only until their dedicated worker is
-  // configured for the current process.
+  // HappyHorse remains catalog-only in the chat model registry; its dedicated
+  // authenticated video-job route checks the specialist transport directly.
   return false;
 }
 

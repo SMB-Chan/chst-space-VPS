@@ -1,9 +1,11 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { db } from "@workspace/db";
-import { conversations, messages, artifacts, assets } from "@workspace/db/schema";
+import { conversations, messages, artifacts, assets, alibabaVideoJobs } from "@workspace/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import {
   CreateOpenaiConversationBody,
+  CreateOpenaiVideoJobBody,
   DeleteOpenaiMessagesBody,
   SendOpenaiMessageBody,
   UpdateOpenaiConversationBody,
@@ -52,6 +54,20 @@ import {
   AlibabaRealtimeError,
   createAlibabaRealtimeSession,
 } from "../../lib/alibaba-realtime";
+import {
+  ALIBABA_CAPABILITY_DEFAULTS,
+  modelHasAlibabaCapability,
+} from "../../lib/alibaba-capabilities";
+import {
+  AlibabaVideoError,
+  cancelAlibabaVideoTask,
+  submitAlibabaVideoTask,
+  type AlibabaVideoMode,
+} from "../../lib/alibaba-video";
+import {
+  alibabaVideoProviderExpiresAt,
+  canCancelAlibabaVideoStatus,
+} from "../../lib/alibaba-video-job-state";
 
 const router = Router();
 
@@ -222,6 +238,105 @@ async function resolveMessageBinaries(
   );
 }
 
+type VideoJobStatus =
+  | "SUBMITTING"
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "CANCELED"
+  | "UNKNOWN";
+
+function videoModelForMode(mode: AlibabaVideoMode, modelId?: string): string {
+  const capability = `video.${mode}` as "video.t2v" | "video.i2v" | "video.r2v";
+  const selected = modelId?.trim() || ALIBABA_CAPABILITY_DEFAULTS[capability];
+  if (!selected || !modelHasAlibabaCapability(selected, capability)) {
+    throw new AlibabaVideoError(
+      `Model ${selected || "(empty)"} does not support ${capability}`,
+      "指定された動画モデルはこの処理に対応していません。",
+    );
+  }
+  return selected;
+}
+
+function videoJobPublicMessage(status: string): string {
+  switch (status) {
+    case "SUBMITTING":
+      return "動画生成を開始しています。";
+    case "PENDING":
+      return "動画生成の順番を待っています。";
+    case "RUNNING":
+      return "動画を生成しています。";
+    case "SUCCEEDED":
+      return "動画生成が完了しました。";
+    case "CANCELED":
+      return "動画生成をキャンセルしました。";
+    case "FAILED":
+      return "動画生成に失敗しました。";
+    default:
+      return "動画生成の状態を確認しています。";
+  }
+}
+
+async function toPublicVideoJob(job: typeof alibabaVideoJobs.$inferSelect) {
+  let resultAsset: {
+    id: number;
+    filename: string;
+    mimeType: string;
+    size: number;
+    downloadUrl: string;
+  } | null = null;
+  if (job.assetId) {
+    const [asset] = await db
+      .select({
+        id: assets.id,
+        filename: assets.filename,
+        mimeType: assets.mimeType,
+        size: assets.size,
+      })
+      .from(assets)
+      .where(and(eq(assets.id, job.assetId), eq(assets.conversationId, job.conversationId)))
+      .limit(1);
+    if (asset) resultAsset = { ...asset, downloadUrl: `/api/openai/assets/${asset.id}` };
+  }
+  return {
+    id: job.id,
+    conversationId: job.conversationId,
+    requestMessageId: job.requestMessageId,
+    modelId: job.modelId,
+    mode: job.mode,
+    status: job.status as VideoJobStatus,
+    failureCode: job.failureCode,
+    failureMessage: job.failureMessage,
+    resultAsset,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.completedAt,
+  };
+}
+
+async function getOwnedVideoJob(id: number, userId: string) {
+  const [job] = await db
+    .select()
+    .from(alibabaVideoJobs)
+    .where(and(eq(alibabaVideoJobs.id, id), eq(alibabaVideoJobs.userId, userId)))
+    .limit(1);
+  return job;
+}
+
+async function markVideoSubmissionFailed(jobId: number, userId: string, error: unknown): Promise<void> {
+  await db
+    .update(alibabaVideoJobs)
+    .set({
+      status: "FAILED",
+      failureCode: "PROVIDER_SUBMISSION_FAILED",
+      failureMessage: error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000),
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(alibabaVideoJobs.id, jobId), eq(alibabaVideoJobs.userId, userId)));
+}
+
 router.use("/openai/artifacts", requireAuth);
 
 router.get("/openai/models", async (_req, res) => {
@@ -248,6 +363,264 @@ router.post("/openai/realtime/session", requireAuth, (req, res) => {
     }
     req.log.error({ err: error }, "Failed to create realtime session");
     res.status(500).json({ error: "リアルタイム音声を開始できませんでした。" });
+  }
+});
+
+router.post("/openai/conversations/:conversationId/video-jobs", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const conversationId = parsePositiveInt(req.params.conversationId);
+  if (conversationId === undefined) {
+    res.status(400).json({ error: "Invalid conversation ID" });
+    return;
+  }
+
+  const parsed = CreateOpenaiVideoJobBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "動画の入力または実行確認が不正です。" });
+    return;
+  }
+
+  const input = parsed.data;
+  const mode = input.mode as AlibabaVideoMode;
+  let modelId: string;
+  try {
+    modelId = videoModelForMode(mode, input.modelId);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof AlibabaVideoError ? error.publicMessage : "指定された動画モデルは利用できません。",
+    });
+    return;
+  }
+
+  let job: typeof alibabaVideoJobs.$inferSelect;
+  try {
+    const now = new Date();
+    job = await db.transaction(async (tx) => {
+      const [conversation] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+        .limit(1);
+      if (!conversation) {
+        const error = new Error("Conversation not found");
+        error.name = "ConversationNotFound";
+        throw error;
+      }
+
+      const [requestMessage] = await tx
+        .insert(messages)
+        .values({
+          conversationId,
+          role: "user",
+          content: [
+            input.prompt.trim(),
+            "",
+            `動画生成: ${mode.toUpperCase()}`,
+            input.referenceImages?.length
+              ? `参照画像: ${input.referenceImages.length}枚`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        })
+        .returning({ id: messages.id });
+      if (!requestMessage) throw new Error("Video request message was not created");
+
+      const [created] = await tx
+        .insert(alibabaVideoJobs)
+        .values({
+          userId,
+          conversationId,
+          requestMessageId: requestMessage.id,
+          // Reserve the idempotency key before calling the provider. The
+          // placeholder is never polled by the worker and is replaced below.
+          providerTaskId: `pending-${randomUUID()}`,
+          idempotencyKey: input.idempotencyKey,
+          modelId,
+          mode,
+          status: "SUBMITTING",
+          providerExpiresAt: alibabaVideoProviderExpiresAt(now),
+          updatedAt: now,
+        })
+        .returning();
+      if (!created) throw new Error("Video job was not created");
+      return created;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "ConversationNotFound") {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    // A concurrent retry with the same key returns the already-reserved job.
+    if ((error as { code?: unknown })?.code === "23505") {
+      const existing = await db
+        .select()
+        .from(alibabaVideoJobs)
+        .where(
+          and(
+            eq(alibabaVideoJobs.userId, userId),
+            eq(alibabaVideoJobs.idempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1);
+      if (existing[0]) {
+        res.status(200).json(await toPublicVideoJob(existing[0]));
+        return;
+      }
+    }
+    req.log.error({ err: error, conversationId }, "Failed to reserve Alibaba video job");
+    res.status(500).json({ error: "動画ジョブを準備できませんでした。" });
+    return;
+  }
+
+  let submitted;
+  try {
+    submitted = await submitAlibabaVideoTask({
+      mode,
+      prompt: input.prompt,
+      modelId,
+      referenceImages: input.referenceImages,
+      resolution: input.resolution,
+      ratio: input.ratio,
+      duration: input.duration,
+      watermark: input.watermark,
+      seed: input.seed,
+    });
+  } catch (error) {
+    try {
+      await markVideoSubmissionFailed(job.id, userId, error);
+    } catch (persistError) {
+      req.log.error(
+        { err: persistError, jobId: job.id },
+        "Failed to record Alibaba video submission failure",
+      );
+    }
+    const publicMessage =
+      error instanceof AlibabaVideoError
+        ? error.publicMessage
+        : "動画生成サービスへの送信に失敗しました。";
+    res.status(503).json({ error: publicMessage });
+    return;
+  }
+
+  let persisted: typeof alibabaVideoJobs.$inferSelect | undefined;
+  let persistenceError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const [updated] = await db
+        .update(alibabaVideoJobs)
+        .set({
+          providerTaskId: submitted.taskId,
+          providerRequestId: submitted.requestId,
+          status: submitted.status,
+          nextPollAt: submitted.status === "PENDING" || submitted.status === "RUNNING" ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(alibabaVideoJobs.id, job.id), eq(alibabaVideoJobs.userId, userId)))
+        .returning();
+      if (updated) {
+        persisted = updated;
+        break;
+      }
+      persistenceError = new Error("Video job reservation disappeared before provider task was linked");
+    } catch (error) {
+      persistenceError = error;
+    }
+  }
+  if (!persisted) {
+    // Never submit again: the provider task was accepted, but the durable
+    // link needs operational repair/retry rather than another billable call.
+    req.log.error(
+      { err: persistenceError, jobId: job.id, providerTaskId: submitted.taskId },
+      "Alibaba video provider task accepted but could not be linked to job",
+    );
+    res.status(503).json({
+      error: "動画生成は受け付けられましたが、状態の保存に時間がかかっています。再送信せず、しばらくしてから履歴を確認してください。",
+    });
+    return;
+  }
+
+  res.status(201).json(await toPublicVideoJob(persisted));
+});
+
+router.get("/openai/video-jobs/:jobId", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const jobId = parsePositiveInt(req.params.jobId);
+  if (jobId === undefined) {
+    res.status(400).json({ error: "Invalid video job id" });
+    return;
+  }
+  try {
+    const job = await getOwnedVideoJob(jobId, userId);
+    if (!job) {
+      res.status(404).json({ error: "Video job not found" });
+      return;
+    }
+    res.json(await toPublicVideoJob(job));
+  } catch (error) {
+    req.log.error({ err: error, jobId }, "Failed to get Alibaba video job");
+    res.status(500).json({ error: "動画ジョブの状態を取得できませんでした。" });
+  }
+});
+
+router.delete("/openai/video-jobs/:jobId", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const jobId = parsePositiveInt(req.params.jobId);
+  if (jobId === undefined) {
+    res.status(400).json({ error: "Invalid video job id" });
+    return;
+  }
+  try {
+    const job = await getOwnedVideoJob(jobId, userId);
+    if (!job) {
+      res.status(404).json({ error: "Video job not found" });
+      return;
+    }
+    if (!canCancelAlibabaVideoStatus(job.status as "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "UNKNOWN")) {
+      res.status(409).json({ error: "この動画ジョブはすでにキャンセルできません。" });
+      return;
+    }
+
+    let canceled;
+    try {
+      canceled = await cancelAlibabaVideoTask(job.providerTaskId);
+    } catch (error) {
+      res.status(503).json({
+        error: error instanceof AlibabaVideoError ? error.publicMessage : "動画生成のキャンセルに失敗しました。",
+      });
+      return;
+    }
+
+    const [updated] = await db
+      .update(alibabaVideoJobs)
+      .set({
+        status: canceled.status === "CANCELED" ? "CANCELED" : job.status,
+        providerRequestId: canceled.requestId ?? job.providerRequestId,
+        completedAt: canceled.status === "CANCELED" ? new Date() : job.completedAt,
+        nextPollAt: canceled.status === "CANCELED" ? null : job.nextPollAt,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(alibabaVideoJobs.id, jobId),
+          eq(alibabaVideoJobs.userId, userId),
+          eq(alibabaVideoJobs.status, "PENDING"),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      const current = await getOwnedVideoJob(jobId, userId);
+      if (current?.status === "CANCELED" || current?.status === "FAILED" || current?.status === "SUCCEEDED") {
+        res.json(await toPublicVideoJob(current));
+        return;
+      }
+      res.status(409).json({ error: "動画ジョブの状態が変わったためキャンセルできませんでした。" });
+      return;
+    }
+    res.json(await toPublicVideoJob(updated));
+  } catch (error) {
+    req.log.error({ err: error, jobId }, "Failed to cancel Alibaba video job");
+    res.status(500).json({ error: "動画ジョブをキャンセルできませんでした。" });
   }
 });
 

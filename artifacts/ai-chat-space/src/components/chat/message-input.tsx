@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   Presentation,
   Music as MusicIcon,
+  Video as VideoIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compressImageFile, formatBytes } from "@/lib/compress-image";
@@ -24,6 +25,15 @@ export interface OutgoingAttachment {
 }
 
 export type FileFormat = "pdf" | "docx" | "xlsx" | "pptx";
+export type VideoMode = "t2v" | "i2v" | "r2v";
+export type VideoGenerationInput = {
+  prompt: string;
+  mode: VideoMode;
+  referenceImages?: OutgoingAttachment[];
+  resolution: "720P" | "1080P";
+  ratio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "4:5" | "5:4" | "9:21" | "21:9";
+  duration: number;
+};
 
 interface MessageInputProps {
   // 戻り値がfalseの場合は送信がブロックされた（入力・添付は保持する）
@@ -37,6 +47,8 @@ interface MessageInputProps {
   placeholder?: string;
   conversationId?: number | null;
   selectedModel?: string;
+  videoGenerationEnabled?: boolean;
+  onGenerateVideo?: (input: VideoGenerationInput) => void | boolean | Promise<void | boolean>;
 }
 
 // 画像・テキスト・文書（PDF/ZIP/Office）・音声を受け付け。
@@ -146,12 +158,18 @@ export function MessageInput({
   placeholder,
   conversationId = null,
   selectedModel = "",
+  videoGenerationEnabled = false,
+  onGenerateVideo,
 }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<StagedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileFormat, setFileFormat] = useState<FileFormat | null>(null);
   const [compressing, setCompressing] = useState(false);
+  const [videoMode, setVideoMode] = useState<VideoMode | null>(null);
+  const [videoResolution, setVideoResolution] = useState<"720P" | "1080P">("720P");
+  const [videoRatio, setVideoRatio] = useState<VideoGenerationInput["ratio"]>("16:9");
+  const [videoDuration, setVideoDuration] = useState(5);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 送信処理中フラグ（二重送信防止）
@@ -160,6 +178,10 @@ export function MessageInput({
   useEffect(() => {
     if (!fileGenerationEnabled) setFileFormat(null);
   }, [fileGenerationEnabled]);
+
+  useEffect(() => {
+    if (!videoGenerationEnabled) setVideoMode(null);
+  }, [videoGenerationEnabled]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // IME変換確定のEnterは無視する
@@ -235,6 +257,49 @@ export function MessageInput({
     isSendingRef.current = true;
 
     try {
+      if (videoMode && onGenerateVideo) {
+        const nonImages = files.filter((item) => !ACCEPTED_IMAGE_TYPES.includes(item.file.type));
+        const imageFiles = files.filter((item) => ACCEPTED_IMAGE_TYPES.includes(item.file.type));
+        const expected =
+          videoMode === "t2v" ? "画像を添付しない" : videoMode === "i2v" ? "先頭画像を1枚" : "参照画像を1〜9枚";
+        if (nonImages.length > 0) {
+          setFileError("動画生成では画像ファイルだけを参照素材に指定できます。");
+          return;
+        }
+        if (
+          (videoMode === "t2v" && imageFiles.length !== 0) ||
+          (videoMode === "i2v" && imageFiles.length !== 1) ||
+          (videoMode === "r2v" && (imageFiles.length < 1 || imageFiles.length > 9))
+        ) {
+          setFileError(`${videoMode.toUpperCase()} は ${expected} 指定してください。`);
+          return;
+        }
+        const confirmed = window.confirm(
+          `${videoMode.toUpperCase()}動画（${videoDuration}秒・${videoResolution}）を生成します。\n高コストの処理です。実行しますか？`,
+        );
+        if (!confirmed) return;
+        const references = imageFiles.length
+          ? await Promise.all(imageFiles.map((item) => readOne(item.file)))
+          : undefined;
+        const result = await onGenerateVideo({
+          prompt: content.trim(),
+          mode: videoMode,
+          referenceImages: references,
+          resolution: videoResolution,
+          ratio: videoRatio,
+          duration: videoDuration,
+        });
+        if (result === false) return;
+        setContent("");
+        setFiles([]);
+        setFileError(null);
+        setVideoMode(null);
+        return;
+      }
+      if (files.length > 5) {
+        setFileError("通常のチャット添付は最大5件までです。動画生成では動画モードを選択してください。");
+        return;
+      }
       const attachments = files.length > 0
         ? await Promise.all(files.map((item) => readOne(item.file)))
         : undefined;
@@ -323,7 +388,73 @@ export function MessageInput({
         </div>
       )}
 
-      {fileGenerationEnabled && (
+      {videoGenerationEnabled && (
+        <div className="flex items-center gap-2 px-3 pt-2 pb-1 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setVideoMode((current) => current ? null : "t2v")}
+            disabled={disabled || compressing}
+            className={cn(
+              "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+              videoMode
+                ? "bg-violet-500/10 border-violet-500/40 text-violet-600 dark:text-violet-300"
+                : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
+              (disabled || compressing) && "opacity-50 cursor-not-allowed",
+            )}
+          >
+            <VideoIcon className="w-3 h-3" /> 動画生成
+          </button>
+          {videoMode && (
+            <>
+              <select
+                value={videoMode}
+                onChange={(event) => setVideoMode(event.target.value as VideoMode)}
+                className="h-7 rounded-full border border-violet-500/30 bg-background px-2 text-[11px] text-foreground outline-none"
+                aria-label="動画生成モード"
+              >
+                <option value="t2v">T2V・テキスト</option>
+                <option value="i2v">I2V・先頭画像</option>
+                <option value="r2v">R2V・参照画像</option>
+              </select>
+              <select
+                value={videoDuration}
+                onChange={(event) => setVideoDuration(Number(event.target.value))}
+                className="h-7 rounded-full border border-border bg-background px-2 text-[11px] text-foreground outline-none"
+                aria-label="動画の長さ"
+              >
+                {[3, 5, 8, 10, 15].map((seconds) => (
+                  <option key={seconds} value={seconds}>{seconds}秒</option>
+                ))}
+              </select>
+              <select
+                value={videoResolution}
+                onChange={(event) => setVideoResolution(event.target.value as "720P" | "1080P")}
+                className="h-7 rounded-full border border-border bg-background px-2 text-[11px] text-foreground outline-none"
+                aria-label="動画の解像度"
+              >
+                <option value="720P">720P</option>
+                <option value="1080P">1080P</option>
+              </select>
+              <select
+                value={videoRatio}
+                disabled={videoMode === "i2v"}
+                onChange={(event) => setVideoRatio(event.target.value as VideoGenerationInput["ratio"])}
+                className="h-7 rounded-full border border-border bg-background px-2 text-[11px] text-foreground outline-none disabled:opacity-50"
+                aria-label="動画の比率"
+              >
+                {["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4", "9:21", "21:9"].map((ratio) => (
+                  <option key={ratio} value={ratio}>{ratio}</option>
+                ))}
+              </select>
+              <span className="w-full text-[11px] text-muted-foreground">
+                {videoMode === "t2v" ? "画像なしで生成" : videoMode === "i2v" ? "画像を1枚添付" : "画像を1〜9枚添付"}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {fileGenerationEnabled && !videoMode && (
         <div className="flex items-center gap-1 px-3 pt-2 pb-0 flex-wrap">
           {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
             const active = fileFormat === format;

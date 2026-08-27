@@ -129,6 +129,9 @@ function wantsGeneratedFile(userText: string): boolean {
 
 function specialistCallFromPlan(plan: CapabilityToolPlan): SpecialistToolCall | undefined {
   if (plan.tool === "none") return undefined;
+  // Async video generation has a separate authenticated, confirmed job API.
+  // Never downgrade a video request into an image tool call.
+  if (plan.tool === "video.generate") return undefined;
   if (plan.tool === "audio.transcribe") {
     return {
       id: "capability-broker-audio-1",

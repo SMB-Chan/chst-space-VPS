@@ -8,9 +8,18 @@ import {
   getListOpenaiConversationsQueryKey,
   OpenaiMessage,
   OpenaiArtifact,
+  OpenaiVideoJob,
+  createOpenaiVideoJob,
+  getOpenaiVideoJob,
+  cancelOpenaiVideoJob,
 } from "@workspace/api-client-react";
 import { MessageFeed, type ChatArtifact } from "@/components/chat/message-feed";
-import { MessageInput, type OutgoingAttachment, type FileFormat } from "@/components/chat/message-input";
+import {
+  MessageInput,
+  type OutgoingAttachment,
+  type FileFormat,
+  type VideoGenerationInput,
+} from "@/components/chat/message-input";
 import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { TranslationModeSelector } from "@/components/chat/translation-selector";
@@ -334,6 +343,12 @@ export function ChatPage() {
   const auditModel =
     resolvedAuditModel && resolvedAuditModel !== selectedModel ? resolvedAuditModel : undefined;
   const [optimisticUserMessage, setOptimisticUserMessage] = useState<OpenaiMessage | null>(null);
+  const [videoJob, setVideoJob] = useState<OpenaiVideoJob | null>(null);
+  const videoBusy =
+    videoJob != null &&
+    (videoJob.status === "SUBMITTING" ||
+      videoJob.status === "PENDING" ||
+      videoJob.status === "RUNNING");
 
   const stopStreaming = () => {
     const targetId = sendingToRef.current ?? conversationId;
@@ -416,6 +431,7 @@ export function ChatPage() {
     setSearchWarning(null);
     setActiveSkills([]);
     setStreamingAudit("");
+    setVideoJob(null);
     // Revoke object URLs created for ephemeral artifact downloads so we do not
     // leak memory when the user switches conversations.
     artifactBlobUrlCache.current.forEach((url) => URL.revokeObjectURL(url));
@@ -463,6 +479,101 @@ export function ChatPage() {
   }, [conversation, modelRestoredForConv, models, isPrivate]);
 
   const createConversation = useCreateOpenaiConversation();
+
+  useEffect(() => {
+    if (!videoJob || !["SUBMITTING", "PENDING", "RUNNING"].includes(videoJob.status)) return;
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const latest = await getOpenaiVideoJob(videoJob.id);
+        if (disposed) return;
+        setVideoJob(latest);
+        if (latest.status === "SUCCEEDED" || latest.status === "FAILED" || latest.status === "CANCELED" || latest.status === "UNKNOWN") {
+          await queryClient.invalidateQueries({
+            queryKey: getGetOpenaiConversationQueryKey(latest.conversationId),
+          });
+          setOptimisticUserMessage(null);
+        }
+      } catch (error) {
+        if (!disposed) {
+          setStreamError(error instanceof Error ? error.message : "動画ジョブの状態を取得できませんでした。");
+        }
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [videoJob?.id, videoJob?.status, queryClient]);
+
+  const handleGenerateVideo = async (input: VideoGenerationInput): Promise<boolean> => {
+    if (isPrivate) {
+      setStreamError("動画生成は通常の会話で利用してください。");
+      return false;
+    }
+    let targetId = conversationId;
+    if (!targetId) {
+      try {
+        const newConv = await createConversation.mutateAsync({
+          data: { title: conversationTitle(input.prompt) },
+        });
+        targetId = newConv.id;
+        await queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+        setLocation(`/conversations/${newConv.id}`, { replace: true });
+      } catch (error) {
+        setStreamError(error instanceof Error ? error.message : "会話の作成に失敗しました。");
+        return false;
+      }
+    }
+
+    setStreamError(null);
+    setOptimisticUserMessage({
+      id: OPTIMISTIC_USER_ID,
+      conversationId: targetId,
+      role: "user",
+      content: input.prompt,
+      createdAt: new Date().toISOString(),
+    });
+    try {
+      const created = await createOpenaiVideoJob(targetId, {
+        prompt: input.prompt,
+        mode: input.mode,
+        ...(input.referenceImages?.length
+          ? { referenceImages: input.referenceImages.map((image) => image.content) }
+          : {}),
+        resolution: input.resolution,
+        ...(input.mode !== "i2v" ? { ratio: input.ratio } : {}),
+        duration: input.duration,
+        confirmation: true,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setVideoJob(created);
+      await queryClient.invalidateQueries({ queryKey: getGetOpenaiConversationQueryKey(targetId) });
+      // The request message is now in the server response. Do not keep the
+      // optimistic copy around while the async job is polling.
+      setOptimisticUserMessage(null);
+      return true;
+    } catch (error) {
+      setOptimisticUserMessage(null);
+      setStreamError(error instanceof Error ? error.message : "動画生成を開始できませんでした。");
+      return false;
+    }
+  };
+
+  const handleCancelVideo = async () => {
+    if (!videoJob || videoJob.status !== "PENDING") return;
+    try {
+      const canceled = await cancelOpenaiVideoJob(videoJob.id);
+      setVideoJob(canceled);
+      await queryClient.invalidateQueries({
+        queryKey: getGetOpenaiConversationQueryKey(canceled.conversationId),
+      });
+    } catch (error) {
+      setStreamError(error instanceof Error ? error.message : "動画生成をキャンセルできませんでした。");
+    }
+  };
 
   // 戻り値: false = 送信ブロック（入力・添付は保持される）
   const handleSend = async (
@@ -767,6 +878,8 @@ export function ChatPage() {
             streamingAudit={streamingAudit}
             specialistProgress={specialistProgress}
             streamingFiles={streamingFiles}
+            videoJob={videoJob}
+            onCancelVideo={() => void handleCancelVideo()}
              isStreaming={isStreaming}
              onStop={stopStreaming}
              streamingWarning={searchWarning}
@@ -859,10 +972,12 @@ export function ChatPage() {
           </div>
           <MessageInput
             onSend={handleSend}
-            disabled={isStreaming || createConversation.isPending}
+             disabled={isStreaming || videoBusy || createConversation.isPending}
             conversationId={conversationId}
             selectedModel={selectedModel}
             fileGenerationEnabled={!isPrivate && translationMode === "off"}
+             videoGenerationEnabled={!isPrivate}
+             onGenerateVideo={handleGenerateVideo}
             placeholder={
               translationMode !== "off"
                 ? "翻訳するテキストをそのまま入力..."

@@ -107,5 +107,47 @@ describe("capability broker", () => {
     expect(couldNeedCapabilityTool("この画像の内容を説明して")).toBe(false);
     expect(couldNeedCapabilityTool("transcribe this audio")).toBe(true);
     expect(couldNeedCapabilityTool("Please synthesize this text to speech")).toBe(true);
+    expect(couldNeedCapabilityTool("動画の作り方を教えて")).toBe(false);
+    expect(couldNeedCapabilityTool("この街の夜景を動画として生成して")).toBe(true);
+  });
+
+  it("plans explicit HappyHorse video generation without treating it as image generation", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"video.generate","mode":"r2v","prompt":"参照画像の街を夜の雨にする","modelId":"happyhorse-1.1-r2v","referenceImageNames":["city.png","street.png"],"resolution":"1080P","ratio":"9:16","duration":8}',
+    );
+    const result = await planCapabilityTool({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      userText: "この2枚の画像を参照して、街の動画を生成して",
+      hasReferenceImages: true,
+      referenceImageNames: ["city.png", "street.png"],
+    });
+    expect(result).toEqual({
+      tool: "video.generate",
+      mode: "r2v",
+      prompt: "参照画像の街を夜の雨にする",
+      modelId: "happyhorse-1.1-r2v",
+      referenceImageNames: ["city.png", "street.png"],
+      resolution: "1080P",
+      ratio: "9:16",
+      duration: 8,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects video plans whose image cardinality does not match the selected mode", async () => {
+    const { client } = fakeClient(
+      '{"tool":"video.generate","mode":"i2v","prompt":"move","referenceImageNames":["one.png","two.png"]}',
+    );
+    const result = await planCapabilityTool({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      userText: "この画像から動画を生成して",
+      hasReferenceImages: true,
+      referenceImageNames: ["one.png", "two.png"],
+    });
+    expect(result).toEqual({ tool: "none" });
   });
 });

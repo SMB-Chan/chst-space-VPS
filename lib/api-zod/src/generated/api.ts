@@ -54,6 +54,152 @@ export const ListOpenaiCapabilitiesResponse = zod.object({
 
 
 /**
+ * @summary Create an authenticated Qwen Audio realtime session
+ */
+
+
+
+
+export const CreateOpenaiRealtimeSessionBody = zod.object({
+  "conversationId": zod.number().int().min(1).optional(),
+  "modelId": zod.string().min(1)
+})
+
+export const CreateOpenaiRealtimeSessionResponse = zod.object({
+  "token": zod.string(),
+  "expiresAt": zod.number().int(),
+  "modelId": zod.enum(['qwen-audio-3.0-realtime-plus']),
+  "websocketPath": zod.enum(['/api/openai/realtime']),
+  "maxSessionSeconds": zod.literal(300)
+})
+
+
+/**
+ * @summary Start an authenticated asynchronous HappyHorse video generation job
+ */
+
+
+
+export const CreateOpenaiVideoJobParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const createOpenaiVideoJobBodyPromptMax = 5000;
+
+export const createOpenaiVideoJobBodyReferenceImagesMax = 9;
+
+export const createOpenaiVideoJobBodyDurationMin = 3;
+export const createOpenaiVideoJobBodyDurationMax = 15;
+
+export const createOpenaiVideoJobBodySeedMin = 0;
+export const createOpenaiVideoJobBodySeedMax = 2147483647;
+
+export const createOpenaiVideoJobBodyIdempotencyKeyMin = 16;
+export const createOpenaiVideoJobBodyIdempotencyKeyMax = 128;
+
+
+
+export const CreateOpenaiVideoJobBody = zod.object({
+  "prompt": zod.string().min(1).max(createOpenaiVideoJobBodyPromptMax),
+  "mode": zod.enum(['t2v', 'i2v', 'r2v']),
+  "modelId": zod.string().optional(),
+  "referenceImages": zod.array(zod.string()).max(createOpenaiVideoJobBodyReferenceImagesMax).optional(),
+  "resolution": zod.enum(['720P', '1080P']).optional(),
+  "ratio": zod.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '4:5', '5:4', '9:21', '21:9']).optional(),
+  "duration": zod.number().int().min(createOpenaiVideoJobBodyDurationMin).max(createOpenaiVideoJobBodyDurationMax).optional(),
+  "watermark": zod.boolean().optional(),
+  "seed": zod.number().int().min(createOpenaiVideoJobBodySeedMin).max(createOpenaiVideoJobBodySeedMax).optional(),
+  "confirmation": zod.literal(true),
+  "idempotencyKey": zod.string().min(createOpenaiVideoJobBodyIdempotencyKeyMin).max(createOpenaiVideoJobBodyIdempotencyKeyMax)
+})
+
+export const CreateOpenaiVideoJobResponse = zod.object({
+  "id": zod.number().int(),
+  "conversationId": zod.number().int(),
+  "requestMessageId": zod.number().int(),
+  "modelId": zod.string(),
+  "mode": zod.enum(['t2v', 'i2v', 'r2v']),
+  "status": zod.enum(['SUBMITTING', 'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'UNKNOWN']),
+  "failureCode": zod.string().nullable(),
+  "failureMessage": zod.string().nullable(),
+  "resultAsset": zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mimeType": zod.enum(['video/mp4']),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+}).nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Get an owned HappyHorse video generation job
+ */
+
+
+
+export const GetOpenaiVideoJobParams = zod.object({
+  "jobId": zod.coerce.number().int().min(1)
+})
+
+export const GetOpenaiVideoJobResponse = zod.object({
+  "id": zod.number().int(),
+  "conversationId": zod.number().int(),
+  "requestMessageId": zod.number().int(),
+  "modelId": zod.string(),
+  "mode": zod.enum(['t2v', 'i2v', 'r2v']),
+  "status": zod.enum(['SUBMITTING', 'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'UNKNOWN']),
+  "failureCode": zod.string().nullable(),
+  "failureMessage": zod.string().nullable(),
+  "resultAsset": zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mimeType": zod.enum(['video/mp4']),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+}).nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Cancel an owned pending HappyHorse video generation job
+ */
+
+
+
+export const CancelOpenaiVideoJobParams = zod.object({
+  "jobId": zod.coerce.number().int().min(1)
+})
+
+export const CancelOpenaiVideoJobResponse = zod.object({
+  "id": zod.number().int(),
+  "conversationId": zod.number().int(),
+  "requestMessageId": zod.number().int(),
+  "modelId": zod.string(),
+  "mode": zod.enum(['t2v', 'i2v', 'r2v']),
+  "status": zod.enum(['SUBMITTING', 'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'UNKNOWN']),
+  "failureCode": zod.string().nullable(),
+  "failureMessage": zod.string().nullable(),
+  "resultAsset": zod.object({
+  "id": zod.number().int(),
+  "filename": zod.string(),
+  "mimeType": zod.enum(['video/mp4']),
+  "size": zod.number().int(),
+  "downloadUrl": zod.string()
+}).nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable()
+})
+
+
+/**
  * @summary Download a generated artifact
  */
 

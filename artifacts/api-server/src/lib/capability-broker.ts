@@ -38,6 +38,18 @@ export type CapabilityToolPlan =
       rate?: number;
       pitch?: number;
       volume?: number;
+    }
+  | {
+      tool: "video.generate";
+      mode: "t2v" | "i2v" | "r2v";
+      prompt: string;
+      modelId?: string;
+      referenceImageNames?: string[];
+      resolution?: "720P" | "1080P";
+      ratio?: string;
+      duration?: number;
+      watermark?: boolean;
+      seed?: number;
     };
 
 const IMAGE_INTENT =
@@ -46,6 +58,10 @@ const TRANSCRIBE_INTENT =
   /(?:音声|録音|音源|audio|voice|recording).{0,60}(?:認識|文字起こし|書き起こし|transcri(?:be|ption)|speech.?to.?text)|(?:認識|文字起こし|書き起こし|transcri(?:be|ption)|speech.?to.?text).{0,60}(?:音声|録音|音源|audio|voice|recording)/i;
 const TTS_INTENT =
   /(?:読み上げ|音声化|音声に(?:して|する)|声に(?:して|する)|テキスト.*音声|read.{0,20}(?:aloud|out loud)|voiceover|text.?to.?speech|\btts\b|synthesi[sz]e.{0,20}(?:speech|voice)|(?:speech|voice).{0,20}synthesi[sz]e)/i;
+const VIDEO_INTENT =
+  /(?:動画|ビデオ|video).{0,80}(?:生成|作(?:って|成)|作り|create|generate|make|制作|produce)|(?:生成|作(?:って|成)|作り|create|generate|make|制作|produce).{0,80}(?:動画|ビデオ|video)/i;
+const VIDEO_NON_EXECUTION =
+  /(?:動画|ビデオ|video).{0,30}(?:作り方|作る方法|やり方|方法|教えて|how\s+to|tutorial|explain)/i;
 
 const ROUTER_SYSTEM_PROMPT = `You are Chat Space's capability router. Decide whether the user's CURRENT request explicitly asks the application to use a specialist capability now.
 Return exactly one JSON object and nothing else.
@@ -56,6 +72,7 @@ Allowed forms:
 {"tool":"image.edit","imageName":"attached filename","prompt":"...","modelId":"optional","size":"optional WIDTH*HEIGHT","n":1}
 {"tool":"audio.transcribe","attachmentName":"attached filename","modelId":"optional","languageHints":["zh","en"]}
 {"tool":"audio.synthesize","text":"text to speak","modelId":"qwen-audio-3.0-tts-plus","voice":"optional","instruction":"optional","languageHint":"zh or en","rate":1,"pitch":1,"volume":50}
+{"tool":"video.generate","mode":"t2v or i2v or r2v","prompt":"...","modelId":"optional","referenceImageNames":["attached.png"],"resolution":"720P","ratio":"16:9","duration":5,"watermark":false}
 
 Rules:
 - Use none for image analysis, explanations, brainstorming, prompts/tutorials, or hypothetical discussion where the user did not ask Chat Space to actually generate/edit an image.
@@ -63,13 +80,20 @@ Rules:
 - audio.synthesize is only for an explicit request to create actual speech/audio from text. The currently implemented qwen-audio-3.0-tts-plus built-in voices support Chinese (Mandarin) and English; use none rather than silently promising unsupported Japanese built-in-voice synthesis.
 - image.edit requires a reference image attached to the current user turn. audio.transcribe requires an attached audio file.
 - Preserve the user's requested subject, style, text, composition, and constraints. Do not invent sensitive personal details.
+- video.generate is only for an explicit request to actually generate a video now. Use none for video explanations, tutorials, brainstorming, prompts, or hypothetical discussion.
+- Use t2v for text-only video, i2v for exactly one first-frame image, and r2v for one or more reference images. A video plan is only a broker classification; the authenticated video-job API performs the billable operation after user confirmation.
 - modelId may only be a model that implements the requested capability. Omit it unless the user asks for a specific specialist model.
 - n must be 1-6. Omit size unless the user asks for a size/aspect resolution.
-- Never route to realtime audio or video tools in this version.`;
+- Never route to realtime audio tools in this version.`;
 
 export function couldNeedCapabilityTool(userText: string): boolean {
   const text = userText.slice(0, 12_000);
-  return IMAGE_INTENT.test(text) || TRANSCRIBE_INTENT.test(text) || TTS_INTENT.test(text);
+  return (
+    IMAGE_INTENT.test(text) ||
+    TRANSCRIBE_INTENT.test(text) ||
+    TTS_INTENT.test(text) ||
+    (VIDEO_INTENT.test(text) && !VIDEO_NON_EXECUTION.test(text))
+  );
 }
 
 function optionalBoundedNumber(
@@ -174,6 +198,45 @@ function parseToolPlan(
         : {}),
       ...(optionalBoundedNumber(obj.volume, 0, 100) !== undefined
         ? { volume: optionalBoundedNumber(obj.volume, 0, 100) }
+        : {}),
+    };
+  }
+
+  if (obj.tool === "video.generate") {
+    const prompt = typeof obj.prompt === "string" ? obj.prompt.trim().slice(0, 5_000) : "";
+    const mode = obj.mode === "t2v" || obj.mode === "i2v" || obj.mode === "r2v" ? obj.mode : null;
+    if (!prompt || !mode) return { tool: "none" };
+    const names = Array.isArray(obj.referenceImageNames)
+      ? obj.referenceImageNames.filter((name): name is string => typeof name === "string")
+      : [];
+    if (
+      (mode === "t2v" && names.length !== 0) ||
+      (mode === "i2v" && names.length !== 1) ||
+      (mode === "r2v" && (names.length < 1 || names.length > 9)) ||
+      names.some((name) => !referenceImageNames.includes(name))
+    ) {
+      return { tool: "none" };
+    }
+    const modelId =
+      typeof obj.modelId === "string" &&
+      modelHasAlibabaCapability(obj.modelId, `video.${mode}` as "video.t2v" | "video.i2v" | "video.r2v")
+        ? obj.modelId
+        : undefined;
+    const resolution = obj.resolution === "720P" || obj.resolution === "1080P" ? obj.resolution : undefined;
+    const ratio = typeof obj.ratio === "string" && /^\d{1,2}:\d{1,2}$/.test(obj.ratio) ? obj.ratio : undefined;
+    const duration = optionalBoundedNumber(obj.duration, 3, 15);
+    return {
+      tool: "video.generate",
+      mode,
+      prompt,
+      ...(modelId ? { modelId } : {}),
+      ...(names.length ? { referenceImageNames: names } : {}),
+      ...(resolution ? { resolution } : {}),
+      ...(ratio ? { ratio } : {}),
+      ...(duration !== undefined ? { duration: Math.floor(duration) } : {}),
+      ...(typeof obj.watermark === "boolean" ? { watermark: obj.watermark } : {}),
+      ...(typeof obj.seed === "number" && Number.isSafeInteger(obj.seed) && obj.seed >= 0 && obj.seed <= 2_147_483_647
+        ? { seed: obj.seed }
         : {}),
     };
   }

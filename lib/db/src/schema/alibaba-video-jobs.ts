@@ -38,6 +38,7 @@ export const alibabaVideoJobs = pgTable(
     assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }),
     providerTaskId: text("provider_task_id").notNull(),
     providerRequestId: text("provider_request_id"),
+     idempotencyKey: text("idempotency_key").notNull(),
     modelId: text("model_id").notNull(),
     mode: text("mode").notNull(),
     status: text("status").notNull().default("PENDING"),
@@ -54,7 +55,11 @@ export const alibabaVideoJobs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("alibaba_video_jobs_provider_task_id_uidx").on(table.providerTaskId),
+     uniqueIndex("alibaba_video_jobs_provider_task_id_uidx").on(table.providerTaskId),
+     uniqueIndex("alibaba_video_jobs_user_idempotency_key_uidx").on(
+       table.userId,
+       table.idempotencyKey,
+     ),
     index("alibaba_video_jobs_user_created_at_idx").on(table.userId, table.createdAt),
     index("alibaba_video_jobs_due_idx").on(table.status, table.nextPollAt),
     index("alibaba_video_jobs_conversation_idx").on(table.conversationId),
