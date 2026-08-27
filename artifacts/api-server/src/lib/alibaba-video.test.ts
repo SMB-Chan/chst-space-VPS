@@ -83,7 +83,7 @@ describe("normalizeHappyHorseVideoRequest", () => {
       mode: "r2v",
       prompt: "make a video",
       images: Array.from({ length: 10 }, () => png),
-    })).toThrow(/1〜9/);
+    })).toThrow(/1-9/);
     expect(() => normalizeHappyHorseVideoRequest({
       mode: "t2v",
       prompt: "make a video",
