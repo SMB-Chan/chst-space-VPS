@@ -12,6 +12,16 @@ import {
 import { Button } from "@/components/ui/button";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const TOKEN_PLAN_QUOTA_REFRESH_MS = 60_000;
+
+const QUOTA_HEADERS = {
+  weeklyRemaining: "X-Chat-Space-Token-Plan-Weekly-Remaining",
+  fiveHourRemaining: "X-Chat-Space-Token-Plan-Five-Hour-Remaining",
+  weeklyReset: "X-Chat-Space-Token-Plan-Weekly-Reset",
+  fiveHourReset: "X-Chat-Space-Token-Plan-Five-Hour-Reset",
+  limitingWindow: "X-Chat-Space-Token-Plan-Limiting-Window",
+  limitingRemaining: "X-Chat-Space-Token-Plan-Limiting-Remaining",
+} as const;
 
 export interface ModelInfo {
   id: string;
@@ -20,6 +30,15 @@ export interface ModelInfo {
   description: string;
   supportsVision: boolean;
   supportsReasoning?: boolean;
+}
+
+interface TokenPlanQuotaHint {
+  weeklyRemainingPercent?: number;
+  fiveHourRemainingPercent?: number;
+  weeklyResetAt?: string;
+  fiveHourResetAt?: string;
+  limitingWindow?: "5-hour" | "1-week";
+  limitingRemainingPercent?: number;
 }
 
 const MODELS: ModelInfo[] = [
@@ -60,6 +79,105 @@ function isModelInfo(value: unknown): value is ModelInfo {
   );
 }
 
+function readPercentHeader(headers: Headers, name: string): number | undefined {
+  const raw = headers.get(name);
+  if (raw === null || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined;
+}
+
+function readTokenPlanQuotaHint(headers: Headers): TokenPlanQuotaHint | null {
+  const weeklyRemainingPercent = readPercentHeader(headers, QUOTA_HEADERS.weeklyRemaining);
+  const fiveHourRemainingPercent = readPercentHeader(headers, QUOTA_HEADERS.fiveHourRemaining);
+  const limitingRemainingPercent = readPercentHeader(headers, QUOTA_HEADERS.limitingRemaining);
+  const rawWindow = headers.get(QUOTA_HEADERS.limitingWindow);
+  const limitingWindow = rawWindow === "5-hour" || rawWindow === "1-week" ? rawWindow : undefined;
+  const weeklyResetAt = headers.get(QUOTA_HEADERS.weeklyReset) || undefined;
+  const fiveHourResetAt = headers.get(QUOTA_HEADERS.fiveHourReset) || undefined;
+  if (
+    weeklyRemainingPercent === undefined &&
+    fiveHourRemainingPercent === undefined &&
+    limitingRemainingPercent === undefined
+  ) {
+    return null;
+  }
+  return {
+    ...(weeklyRemainingPercent !== undefined ? { weeklyRemainingPercent } : {}),
+    ...(fiveHourRemainingPercent !== undefined ? { fiveHourRemainingPercent } : {}),
+    ...(limitingRemainingPercent !== undefined ? { limitingRemainingPercent } : {}),
+    ...(limitingWindow ? { limitingWindow } : {}),
+    ...(weeklyResetAt ? { weeklyResetAt } : {}),
+    ...(fiveHourResetAt ? { fiveHourResetAt } : {}),
+  };
+}
+
+function useTokenPlanQuotaHint(enabled: boolean): TokenPlanQuotaHint | null {
+  const [quota, setQuota] = useState<TokenPlanQuotaHint | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setQuota(null);
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res = await fetch(`${BASE}/api/openai/models`, { credentials: "include" });
+        if (!res.ok || cancelled) return;
+        const next = readTokenPlanQuotaHint(res.headers);
+        if (!cancelled) setQuota(next);
+      } catch {
+        if (!cancelled) setQuota(null);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), TOKEN_PLAN_QUOTA_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [enabled]);
+
+  return quota;
+}
+
+function quotaTone(remaining: number): string {
+  if (remaining <= 20) return "border-red-500/40 bg-red-500/10 text-red-400";
+  if (remaining <= 35) return "border-amber-500/40 bg-amber-500/10 text-amber-400";
+  return "border-emerald-500/35 bg-emerald-500/10 text-emerald-400";
+}
+
+function formatQuotaPercent(value: number): string {
+  return value < 10 ? value.toFixed(1) : Math.round(value).toString();
+}
+
+function formatReset(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
+function quotaTitle(quota: TokenPlanQuotaHint): string {
+  const parts = ["Alibaba Token Plan 残量"];
+  if (quota.weeklyRemainingPercent !== undefined) {
+    const reset = formatReset(quota.weeklyResetAt);
+    parts.push(`週間 ${formatQuotaPercent(quota.weeklyRemainingPercent)}%${reset ? `（${reset} JST リセット）` : ""}`);
+  }
+  if (quota.fiveHourRemainingPercent !== undefined) {
+    const reset = formatReset(quota.fiveHourResetAt);
+    parts.push(`5時間 ${formatQuotaPercent(quota.fiveHourRemainingPercent)}%${reset ? `（${reset} JST リセット）` : ""}`);
+  }
+  return parts.join(" / ");
+}
+
 /** Live list from the API, falling back to the bundled catalog if the request fails. */
 export function useAvailableModels(): ModelInfo[] {
   const [models, setModels] = useState<ModelInfo[]>(MODELS);
@@ -91,9 +209,12 @@ export function getModelLabel(modelId: string, models: ModelInfo[] = MODELS): st
 export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelectorProps) {
   const models = useAvailableModels();
   const current = models.find((m) => m.id === selectedModel) ?? models[0] ?? MODELS[0];
+  const quota = useTokenPlanQuotaHint(current.provider === "dashscope");
 
   const openaiModels = models.filter((m) => m.provider === "openai");
   const qwenModels = models.filter((m) => m.provider === "dashscope");
+  const triggerQuota = quota?.weeklyRemainingPercent ?? quota?.limitingRemainingPercent;
+  const triggerQuotaLabel = quota?.weeklyRemainingPercent !== undefined ? "週" : "TP";
 
   return (
     <DropdownMenu>
@@ -112,11 +233,22 @@ export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelect
         >
           <Cpu className="w-3 h-3" />
           <span>{current.label}</span>
+          {current.provider === "dashscope" && triggerQuota !== undefined ? (
+            <span
+              title={quota ? quotaTitle(quota) : undefined}
+              className={cn(
+                "rounded-full border px-1.5 py-0.5 text-[10px] leading-none tabular-nums",
+                quotaTone(triggerQuota),
+              )}
+            >
+              {triggerQuotaLabel} {formatQuotaPercent(triggerQuota)}%
+            </span>
+          ) : null}
           <ChevronDown className="w-3 h-3 opacity-60" />
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" className="w-56" data-testid="dropdown-model-list">
+      <DropdownMenuContent align="start" className="w-64" data-testid="dropdown-model-list">
         <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
           {PROVIDER_LABELS["openai"]}
         </DropdownMenuLabel>
@@ -137,8 +269,30 @@ export function ModelSelector({ selectedModel, onSelect, disabled }: ModelSelect
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuLabel className="text-xs text-amber-400/70 font-normal">
-          {PROVIDER_LABELS["dashscope"]}
+        <DropdownMenuLabel className="flex items-center gap-2 text-xs text-amber-400/70 font-normal">
+          <span>{PROVIDER_LABELS["dashscope"]}</span>
+          {quota?.weeklyRemainingPercent !== undefined ? (
+            <span
+              title={quotaTitle(quota)}
+              className={cn(
+                "rounded-full border px-1.5 py-0.5 text-[10px] tabular-nums",
+                quotaTone(quota.weeklyRemainingPercent),
+              )}
+            >
+              週 {formatQuotaPercent(quota.weeklyRemainingPercent)}%
+            </span>
+          ) : null}
+          {quota?.fiveHourRemainingPercent !== undefined ? (
+            <span
+              title={quotaTitle(quota)}
+              className={cn(
+                "rounded-full border px-1.5 py-0.5 text-[10px] tabular-nums",
+                quotaTone(quota.fiveHourRemainingPercent),
+              )}
+            >
+              5h {formatQuotaPercent(quota.fiveHourRemainingPercent)}%
+            </span>
+          ) : null}
         </DropdownMenuLabel>
         {qwenModels.map((model) => (
           <DropdownMenuItem

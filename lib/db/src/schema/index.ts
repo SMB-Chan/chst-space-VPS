@@ -1,4 +1,5 @@
 export * from "./assets";
+export * from "./alibaba-video-jobs";
 export * from "./conversations";
 export * from "./messages";
 export * from "./artifacts";

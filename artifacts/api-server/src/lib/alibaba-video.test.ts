@@ -1,288 +1,177 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AlibabaVideoError,
-  AlibabaVideoHttpTransport,
-  HAPPYHORSE_VIDEO_POLL_INTERVAL_MS,
-  buildHappyHorseSubmitPayload,
-  downloadHappyHorseVideoResult,
-  normalizeHappyHorseVideoRequest,
-  pollHappyHorseVideoTask,
-  runHappyHorseVideoJob,
-  type HappyHorseVideoTask,
+  cancelAlibabaVideoTask,
+  downloadAlibabaVideoResult,
+  getAlibabaVideoTask,
+  submitAlibabaVideoTask,
 } from "./alibaba-video";
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-const specialistEnv = {
-  ALIBABA_SPECIALIST_API_KEY: "regular-model-studio-credential",
-} as NodeJS.ProcessEnv;
+const specialistEnv = { ALIBABA_SPECIALIST_API_KEY: "test-credential" } as NodeJS.ProcessEnv;
+const pendingResponse = {
+  output: { task_id: "0385dc79-5ff8-4d82-bcb6-123456789abc", task_status: "PENDING" },
+  request_id: "req-1",
+};
 
-const png = `data:image/png;base64,${Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-]).toString("base64")}`;
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-describe("normalizeHappyHorseVideoRequest", () => {
-  it("uses the cost-conscious 720P and 5 second defaults for T2V", () => {
-    const request = normalizeHappyHorseVideoRequest({
-      mode: "t2v",
-      prompt: "a quiet train station at dusk",
-    });
-    expect(request).toMatchObject({
-      modelId: "happyhorse-1.1-t2v",
-      resolution: "720P",
-      durationSeconds: 5,
-      aspectRatio: "16:9",
-      watermark: false,
-      images: [],
-    });
-  });
-
-  it("requires exactly one first image for I2V and preserves 1-9 R2V order", () => {
-    const missingI2vImage = () => normalizeHappyHorseVideoRequest({
-      mode: "i2v",
-      prompt: "animate this",
-    });
-    expect(missingI2vImage).toThrow(/exactly one image/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "i2v",
-      prompt: "animate this",
-      images: [png, png],
-    })).toThrow(/exactly one image/);
-
-    const refs = [png, "https://input.oss-cn-shenzhen.aliyuncs.com/second.png", png];
-    const request = normalizeHappyHorseVideoRequest({
-      mode: "r2v",
-      prompt: "connect these shots",
-      images: refs,
-    });
-    expect(request.images).toEqual(refs);
-    expect(request.modelId).toBe("happyhorse-1.1-r2v");
-  });
-
-  it("rejects attachments for T2V and unsafe settings or input images", () => {
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "t2v",
-      prompt: "make a video",
-      images: [png],
-    })).toThrow(/does not accept/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "r2v",
-      prompt: "make a video",
-      images: [],
-    })).toThrow(/1-9/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "r2v",
-      prompt: "make a video",
-      images: Array.from({ length: 10 }, () => png),
-    })).toThrow(/1-9/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "t2v",
-      prompt: "make a video",
-      durationSeconds: 16,
-    })).toThrow(/3〜15/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "t2v",
-      prompt: "make a video",
-      resolution: "4K" as never,
-    })).toThrow(/720P/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "t2v",
-      prompt: "make a video",
-      aspectRatio: "4:3" as never,
-    })).toThrow(/縦横比/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "t2v",
-      prompt: "make a video",
-      seed: 2_147_483_648,
-    })).toThrow(/seed/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "i2v",
-      prompt: "animate this",
-      images: ["data:image/png;base64,aGVsbG8="],
-    })).toThrow(/magic bytes/);
-    expect(() => normalizeHappyHorseVideoRequest({
-      mode: "i2v",
-      prompt: "animate this",
-      images: ["https://example.com/input.png"],
-    })).toThrow(/許可/);
-  });
-
-  it("builds mode-specific payloads without reordering reference images", () => {
-    const payload = buildHappyHorseSubmitPayload({
-      mode: "r2v",
-      prompt: "make a flowing sequence",
-      images: [png, png],
-      resolution: "1080P",
-      durationSeconds: 12,
-      aspectRatio: "9:16",
-      watermark: true,
-      seed: 42,
-    });
-    expect(payload).toEqual({
-      model: "happyhorse-1.1-r2v",
-      input: { prompt: "make a flowing sequence", reference_images: [png, png] },
-      parameters: {
-        resolution: "1080P",
-        duration: 12,
-        aspect_ratio: "9:16",
-        watermark: true,
-        seed: 42,
-      },
-    });
-  });
-});
-
-describe("AlibabaVideoHttpTransport", () => {
-  it("submits once to the regular specialist endpoint with async transport headers", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-      output: { task_id: "task-t2v-1" },
+describe("Alibaba HappyHorse video transport", () => {
+  it("submits a safe low-cost T2V task through the asynchronous endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(pendingResponse), {
+      status: 200,
+      headers: { "content-type": "application/json" },
     }));
-    const transport = new AlibabaVideoHttpTransport(specialistEnv, fetchMock);
-    const result = await transport.submit({
-      mode: "t2v",
-      prompt: "a paper boat",
+    vi.stubGlobal("fetch", fetchMock);
+
+    const task = await submitAlibabaVideoTask({ mode: "t2v", prompt: "A paper train at night" }, specialistEnv);
+
+    expect(task).toMatchObject({ status: "PENDING", modelId: "happyhorse-1.1-t2v", requestId: "req-1" });
+    const [endpoint, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(endpoint.toString()).toContain("dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer test-credential",
+      "X-DashScope-Async": "enable",
     });
-    expect(result).toEqual({ taskId: "task-t2v-1", modelId: "happyhorse-1.1-t2v" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    expect(url.toString()).toContain(
-      "dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
-    );
-    expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>)["Authorization"]).toBe(
-      "Bearer regular-model-studio-credential",
-    );
-    expect((init.headers as Record<string, string>)["X-DashScope-Async"]).toBe("enable");
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    expect(JSON.parse(String(init.body))).toEqual({
       model: "happyhorse-1.1-t2v",
-      input: { prompt: "a paper boat" },
-      parameters: { resolution: "720P", duration: 5 },
+      input: { prompt: "A paper train at night" },
+      parameters: { resolution: "720P", ratio: "16:9", duration: 5, watermark: false },
     });
   });
 
-  it("polls and cancels using the remote task ID", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ output: { task_status: "RUNNING" } }))
-      .mockResolvedValueOnce(jsonResponse({ output: { task_status: "CANCELED" } }));
-    const transport = new AlibabaVideoHttpTransport(specialistEnv, fetchMock);
-    expect(await transport.status("task-1")).toMatchObject({
-      taskId: "task-1",
-      status: "RUNNING",
+  it("submits exactly one first frame for I2V without a ratio", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(pendingResponse)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitAlibabaVideoTask({
+      mode: "i2v",
+      prompt: "The cat starts running",
+      referenceImages: ["data:image/png;base64,aGVsbG8="],
+      resolution: "1080P",
+      duration: 7,
+    }, specialistEnv);
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body).toEqual({
+      model: "happyhorse-1.1-i2v",
+      input: {
+        prompt: "The cat starts running",
+        media: [{ type: "first_frame", url: "data:image/png;base64,aGVsbG8=" }],
+      },
+      parameters: { resolution: "1080P", duration: 7, watermark: false },
     });
-    expect(await transport.cancel("task-1")).toMatchObject({
-      taskId: "task-1",
-      status: "CANCELED",
-    });
-    expect((fetchMock.mock.calls[0][0] as URL).pathname).toContain("/tasks/task-1");
-    expect((fetchMock.mock.calls[1][0] as URL).pathname).toContain("/tasks/task-1/cancel");
   });
 
-  it("rejects Token Plan credentials before any HTTP request", async () => {
+  it("preserves ordered reference images for R2V", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(pendingResponse)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitAlibabaVideoTask({
+      mode: "r2v",
+      prompt: "[Image 1] opens [Image 2]",
+      referenceImages: ["https://assets.example.com/person.webp", "https://assets.example.com/fan.png"],
+      ratio: "9:16",
+      seed: 42,
+    }, specialistEnv);
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.model).toBe("happyhorse-1.1-r2v");
+    expect(body.input.media).toEqual([
+      { type: "reference_image", url: "https://assets.example.com/person.webp" },
+      { type: "reference_image", url: "https://assets.example.com/fan.png" },
+    ]);
+    expect(body.parameters).toMatchObject({ ratio: "9:16", seed: 42 });
+  });
+
+  it("rejects mode, model, media, duration, and URL mismatches before network access", async () => {
     const fetchMock = vi.fn();
-    const transport = new AlibabaVideoHttpTransport({
-      DASHSCOPE_API_KEY: "sk-sp-token-plan",
-    } as NodeJS.ProcessEnv, fetchMock);
-    await expect(transport.submit({ mode: "t2v", prompt: "blocked" }))
-      .rejects.toThrow(/Regular Model Studio specialist credentials/);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitAlibabaVideoTask({ mode: "i2v", prompt: "move", referenceImages: [] }, specialistEnv))
+      .rejects.toThrow(/exactly one/);
+    await expect(submitAlibabaVideoTask({
+      mode: "i2v",
+      prompt: "move",
+      referenceImages: ["https://assets.example.com/frame.png"],
+      ratio: "16:9",
+    }, specialistEnv)).rejects.toThrow(/does not accept a ratio/);
+    await expect(submitAlibabaVideoTask({
+      mode: "r2v",
+      prompt: "move",
+      referenceImages: ["http://assets.example.com/frame.png"],
+    }, specialistEnv)).rejects.toThrow(/public HTTPS hostname/);
+    await expect(submitAlibabaVideoTask({
+      mode: "t2v",
+      prompt: "move",
+      modelId: "happyhorse-1.1-i2v",
+    }, specialistEnv)).rejects.toThrow(/does not support/);
+    await expect(submitAlibabaVideoTask({ mode: "t2v", prompt: "move", duration: 16 }, specialistEnv))
+      .rejects.toThrow(/duration/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
-});
 
-describe("HappyHorse task polling and result retrieval", () => {
-  it("uses one submit and waits between non-terminal states", async () => {
-    const statusResults: HappyHorseVideoTask[] = [
-      { taskId: "task-1", status: "PENDING" },
-      { taskId: "task-1", status: "RUNNING" },
-      { taskId: "task-1", status: "SUCCEEDED", resultUrl: "https://result.oss-cn-shenzhen.aliyuncs.com/a.mp4" },
-    ];
-    const transport = {
-      submit: vi.fn().mockResolvedValue({ taskId: "task-1", modelId: "happyhorse-1.1-t2v" }),
-      status: vi.fn().mockImplementation(async () => statusResults.shift()),
-      cancel: vi.fn(),
-    };
-    const task = await pollHappyHorseVideoTask(transport, "task-1", { pollIntervalMs: 0 });
-    expect(task.status).toBe("SUCCEEDED");
-    expect(transport.status).toHaveBeenCalledTimes(3);
-    expect(transport.submit).not.toHaveBeenCalled();
-    expect(HAPPYHORSE_VIDEO_POLL_INTERVAL_MS).toBe(15_000);
+  it("rejects Token Plan credentials for specialist video calls", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitAlibabaVideoTask(
+      { mode: "t2v", prompt: "move" },
+      { DASHSCOPE_API_KEY: ["sk", "sp", "test"].join("-") } as NodeJS.ProcessEnv,
+    )).rejects.toThrow(/Regular Model Studio specialist credentials/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("downloads a successful MP4 and never submits more than once", async () => {
-    const video = Buffer.from("mock-mp4");
-    const transport = {
-      submit: vi.fn().mockResolvedValue({ taskId: "task-r2v-1", modelId: "happyhorse-1.1-r2v" }),
-      status: vi.fn().mockResolvedValue({
-        taskId: "task-r2v-1",
-        status: "SUCCEEDED",
-        resultUrl: "https://result.oss-cn-shenzhen.aliyuncs.com/video.mp4?expires=24h",
-      }),
-      cancel: vi.fn(),
+  it("queries and cancels only validated task IDs", async () => {
+    const running = {
+      output: { task_id: pendingResponse.output.task_id, task_status: "RUNNING" },
+      request_id: "req-2",
     };
-    const result = await runHappyHorseVideoJob(
-      transport,
-      { mode: "r2v", prompt: "animate references", images: [png] },
-      {
-        pollIntervalMs: 0,
-        fetchImpl: vi.fn().mockResolvedValue(new Response(video, {
-          status: 200,
-          headers: { "content-type": "video/mp4", "content-length": String(video.length) },
-        })),
-      },
-    );
-    expect(transport.submit).toHaveBeenCalledTimes(1);
-    expect(transport.status).toHaveBeenCalledTimes(1);
-    expect(result.asset).toMatchObject({
-      filename: "happyhorse-r2v-task-r2v-1.mp4",
-      mimeType: "video/mp4",
-      size: video.length,
-    });
-    expect(result.asset.buffer.equals(video)).toBe(true);
+    const canceled = {
+      output: { task_id: pendingResponse.output.task_id, task_status: "CANCELED" },
+      request_id: "req-3",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(running)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(canceled)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAlibabaVideoTask("../secrets", {}, specialistEnv)).rejects.toThrow(/task ID/);
+    expect((await getAlibabaVideoTask(pendingResponse.output.task_id, {}, specialistEnv)).status).toBe("RUNNING");
+    expect((await cancelAlibabaVideoTask(pendingResponse.output.task_id, {}, specialistEnv)).status).toBe("CANCELED");
+    expect((fetchMock.mock.calls[0][0] as URL).pathname.endsWith(`/tasks/${pendingResponse.output.task_id}`)).toBe(true);
+    expect((fetchMock.mock.calls[1][0] as URL).pathname.endsWith(`/tasks/${pendingResponse.output.task_id}/cancel`)).toBe(true);
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe("POST");
   });
 
-  it.each(["FAILED", "CANCELED", "UNKNOWN"] as const)("does not download a %s task", async (status) => {
-    const transport = {
-      submit: vi.fn().mockResolvedValue({ taskId: "task-terminal", modelId: "happyhorse-1.1-t2v" }),
-      status: vi.fn().mockResolvedValue({ taskId: "task-terminal", status }),
-      cancel: vi.fn(),
-    };
-    await expect(runHappyHorseVideoJob(transport, { mode: "t2v", prompt: "terminal" }, {
-      pollIntervalMs: 0,
-      fetchImpl: vi.fn(),
-    })).rejects.toThrow();
+  it("downloads a trusted successful MP4 without following redirects", async () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.from("payload")]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(mp4, {
+      status: 200,
+      headers: { "content-type": "video/mp4", "content-length": String(mp4.length) },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const generated = await downloadAlibabaVideoResult({
+      taskId: pendingResponse.output.task_id,
+      status: "SUCCEEDED",
+      requestId: "req-4",
+      videoUrl: "https://dashscope-result.oss-cn-beijing.aliyuncs.com/result.mp4?Expires=1",
+    }, "happyhorse-1.1-t2v");
+
+    expect(generated.buffer.equals(mp4)).toBe(true);
+    expect(generated).toMatchObject({ mimeType: "video/mp4", taskId: pendingResponse.output.task_id });
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: "error" });
   });
 
-  it("rejects untrusted, non-MP4, and oversized result responses", async () => {
-    const neverFetch = vi.fn();
-    await expect(downloadHappyHorseVideoResult("https://example.com/video.mp4", undefined, neverFetch))
-      .rejects.toMatchObject({ publicMessage: "生成動画の取得先が許可されていません。" });
-    expect(neverFetch).not.toHaveBeenCalled();
-    await expect(downloadHappyHorseVideoResult(
-      "https://result.oss-cn-shenzhen.aliyuncs.com/video.mp4",
-      undefined,
-      vi.fn().mockResolvedValue(new Response("not-video", {
-        status: 200,
-        headers: { "content-type": "text/plain" },
-      })),
-    )).rejects.toThrow(/MP4/);
-    await expect(downloadHappyHorseVideoResult(
-      "https://result.oss-cn-shenzhen.aliyuncs.com/video.mp4",
-      undefined,
-      vi.fn().mockResolvedValue(new Response(null, {
-        status: 200,
-        headers: {
-          "content-type": "video/mp4",
-          "content-length": "67108865",
-        },
-      })),
-    )).rejects.toMatchObject({ publicMessage: "生成動画が大きすぎます。" });
+  it("rejects untrusted result URLs before downloading", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(downloadAlibabaVideoResult({
+      taskId: pendingResponse.output.task_id,
+      status: "SUCCEEDED",
+      videoUrl: "https://example.com/result.mp4",
+    }, "happyhorse-1.1-t2v")).rejects.toThrow(AlibabaVideoError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

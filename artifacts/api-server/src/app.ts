@@ -17,6 +17,11 @@ import { publicHttpError } from "./lib/public-error";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
 import { requireAuth } from "./middlewares/requireAuth";
 import { sharedAiUsageGuard } from "./middlewares/sharedAiUsageGuard";
+import {
+  TOKEN_PLAN_QUOTA_RESPONSE_HEADERS,
+  tokenPlanQuotaPreflightGuard,
+  tokenPlanQuotaStatusHeaders,
+} from "./middlewares/tokenPlanQuotaPreflightGuard";
 import { isAllowedCorsOrigin, parseAllowedOrigins } from "./lib/cors-origins";
 
 const app: Express = express();
@@ -56,6 +61,11 @@ app.use(
     },
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    exposedHeaders: [
+      ...Object.values(TOKEN_PLAN_QUOTA_RESPONSE_HEADERS),
+      "X-Chat-Space-Token-Plan-Remaining",
+      "X-Chat-Space-Token-Plan-Window",
+    ],
   }),
 );
 
@@ -83,15 +93,23 @@ app.use(
   }),
 );
 
+// Reuse the authenticated model-list request as a lightweight quota status
+// surface. No new API contract is introduced: safe quota values are response
+// headers and the route body remains the existing model catalog.
+app.get("/api/openai/models", requireAuth, tokenPlanQuotaStatusHeaders);
+
 // Attachment requests may carry base64 image data. Authenticate and acquire
 // the shared per-user AI budget before the expensive 30MB parser so anonymous
-// or over-limit clients cannot force large allocations first.
+// or over-limit clients cannot force large allocations first. Once the bounded
+// body is available, perform the Token Plan large-turn quota preflight before
+// route-level web/vision/audit/file-generation work starts.
 app.post(
   [...LARGE_JSON_PATHS],
   requireAuth,
   sharedAiUsageGuard,
   express.json({ limit: LARGE_JSON_LIMIT }),
   express.urlencoded({ extended: true, limit: LARGE_JSON_LIMIT }),
+  tokenPlanQuotaPreflightGuard,
 );
 app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));

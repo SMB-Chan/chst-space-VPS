@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { logger } from "./logger";
 import { createLlmTimeContextFetch } from "./llm-time-context";
+import { createAlibabaTokenPlanQuotaGuardedFetch } from "./alibaba-token-plan-usage";
 
 // Replit-managed OpenAI proxy
 if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
@@ -33,7 +34,10 @@ if (process.env.DASHSCOPE_API_KEY) {
   dashscopeClient = new OpenAI({
     apiKey: process.env.DASHSCOPE_API_KEY,
     baseURL: DASHSCOPE_BASE_URL,
-    fetch: llmFetch,
+    // For Personal Token Plan keys, the wrapper can query Alibaba's official
+    // console quota endpoint before a high-cost chat request. It is a no-op
+    // for ordinary Model Studio keys or when console telemetry is unavailable.
+    fetch: createAlibabaTokenPlanQuotaGuardedFetch(llmFetch),
   });
   logger.info("DashScope client initialized");
 } else {
