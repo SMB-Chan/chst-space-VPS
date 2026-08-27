@@ -95,3 +95,28 @@ export function resolveAlibabaTtsWebSocketUrl(
   }
   return url;
 }
+
+export const ALIBABA_REALTIME_MODEL_ID = "qwen-audio-3.0-realtime-plus";
+
+export function resolveAlibabaRealtimeWebSocketUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): URL {
+  const explicit = env.ALIBABA_SPECIALIST_REALTIME_WS_URL?.trim();
+  const workspaceId = env.ALIBABA_SPECIALIST_WORKSPACE_ID?.trim();
+  const raw = explicit || (workspaceId && WORKSPACE_ID_PATTERN.test(workspaceId)
+    ? `wss://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/realtime?model=${ALIBABA_REALTIME_MODEL_ID}`
+    : `wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=${ALIBABA_REALTIME_MODEL_ID}`);
+  const url = new URL(raw);
+  if (url.protocol !== "wss:") throw new Error("Alibaba realtime endpoint must use WSS");
+  assertTrustedAlibabaHost(url);
+  if (url.pathname !== "/api-ws/v1/realtime") {
+    throw new Error("Alibaba realtime endpoint path is not allowed");
+  }
+  if (url.username || url.password || url.hash) {
+    throw new Error("Alibaba realtime endpoint must not contain credentials or fragment");
+  }
+  if (url.searchParams.get("model") !== ALIBABA_REALTIME_MODEL_ID || [...url.searchParams.keys()].length !== 1) {
+    throw new Error("Alibaba realtime endpoint must select the supported realtime model");
+  }
+  return url;
+}

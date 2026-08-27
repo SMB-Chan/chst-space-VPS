@@ -860,6 +860,8 @@ export function ChatPage() {
           <MessageInput
             onSend={handleSend}
             disabled={isStreaming || createConversation.isPending}
+            conversationId={conversationId}
+            selectedModel={selectedModel}
             fileGenerationEnabled={!isPrivate && translationMode === "off"}
             placeholder={
               translationMode !== "off"

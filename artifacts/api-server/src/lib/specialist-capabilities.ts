@@ -188,8 +188,11 @@ function specialistModelConfigured(model: CapabilityModel): boolean {
   if (model.id === "qwen-audio-3.0-tts-plus" && model.capabilities.includes("audio-synthesis")) {
     return isAlibabaSpecialistConfigured();
   }
-  // Realtime audio and HappyHorse transports are registered but intentionally
-  // remain catalog-only until their dedicated orchestration is implemented.
+  if (model.id === "qwen-audio-3.0-realtime-plus" && model.capabilities.includes("realtime")) {
+    return isAlibabaSpecialistConfigured();
+  }
+  // HappyHorse transports remain catalog-only until their dedicated worker is
+  // configured for the current process.
   return false;
 }
 

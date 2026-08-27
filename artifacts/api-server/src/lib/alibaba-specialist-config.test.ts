@@ -3,6 +3,7 @@ import {
   getAlibabaSpecialistConfig,
   isAlibabaSpecialistConfigured,
   isAlibabaTokenPlanKey,
+  resolveAlibabaRealtimeWebSocketUrl,
   resolveAlibabaSpecialistHttpUrl,
   resolveAlibabaTtsWebSocketUrl,
 } from "./alibaba-specialist-config";
@@ -35,6 +36,9 @@ describe("Alibaba specialist backend configuration", () => {
     ).toString()).toBe(
       "https://ws-123.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
     );
+    expect(resolveAlibabaRealtimeWebSocketUrl(env).toString()).toBe(
+      "wss://ws-123.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-realtime-plus",
+    );
   });
 
   it("keeps the trusted legacy Singapore HTTP endpoint as a fallback", () => {
@@ -50,9 +54,24 @@ describe("Alibaba specialist backend configuration", () => {
     expect(() => resolveAlibabaTtsWebSocketUrl({
       ALIBABA_SPECIALIST_TTS_WS_URL: "wss://example.com/api-ws/v1/inference",
     } as NodeJS.ProcessEnv)).toThrow(/not trusted/);
+    expect(() => resolveAlibabaRealtimeWebSocketUrl({
+      ALIBABA_SPECIALIST_REALTIME_WS_URL:
+        "wss://example.com/api-ws/v1/realtime?model=qwen-audio-3.0-realtime-plus",
+    } as NodeJS.ProcessEnv)).toThrow(/not trusted/);
     expect(() => resolveAlibabaSpecialistHttpUrl(
       "services/aigc/image-generation/generation",
       { ALIBABA_SPECIALIST_HTTP_BASE_URL: "https://example.com/api/v1/" } as NodeJS.ProcessEnv,
     )).toThrow(/not trusted/);
+  });
+
+  it("rejects realtime endpoint overrides with another model or query", () => {
+    expect(() => resolveAlibabaRealtimeWebSocketUrl({
+      ALIBABA_SPECIALIST_REALTIME_WS_URL:
+        "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=other",
+    } as NodeJS.ProcessEnv)).toThrow(/supported realtime model/);
+    expect(() => resolveAlibabaRealtimeWebSocketUrl({
+      ALIBABA_SPECIALIST_REALTIME_WS_URL:
+        "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-realtime-plus&x=1",
+    } as NodeJS.ProcessEnv)).toThrow(/supported realtime model/);
   });
 });

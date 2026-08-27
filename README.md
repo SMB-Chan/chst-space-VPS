@@ -94,8 +94,8 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - `FRONTEND_URL` — APIへアクセスできるブラウザOrigin。カンマ区切り可。本番のクロスOrigin構成では必須
 - `AI_INTEGRATIONS_OPENAI_BASE_URL` / `AI_INTEGRATIONS_OPENAI_API_KEY` — OpenAI 互換エンドポイント
 - `DASHSCOPE_API_KEY` — Qwen 等を使う場合（任意）
-- `ALIBABA_SPECIALIST_API_KEY` / `ALIBABA_SPECIALIST_WORKSPACE_ID` — 通常のAlibaba Model Studioワークスペース資格情報（任意。画像生成・画像編集・Qwen Audio TTSのカスタムバックエンド専門能力用。Token Plan Personal/Teamキーは使用せず、未設定時はcatalog-only）
-- `ALIBABA_SPECIALIST_HTTP_BASE_URL` / `ALIBABA_SPECIALIST_TTS_WS_URL` — 専門能力用の許可済みHTTPS/WSSエンドポイント（任意。詳細は[`.env.example`](./.env.example)）
+- `ALIBABA_SPECIALIST_API_KEY` / `ALIBABA_SPECIALIST_WORKSPACE_ID` — 通常のAlibaba Model Studioワークスペース資格情報（任意。画像生成・画像編集・Qwen Audio TTS／Realtimeのカスタムバックエンド専門能力用。Token Plan Personal/Teamキーは使用せず、未設定時はcatalog-only）
+- `ALIBABA_SPECIALIST_HTTP_BASE_URL` / `ALIBABA_SPECIALIST_TTS_WS_URL` / `ALIBABA_SPECIALIST_REALTIME_WS_URL` — 専門能力用の許可済みHTTPS/WSSエンドポイント（任意。詳細は[`.env.example`](./.env.example)）
 - `AI_REQUESTS_PER_MINUTE` — ユーザー単位・PostgreSQL共有のAIリクエスト上限（既定20/60秒、0で無効）
 - `AI_MAX_CONCURRENT_REQUESTS` — ユーザー単位・全Autoscaleインスタンス共有の同時AI生成上限（既定2、0で無効）
 - `AI_CONCURRENCY_LEASE_TTL_MS` — 同時実行leaseの失効時間（既定90000ms。実行中はheartbeat更新）

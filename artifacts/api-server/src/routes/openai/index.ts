@@ -48,6 +48,10 @@ import {
   type IncomingAttachment,
   type ParsedUserMessageContent,
 } from "../../lib/message-content";
+import {
+  AlibabaRealtimeError,
+  createAlibabaRealtimeSession,
+} from "../../lib/alibaba-realtime";
 
 const router = Router();
 
@@ -226,6 +230,25 @@ router.get("/openai/models", async (_req, res) => {
 
 router.get("/openai/capabilities", async (_req, res) => {
   res.json(await getCapabilityRegistryWithAvailability());
+});
+
+router.post("/openai/realtime/session", requireAuth, (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const modelId = typeof req.body?.modelId === "string" ? req.body.modelId.trim() : "";
+    const conversationId =
+      typeof req.body?.conversationId === "number" ? req.body.conversationId : undefined;
+    const session = createAlibabaRealtimeSession({ userId, modelId, conversationId });
+    res.setHeader("Cache-Control", "no-store");
+    res.json(session);
+  } catch (error) {
+    if (error instanceof AlibabaRealtimeError) {
+      res.status(error.retryable ? 503 : 400).json({ error: error.publicMessage });
+      return;
+    }
+    req.log.error({ err: error }, "Failed to create realtime session");
+    res.status(500).json({ error: "リアルタイム音声を開始できませんでした。" });
+  }
 });
 
 router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) => {

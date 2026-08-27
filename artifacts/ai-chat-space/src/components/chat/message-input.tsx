@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compressImageFile, formatBytes } from "@/lib/compress-image";
+import { QwenAudioRealtime } from "./qwen-audio-realtime";
 
 export interface OutgoingAttachment {
   name: string;
@@ -34,6 +35,8 @@ interface MessageInputProps {
   disabled?: boolean;
   fileGenerationEnabled?: boolean;
   placeholder?: string;
+  conversationId?: number | null;
+  selectedModel?: string;
 }
 
 // 画像・テキスト・文書（PDF/ZIP/Office）・音声を受け付け。
@@ -141,6 +144,8 @@ export function MessageInput({
   disabled,
   fileGenerationEnabled = true,
   placeholder,
+  conversationId = null,
+  selectedModel = "",
 }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<StagedFile[]>([]);
@@ -364,6 +369,15 @@ export function MessageInput({
         >
           <Paperclip className="w-5 h-5" />
         </Button>
+
+        <QwenAudioRealtime
+          conversationId={conversationId}
+          selectedModel={selectedModel}
+          disabled={disabled || compressing}
+          onTranscript={(transcript) => {
+            void onSend(transcript);
+          }}
+        />
 
         <textarea
           ref={textareaRef}

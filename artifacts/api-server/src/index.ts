@@ -9,6 +9,7 @@ import {
 } from "./lib/ensure-schema";
 import { createGracefulShutdown } from "./lib/graceful-shutdown";
 import { startAlibabaVideoWorker } from "./lib/alibaba-video-worker";
+import { attachAlibabaRealtimeWebSocket } from "./lib/alibaba-realtime";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"] ?? "5000";
@@ -39,11 +40,13 @@ async function main(): Promise<void> {
 
     logger.info({ port }, "Server listening");
   });
+  const realtimeSocket = attachAlibabaRealtimeWebSocket(server);
 
   const shutdown = createGracefulShutdown({
     server,
     resources: [
       { name: "alibaba-video-worker", close: videoWorker.close },
+      { name: "alibaba-realtime-websocket", close: realtimeSocket.close },
       { name: "browser-egress", close: closeBrowser },
       { name: "postgres", close: async () => pool.end() },
     ],
