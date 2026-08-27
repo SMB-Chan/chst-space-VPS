@@ -624,7 +624,7 @@ export function ChatPage() {
         setSearchStatus(status ? { kind: status, query } : null);
       },
       (event) => {
-        setSpecialistProgress(event.phase === "failed" ? event : event.phase === "completed" ? null : event);
+        setSpecialistProgress(event);
       },
       (message) => {
         setSearchWarning(message);
@@ -765,8 +765,8 @@ export function ChatPage() {
                 : null
             }
             streamingAudit={streamingAudit}
-             specialistProgress={specialistProgress}
-             streamingFiles={streamingFiles}
+            specialistProgress={specialistProgress}
+            streamingFiles={streamingFiles}
              isStreaming={isStreaming}
              onStop={stopStreaming}
              streamingWarning={searchWarning}

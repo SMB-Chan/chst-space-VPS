@@ -7,3 +7,4 @@
 - [画像添付のマルチモーダル変換](image-attachments-multimodal.md) — 保存は文字列形式、送信直前にstructured contentへ変換。vision可否はフロントとサーバー両方で管理。
 - [PDF用CJKフォント互換性](pdf-cjk-font-compatibility.md) — fontconfigで見つかる可変TTCはpdf-lib非互換。単体の静的TTF/OTFを使う。
 - [マージ後セットアップ](post-merge-setup.md) — frozen install後にDBライブラリの生成型を再ビルドし、依存変更時はlockfileも同期する。
+- [GitHub API書き込み制限](github-api-rate-limit.md) — GitHub連携のgit-data更新は毎秒制限があるため、blob作成を並列化せず間隔を空ける。

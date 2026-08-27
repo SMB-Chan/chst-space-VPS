@@ -136,6 +136,7 @@ function specialistCallFromPlan(plan: CapabilityToolPlan): SpecialistToolCall | 
       arguments: JSON.stringify({
         attachmentName: plan.attachmentName,
         ...(plan.modelId ? { modelId: plan.modelId } : {}),
+        ...(plan.languageHints ? { languageHints: plan.languageHints } : {}),
       }),
     };
   }
@@ -444,6 +445,13 @@ export async function streamChatReply(args: {
         );
       }
       if (!clientGone) {
+        res.write(
+          `data: ${JSON.stringify({
+            status: "specialist",
+            capability: toolCall.name,
+            phase: "planned",
+          })}\n\n`,
+        );
         res.write(
           `data: ${JSON.stringify({
             status: "specialist",

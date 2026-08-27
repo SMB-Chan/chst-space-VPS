@@ -190,7 +190,7 @@ export const ALIBABA_CHAT_MODELS = ALIBABA_MODEL_CATALOG.filter(
 export const ALIBABA_CAPABILITY_DEFAULTS = {
   "image.generate": "qwen-image-3.0-pro",
   "image.edit": "qwen-image-3.0-pro",
-  "audio.asr": "paraformer-v2",
+  "audio.asr": "qwen-audio-3.0-asr-flash",
   "audio.tts": "qwen-audio-3.0-tts-plus",
   "audio.realtime": "qwen-audio-3.0-realtime-plus",
   "video.t2v": "happyhorse-1.1-t2v",

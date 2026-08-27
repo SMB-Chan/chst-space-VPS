@@ -55,14 +55,15 @@ describe("capability broker", () => {
   });
 
   it("plans audio transcription only for attached audio", async () => {
-    const { client } = fakeClient('{"tool":"audio.transcribe","attachmentName":"meeting.m4a","modelId":"paraformer-v2"}');
+    const { client } = fakeClient('{"tool":"audio.transcribe","attachmentName":"meeting.m4a","modelId":"qwen-audio-3.0-asr-flash","languageHints":["en","ja"]}');
     const result = await planCapabilityTool({
       client, provider: "dashscope", modelId: "qwen3.8-flash",
       userText: "この録音を文字起こしして", hasReferenceImages: false,
       audioAttachmentNames: ["meeting.m4a"],
     });
     expect(result).toEqual({
-      tool: "audio.transcribe", attachmentName: "meeting.m4a", modelId: "paraformer-v2",
+      tool: "audio.transcribe", attachmentName: "meeting.m4a", modelId: "qwen-audio-3.0-asr-flash",
+      languageHints: ["en", "ja"],
     });
   });
 

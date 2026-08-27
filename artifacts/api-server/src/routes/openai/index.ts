@@ -843,7 +843,7 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
     res.setHeader("Content-Type", asset.mimeType);
     res.setHeader(
       "Content-Disposition",
-      asset.mimeType.startsWith("audio/")
+      asset.mimeType.startsWith("audio/") || asset.mimeType.startsWith("image/")
         ? "inline"
         : `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
     );

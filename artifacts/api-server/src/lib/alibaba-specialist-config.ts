@@ -48,12 +48,23 @@ function assertTrustedAlibabaHost(url: URL): void {
   if (!trusted) throw new Error("Alibaba specialist endpoint host is not trusted");
 }
 
+function defaultSpecialistHttpBase(env: NodeJS.ProcessEnv): string {
+  const workspaceId = env.ALIBABA_SPECIALIST_WORKSPACE_ID?.trim();
+  if (workspaceId && WORKSPACE_ID_PATTERN.test(workspaceId)) {
+    return `https://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1/`;
+  }
+  // Alibaba keeps the legacy Singapore public domain functional, but recommends
+  // workspace-specific domains for higher stability. It remains a safe fallback
+  // for installations that have not yet configured their workspace ID.
+  return "https://dashscope-intl.aliyuncs.com/api/v1/";
+}
+
 export function resolveAlibabaSpecialistHttpUrl(
   servicePath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): URL {
   const configured = env.ALIBABA_SPECIALIST_HTTP_BASE_URL?.trim();
-  const base = new URL(configured || "https://dashscope-intl.aliyuncs.com/api/v1/");
+  const base = new URL(configured || defaultSpecialistHttpBase(env));
   if (base.protocol !== "https:") throw new Error("Alibaba specialist HTTP endpoint must use HTTPS");
   assertTrustedAlibabaHost(base);
 

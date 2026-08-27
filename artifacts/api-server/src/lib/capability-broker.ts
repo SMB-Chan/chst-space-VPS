@@ -26,6 +26,7 @@ export type CapabilityToolPlan =
       tool: "audio.transcribe";
       attachmentName: string;
       modelId?: string;
+      languageHints?: string[];
     }
   | {
       tool: "audio.synthesize";
@@ -53,7 +54,7 @@ Allowed forms:
 {"tool":"none"}
 {"tool":"image.generate","prompt":"...","modelId":"optional","size":"optional WIDTH*HEIGHT","n":1}
 {"tool":"image.edit","imageName":"attached filename","prompt":"...","modelId":"optional","size":"optional WIDTH*HEIGHT","n":1}
-{"tool":"audio.transcribe","attachmentName":"attached filename","modelId":"optional"}
+{"tool":"audio.transcribe","attachmentName":"attached filename","modelId":"optional","languageHints":["zh","en"]}
 {"tool":"audio.synthesize","text":"text to speak","modelId":"qwen-audio-3.0-tts-plus","voice":"optional","instruction":"optional","languageHint":"zh or en","rate":1,"pitch":1,"volume":50}
 
 Rules:
@@ -111,10 +112,25 @@ function parseToolPlan(
       modelHasAlibabaCapability(obj.modelId, "audio.asr")
         ? obj.modelId
         : undefined;
+    let languageHints: string[] | undefined;
+    if (obj.languageHints !== undefined) {
+      if (!Array.isArray(obj.languageHints) || obj.languageHints.length > 4) {
+        return { tool: "none" };
+      }
+      const hints = obj.languageHints.filter(
+        (hint): hint is string =>
+          typeof hint === "string" &&
+          /^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/i.test(hint.trim()),
+      );
+      if (hints.length !== obj.languageHints.length) return { tool: "none" };
+      const uniqueHints = [...new Set(hints.map((hint) => hint.trim().toLowerCase()))];
+      if (uniqueHints.length > 0) languageHints = uniqueHints;
+    }
     return {
       tool: "audio.transcribe",
       attachmentName,
       ...(modelId ? { modelId } : {}),
+      ...(languageHints ? { languageHints } : {}),
     };
   }
 

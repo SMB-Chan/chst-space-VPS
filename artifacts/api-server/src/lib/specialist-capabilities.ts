@@ -181,7 +181,7 @@ function regularDashScopeTranscriptionConfigured(): boolean {
 
 function specialistModelConfigured(model: CapabilityModel): boolean {
   if (model.id === "paraformer-v2") return regularDashScopeTranscriptionConfigured();
-  if (model.id === "qwen-audio-3.0-asr-flash") return false;
+  if (model.id === "qwen-audio-3.0-asr-flash") return isAlibabaSpecialistConfigured();
   if (model.capabilities.includes("image-generate") || model.capabilities.includes("image-edit")) {
     return isAlibabaSpecialistConfigured();
   }
@@ -308,7 +308,8 @@ const imageEditArgs = z.object({
 
 const transcribeArgs = z.object({
   attachmentName: z.string().trim().min(1).max(255),
-  modelId: z.string().trim().max(100).optional(),
+  modelId: z.enum(["qwen-audio-3.0-asr-flash", "paraformer-v2"]).optional(),
+  languageHints: z.array(z.string().trim().min(2).max(16)).max(4).optional(),
 });
 
 const synthesizeSpeechArgs = z.object({
@@ -388,7 +389,7 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
       },
     });
   }
-  if (regularDashScopeTranscriptionConfigured() && context.audioAttachments?.length) {
+  if (specialistConfigured && context.audioAttachments?.length) {
     tools.push({
       type: "function",
       function: {
@@ -399,7 +400,8 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
           type: "object",
           properties: {
             attachmentName: { type: "string", minLength: 1, maxLength: 255 },
-            modelId: { type: "string", maxLength: 100 },
+            modelId: { type: "string", enum: ["qwen-audio-3.0-asr-flash", "paraformer-v2"] },
+            languageHints: { type: "array", maxItems: 4, items: { type: "string", minLength: 2, maxLength: 16 } },
           },
           required: ["attachmentName"],
           additionalProperties: false,
@@ -509,6 +511,7 @@ export async function executeSpecialistTool(
         filename: audio.name,
         mime: audio.mime,
         signal: context.signal,
+        languageHints: args.languageHints,
       }, args.modelId);
       return {
         ok: true,

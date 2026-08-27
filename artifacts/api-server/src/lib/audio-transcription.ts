@@ -1,5 +1,10 @@
 import type OpenAI from "openai";
 import { dashscopeClient, openaiClient } from "./ai-clients";
+import { AlibabaAsrError, transcribeQwenAudio } from "./alibaba-asr";
+import {
+  isAlibabaSpecialistConfigured,
+  isAlibabaTokenPlanKey,
+} from "./alibaba-specialist-config";
 import { logger } from "./logger";
 
 /**
@@ -19,7 +24,8 @@ export class TranscriptionError extends Error {
 }
 
 const OPENAI_FALLBACK_MODELS = ["gpt-4o-mini-transcribe", "whisper-1"];
-const DASHSCOPE_TRANSCRIBE_MODEL = "paraformer-v2";
+const QWEN_TRANSCRIBE_MODEL = "qwen-audio-3.0-asr-flash";
+const PARAFormer_FALLBACK_MODEL = "paraformer-v2";
 
 let cachedOpenAiModel: string | null = null;
 
@@ -67,15 +73,29 @@ export async function transcribeDashScopeAudio(args: {
   buffer: Buffer;
   filename: string;
   mime: string;
+  languageHints?: string[];
   signal?: AbortSignal;
-}, model = DASHSCOPE_TRANSCRIBE_MODEL): Promise<string> {
-  if (!dashscopeClient) {
+}, model = QWEN_TRANSCRIBE_MODEL): Promise<string> {
+  if (model === QWEN_TRANSCRIBE_MODEL) {
+    try {
+      const text = await transcribeQwenAudio(args);
+      return text;
+    } catch (error) {
+      if (args.signal?.aborted) throw args.signal.reason ?? error;
+      if (error instanceof AlibabaAsrError && !error.retryable) {
+        throw new TranscriptionError(error.publicMessage);
+      }
+      logger.warn({ filename: args.filename, error: errorMessage(error) }, "Qwen ASR failed; trying Paraformer fallback");
+    }
+  }
+  const dashscopeKey = process.env.DASHSCOPE_API_KEY?.trim();
+  if (!dashscopeClient || !dashscopeKey || isAlibabaTokenPlanKey(dashscopeKey)) {
     throw new TranscriptionError("Alibaba Model Studioが設定されていません。");
   }
   try {
-    const text = await callTranscription(dashscopeClient, model, args);
+    const text = await callTranscription(dashscopeClient, model === QWEN_TRANSCRIBE_MODEL ? PARAFormer_FALLBACK_MODEL : model, args);
     logger.info(
-      { model, filename: args.filename, outputCharacters: text.length },
+      { model: model === QWEN_TRANSCRIBE_MODEL ? PARAFormer_FALLBACK_MODEL : model, filename: args.filename, outputCharacters: text.length },
       "Audio transcription completed via DashScope",
     );
     return text;
@@ -113,13 +133,13 @@ export async function transcribeAudio(args: {
     }
   }
 
-  if (dashscopeClient) {
+  if (dashscopeClient || isAlibabaSpecialistConfigured()) {
     try {
       const text = await transcribeDashScopeAudio(args);
       return text;
     } catch (err) {
       if (args.signal?.aborted) throw args.signal.reason ?? new Error("aborted");
-      failures.push(`dashscope/${DASHSCOPE_TRANSCRIBE_MODEL}: ${errorMessage(err)}`);
+      failures.push(`dashscope/${QWEN_TRANSCRIBE_MODEL}: ${errorMessage(err)}`);
     }
   }
 

@@ -102,6 +102,15 @@ function SpecialistProgress({
   };
   const label = labels[progress.capability] ?? "専門能力";
   const failed = progress.phase === "failed";
+  const completed = progress.phase === "completed";
+  const phaseLabel =
+    progress.phase === "planned"
+      ? "準備中"
+      : progress.phase === "running"
+        ? "実行中"
+        : completed
+          ? "完了"
+          : "失敗";
   return (
     <div
       className={cn(
@@ -111,8 +120,13 @@ function SpecialistProgress({
           : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
       )}
     >
-      {failed ? <Sparkles className="h-3.5 w-3.5 shrink-0" /> : <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
-      <span>{progress.message ?? `${label}を${progress.phase === "running" ? "実行中" : "完了しました"}`}</span>
+      {failed || completed ? (
+        <Sparkles className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+      )}
+      <span className="font-medium">{label}</span>
+      <span className="text-current/80">{progress.message ?? phaseLabel}</span>
     </div>
   );
 }
@@ -215,6 +229,13 @@ function FileDownloadButton({
   const downloadUrl = getGetOpenaiAssetUrl(assetId);
   return (
     <div className="grid gap-2">
+      {mimeType?.startsWith("image/") ? (
+        <img
+          src={downloadUrl}
+          alt={filename ?? "生成画像"}
+          className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain"
+        />
+      ) : null}
       {mimeType?.startsWith("audio/") ? (
         <audio
           controls
