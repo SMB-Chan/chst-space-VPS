@@ -279,12 +279,12 @@ export async function getAlibabaTokenPlanUsage(
   fetchImpl: typeof fetch = fetch,
 ): Promise<AlibabaTokenPlanUsageSnapshot | null> {
   const now = Date.now();
-  if (fetchImpl === fetch && cachedUsage && cachedUsage.expiresAt > now) {
+  if (env === process.env && fetchImpl === fetch && cachedUsage && cachedUsage.expiresAt > now) {
     return cachedUsage.snapshot;
   }
   try {
     const snapshot = await fetchAlibabaTokenPlanUsage(env, fetchImpl);
-    if (snapshot && fetchImpl === fetch) {
+    if (snapshot && env === process.env && fetchImpl === fetch) {
       const cacheMs = parsePositiveInt(env.ALIBABA_TOKEN_PLAN_QUOTA_CACHE_MS, DEFAULT_CACHE_MS);
       cachedUsage = { snapshot, expiresAt: now + cacheMs };
     }
