@@ -326,11 +326,22 @@ export async function tokenPlanQuotaPreflightGuard(
     const snapshot = await getAlibabaTokenPlanUsage(process.env);
     const assessment = assessAlibabaLargeTurnQuota(snapshot, process.env);
     if (assessment.decision === "unknown") {
+      if (isAlibabaTokenPlanQuotaFailOpen(process.env)) {
+        logger.warn(
+          { reasons: estimate.reasons, tokenPlanCalls: estimate.tokenPlanCalls },
+          "Large Token Plan turn is using the explicit fail-open override",
+        );
+        next();
+        return;
+      }
       logger.warn(
         { reasons: estimate.reasons, tokenPlanCalls: estimate.tokenPlanCalls },
-        "Large Token Plan turn is proceeding because quota telemetry is unavailable",
+        "Large Token Plan turn blocked because quota telemetry is unavailable",
       );
-      next();
+      res.status(503).json({
+        error:
+          "Alibaba Token Plan の残量を確認できないため、クォータ保護のため大きな処理は開始しません。",
+      });
       return;
     }
 

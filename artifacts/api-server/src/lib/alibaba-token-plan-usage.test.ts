@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   AlibabaTokenPlanQuotaGuardError,
+  MODEL_STUDIO_DASHSCOPE_BASE_URL,
+  TOKEN_PLAN_DASHSCOPE_BASE_URL,
   assessAlibabaTokenPlanQuota,
+  classifyAlibabaDashScopeKey,
   createAlibabaTokenPlanQuotaGuardedFetch,
   fetchAlibabaTokenPlanUsage,
   isHeavyAlibabaChatRequest,
+  resolveAlibabaDashScopeBaseUrl,
 } from "./alibaba-token-plan-usage";
 
 function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -16,7 +20,7 @@ function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   };
 }
 
-function quotaResponse(weeklyUsed: number, fiveHourUsed?: number) {
+function quotaResponse(weeklyUsed: number, fiveHourUsed = 0.2) {
   return new Response(
     JSON.stringify({
       data: {
@@ -69,6 +73,38 @@ describe("Alibaba Token Plan quota telemetry", () => {
     expect(snapshot?.weeklyRemainingPercent).toBeCloseTo(20.75);
   });
 
+  it("rejects an incomplete response instead of exposing partial quota", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { per1WeekPercentage: 0.2 } }), { status: 200 }),
+    );
+    await expect(fetchAlibabaTokenPlanUsage(env(), fetchImpl as typeof fetch)).rejects.toThrow(
+      "both quota windows",
+    );
+  });
+
+  it("rejects non-success responses", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }));
+    await expect(fetchAlibabaTokenPlanUsage(env(), fetchImpl as typeof fetch)).rejects.toThrow(
+      "HTTP 503",
+    );
+  });
+
+  it("aborts a quota request that exceeds the configured timeout", async () => {
+    const fetchImpl = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal?.reason ?? new Error("aborted")),
+            { once: true },
+          );
+        }),
+    );
+    await expect(
+      fetchAlibabaTokenPlanUsage(env({ ALIBABA_TOKEN_PLAN_QUOTA_TIMEOUT_MS: "1" }), fetchImpl),
+    ).rejects.toThrow();
+  });
+
   it("returns null when the console credential is not configured", async () => {
     const fetchImpl = vi.fn();
     const snapshot = await fetchAlibabaTokenPlanUsage(
@@ -101,6 +137,15 @@ describe("Alibaba Token Plan quota telemetry", () => {
       env(),
     );
     expect(assessment.decision).toBe("warn");
+  });
+
+  it("treats a partial snapshot as unavailable", () => {
+    const assessment = assessAlibabaTokenPlanQuota(
+      { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 7 },
+      false,
+      env(),
+    );
+    expect(assessment.decision).toBe("unknown");
   });
 
   it("lets operators tune the heavy-request floor", () => {
@@ -191,5 +236,125 @@ describe("Alibaba quota-aware fetch", () => {
       body: JSON.stringify({ model: "qwen3.8-max", messages: [] }),
     });
     expect(modelFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a heavy request when quota telemetry is unavailable by default", async () => {
+    const modelFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const quotaFetch = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = quotaFetch as typeof fetch;
+    try {
+      const guarded = createAlibabaTokenPlanQuotaGuardedFetch(modelFetch as typeof fetch, env());
+      await expect(
+        guarded("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions", {
+          method: "POST",
+          body: JSON.stringify({
+            model: "qwen3.8-max",
+            messages: [{ role: "user", content: "x".repeat(32_000) }],
+          }),
+        }),
+      ).rejects.toBeInstanceOf(AlibabaTokenPlanQuotaGuardError);
+      expect(modelFetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("allows a small request when quota telemetry is unavailable", async () => {
+    const modelFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const quotaFetch = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = quotaFetch as typeof fetch;
+    try {
+      const guarded = createAlibabaTokenPlanQuotaGuardedFetch(modelFetch as typeof fetch, env());
+      await guarded("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "qwen3.8-max", messages: [{ role: "user", content: "short" }] }),
+      });
+      expect(modelFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("allows a heavy request only with the explicit fail-open override", async () => {
+    const modelFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const quotaFetch = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = quotaFetch as typeof fetch;
+    try {
+      const guarded = createAlibabaTokenPlanQuotaGuardedFetch(
+        modelFetch as typeof fetch,
+        env({ ALIBABA_TOKEN_PLAN_QUOTA_FAIL_OPEN: "1" }),
+      );
+      await guarded("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "qwen3.8-max",
+          messages: [{ role: "user", content: "x".repeat(32_000) }],
+        }),
+      });
+      expect(modelFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("Alibaba DashScope credential routing", () => {
+  it.each([
+    ["sk-sp-token-plan", "token-plan"],
+    ["sk-regular-model-studio", "model-studio"],
+    ["opaque-key", "unknown"],
+    ["", "unknown"],
+  ] as const)("classifies %s without exposing it", (key, expected) => {
+    expect(classifyAlibabaDashScopeKey(key)).toBe(expected);
+  });
+
+  it("selects the Token Plan default for a Token Plan key", () => {
+    expect(resolveAlibabaDashScopeBaseUrl({ DASHSCOPE_API_KEY: "sk-sp-token-plan" })).toBe(
+      TOKEN_PLAN_DASHSCOPE_BASE_URL,
+    );
+  });
+
+  it("selects the Model Studio default for a regular key", () => {
+    expect(resolveAlibabaDashScopeBaseUrl({ DASHSCOPE_API_KEY: "sk-regular-model-studio" })).toBe(
+      MODEL_STUDIO_DASHSCOPE_BASE_URL,
+    );
+  });
+
+  it("accepts matching explicit endpoints", () => {
+    expect(
+      resolveAlibabaDashScopeBaseUrl({
+        DASHSCOPE_API_KEY: "sk-sp-token-plan",
+        DASHSCOPE_BASE_URL: `${TOKEN_PLAN_DASHSCOPE_BASE_URL}/`,
+      }),
+    ).toBe(TOKEN_PLAN_DASHSCOPE_BASE_URL);
+    expect(
+      resolveAlibabaDashScopeBaseUrl({
+        DASHSCOPE_API_KEY: "sk-regular-model-studio",
+        DASHSCOPE_BASE_URL: MODEL_STUDIO_DASHSCOPE_BASE_URL,
+      }),
+    ).toBe(MODEL_STUDIO_DASHSCOPE_BASE_URL);
+  });
+
+  it.each([
+    ["sk-sp-token-plan", MODEL_STUDIO_DASHSCOPE_BASE_URL],
+    ["sk-regular-model-studio", TOKEN_PLAN_DASHSCOPE_BASE_URL],
+  ] as const)("fails closed for a known key/endpoint mismatch", (key, baseURL) => {
+    expect(() => resolveAlibabaDashScopeBaseUrl({ DASHSCOPE_API_KEY: key, DASHSCOPE_BASE_URL: baseURL }))
+      .toThrow();
+  });
+
+  it("fails closed for an unknown key format without including the key", () => {
+    const key = "opaque-secret-value";
+    expect(() => resolveAlibabaDashScopeBaseUrl({ DASHSCOPE_API_KEY: key })).toThrow(
+      /unsupported key format/,
+    );
+    try {
+      resolveAlibabaDashScopeBaseUrl({ DASHSCOPE_API_KEY: key });
+    } catch (error) {
+      expect(String(error)).not.toContain(key);
+    }
   });
 });
