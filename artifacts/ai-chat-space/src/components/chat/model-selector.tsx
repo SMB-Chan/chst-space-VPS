@@ -86,7 +86,7 @@ function readPercentHeader(headers: Headers, name: string): number | undefined {
   return Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined;
 }
 
-function readTokenPlanQuotaHint(headers: Headers): TokenPlanQuotaHint | null {
+export function readTokenPlanQuotaHint(headers: Headers): TokenPlanQuotaHint | null {
   const weeklyRemainingPercent = readPercentHeader(headers, QUOTA_HEADERS.weeklyRemaining);
   const fiveHourRemainingPercent = readPercentHeader(headers, QUOTA_HEADERS.fiveHourRemaining);
   const limitingRemainingPercent = readPercentHeader(headers, QUOTA_HEADERS.limitingRemaining);
@@ -94,11 +94,7 @@ function readTokenPlanQuotaHint(headers: Headers): TokenPlanQuotaHint | null {
   const limitingWindow = rawWindow === "5-hour" || rawWindow === "1-week" ? rawWindow : undefined;
   const weeklyResetAt = headers.get(QUOTA_HEADERS.weeklyReset) || undefined;
   const fiveHourResetAt = headers.get(QUOTA_HEADERS.fiveHourReset) || undefined;
-  if (
-    weeklyRemainingPercent === undefined &&
-    fiveHourRemainingPercent === undefined &&
-    limitingRemainingPercent === undefined
-  ) {
+  if (weeklyRemainingPercent === undefined || fiveHourRemainingPercent === undefined) {
     return null;
   }
   return {
@@ -123,7 +119,11 @@ function useTokenPlanQuotaHint(enabled: boolean): TokenPlanQuotaHint | null {
     const refresh = async () => {
       try {
         const res = await fetch(`${BASE}/api/openai/models`, { credentials: "include" });
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          setQuota(null);
+          return;
+        }
         const next = readTokenPlanQuotaHint(res.headers);
         if (!cancelled) setQuota(next);
       } catch {

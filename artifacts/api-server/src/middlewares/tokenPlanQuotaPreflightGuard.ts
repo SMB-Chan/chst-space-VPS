@@ -3,6 +3,7 @@ import { ALIBABA_MODEL_CATALOG } from "../lib/alibaba-capabilities";
 import {
   assessAlibabaTokenPlanQuota,
   getAlibabaTokenPlanUsage,
+  isAlibabaTokenPlanQuotaFailOpen,
   isAlibabaTokenPlanChatKey,
   isAlibabaTokenPlanQuotaGuardEnabled,
   type AlibabaTokenPlanUsageSnapshot,
@@ -39,6 +40,7 @@ export interface AlibabaLargeTurnQuotaAssessment {
   resetAt?: string;
   warnAt: number;
   blockAt: number;
+  reason: string;
 }
 
 interface TurnShape {
@@ -161,7 +163,7 @@ export function assessAlibabaLargeTurnQuota(
   );
 
   if (base.decision === "unknown" || base.remainingPercent === undefined) {
-    return { decision: "unknown", warnAt, blockAt };
+    return { decision: "unknown", warnAt, blockAt, reason: base.reason };
   }
   const common = {
     limitingWindow: base.limitingWindow,
@@ -169,6 +171,7 @@ export function assessAlibabaLargeTurnQuota(
     resetAt: base.resetAt,
     warnAt,
     blockAt,
+    reason: base.reason,
   };
   if (base.remainingPercent <= blockAt) return { decision: "block", ...common };
   if (base.remainingPercent <= warnAt) return { decision: "warn", ...common };
@@ -179,7 +182,13 @@ export function assessAlibabaLargeTurnQuota(
 export function tokenPlanQuotaHeaders(
   snapshot: AlibabaTokenPlanUsageSnapshot | null,
 ): Record<string, string> {
-  if (!snapshot) return {};
+  if (
+    !snapshot ||
+    snapshot.weeklyRemainingPercent === undefined ||
+    snapshot.fiveHourRemainingPercent === undefined
+  ) {
+    return {};
+  }
   const headers: Record<string, string> = {};
   if (snapshot.weeklyRemainingPercent !== undefined) {
     headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyRemaining] =
@@ -226,6 +235,12 @@ function formatResetAt(resetAt: string | undefined): string | undefined {
 }
 
 function blockedMessage(assessment: AlibabaLargeTurnQuotaAssessment): string {
+  if (assessment.remainingPercent === undefined) {
+    return (
+      "Alibaba Token Plan の残量を確認できないため、クォータ保護のため大きな処理は開始しません。" +
+      "時間を置いて再試行するか、運用設定で明示的にfail-openを許可してください。"
+    );
+  }
   const remaining = assessment.remainingPercent?.toFixed(1) ?? "不明";
   const reset = formatResetAt(assessment.resetAt);
   return (
@@ -357,13 +372,22 @@ export async function tokenPlanQuotaPreflightGuard(
       );
     }
     next();
-  } catch (error) {
-    // Quota telemetry is advisory protection. A provider-side outage or stale
-    // console login must not make the entire chat application unavailable.
+  } catch {
+    if (isAlibabaTokenPlanQuotaFailOpen(process.env)) {
+      logger.warn(
+        { reasons: estimate.reasons },
+        "Token Plan large-turn preflight is using the explicit fail-open override",
+      );
+      next();
+      return;
+    }
     logger.warn(
-      { err: error, reasons: estimate.reasons },
-      "Token Plan large-turn preflight failed open",
+      { reasons: estimate.reasons },
+      "Token Plan large-turn preflight blocked because quota telemetry is unavailable",
     );
-    next();
+    res.status(503).json({
+      error:
+        "Alibaba Token Plan の残量を確認できないため、クォータ保護のため大きな処理は開始しません。",
+    });
   }
 }

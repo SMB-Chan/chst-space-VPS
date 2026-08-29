@@ -1,7 +1,10 @@
 import OpenAI from "openai";
 import { logger } from "./logger";
 import { createLlmTimeContextFetch } from "./llm-time-context";
-import { createAlibabaTokenPlanQuotaGuardedFetch } from "./alibaba-token-plan-usage";
+import {
+  createAlibabaTokenPlanQuotaGuardedFetch,
+  resolveAlibabaDashScopeBaseUrl,
+} from "./alibaba-token-plan-usage";
 
 // Replit-managed OpenAI proxy
 if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
@@ -25,15 +28,11 @@ export const openaiClient = new OpenAI({
 // DashScope (Alibaba Cloud) — OpenAI-compatible endpoint
 let dashscopeClient: OpenAI | null = null;
 
-// Token Plan requires the region endpoint. The generic intl URL rejects these keys.
-const DASHSCOPE_BASE_URL =
-  process.env.DASHSCOPE_BASE_URL ??
-  "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
-
 if (process.env.DASHSCOPE_API_KEY) {
+  const dashscopeBaseUrl = resolveAlibabaDashScopeBaseUrl(process.env);
   dashscopeClient = new OpenAI({
     apiKey: process.env.DASHSCOPE_API_KEY,
-    baseURL: DASHSCOPE_BASE_URL,
+    baseURL: dashscopeBaseUrl,
     // For Personal Token Plan keys, the wrapper can query Alibaba's official
     // console quota endpoint before a high-cost chat request. It is a no-op
     // for ordinary Model Studio keys or when console telemetry is unavailable.
