@@ -85,7 +85,11 @@ describe("Token Plan large-turn estimation", () => {
 describe("Token Plan large-turn quota decision", () => {
   it("blocks a large turn before downstream work when remaining quota is below the reserve", () => {
     const result = assessAlibabaLargeTurnQuota(
-      { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 18 },
+      {
+        checkedAt: new Date().toISOString(),
+        weeklyRemainingPercent: 18,
+        fiveHourRemainingPercent: 80,
+      },
       env(),
     );
     expect(result.decision).toBe("block");
@@ -94,7 +98,11 @@ describe("Token Plan large-turn quota decision", () => {
 
   it("warns in the reserve band without blocking", () => {
     const result = assessAlibabaLargeTurnQuota(
-      { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 30 },
+      {
+        checkedAt: new Date().toISOString(),
+        weeklyRemainingPercent: 30,
+        fiveHourRemainingPercent: 80,
+      },
       env(),
     );
     expect(result.decision).toBe("warn");
@@ -116,7 +124,11 @@ describe("Token Plan large-turn quota decision", () => {
 
   it("lets operators tune the large-turn reserve", () => {
     const result = assessAlibabaLargeTurnQuota(
-      { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 27 },
+      {
+        checkedAt: new Date().toISOString(),
+        weeklyRemainingPercent: 27,
+        fiveHourRemainingPercent: 80,
+      },
       env({ ALIBABA_TOKEN_PLAN_BLOCK_LARGE_TURN_REMAINING_PERCENT: "30" }),
     );
     expect(result.decision).toBe("block");
@@ -124,6 +136,15 @@ describe("Token Plan large-turn quota decision", () => {
 
   it("returns unknown when provider telemetry is unavailable", () => {
     expect(assessAlibabaLargeTurnQuota(null, env()).decision).toBe("unknown");
+  });
+
+  it("returns unknown when one required quota window is missing", () => {
+    expect(
+      assessAlibabaLargeTurnQuota(
+        { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 80 },
+        env(),
+      ).decision,
+    ).toBe("unknown");
   });
 });
 
@@ -147,5 +168,14 @@ describe("Token Plan browser-safe quota headers", () => {
 
   it("returns no telemetry headers when quota is unavailable", () => {
     expect(tokenPlanQuotaHeaders(null)).toEqual({});
+  });
+
+  it("returns no headers when either required quota window is missing", () => {
+    expect(
+      tokenPlanQuotaHeaders({
+        checkedAt: new Date().toISOString(),
+        weeklyRemainingPercent: 80,
+      }),
+    ).toEqual({});
   });
 });

@@ -32,7 +32,7 @@ export interface ModelInfo {
   supportsReasoning?: boolean;
 }
 
-interface TokenPlanQuotaHint {
+export interface TokenPlanQuotaHint {
   weeklyRemainingPercent?: number;
   fiveHourRemainingPercent?: number;
   weeklyResetAt?: string;
@@ -107,6 +107,11 @@ export function readTokenPlanQuotaHint(headers: Headers): TokenPlanQuotaHint | n
   };
 }
 
+export function readTokenPlanQuotaResponse(response: Response): TokenPlanQuotaHint | null {
+  if (!response.ok) return null;
+  return readTokenPlanQuotaHint(response.headers);
+}
+
 function useTokenPlanQuotaHint(enabled: boolean): TokenPlanQuotaHint | null {
   const [quota, setQuota] = useState<TokenPlanQuotaHint | null>(null);
 
@@ -124,7 +129,7 @@ function useTokenPlanQuotaHint(enabled: boolean): TokenPlanQuotaHint | null {
           setQuota(null);
           return;
         }
-        const next = readTokenPlanQuotaHint(res.headers);
+        const next = readTokenPlanQuotaResponse(res);
         if (!cancelled) setQuota(next);
       } catch {
         if (!cancelled) setQuota(null);
