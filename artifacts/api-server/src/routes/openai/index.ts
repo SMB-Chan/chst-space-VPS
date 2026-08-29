@@ -22,7 +22,11 @@ import {
   getAvailableChatModels,
   getCapabilityRegistryWithAvailability,
 } from "../../lib/specialist-capabilities";
-import { streamChatReply, withTimeout } from "../../lib/chat-stream";
+import {
+  createResponseCancellation,
+  streamChatReply,
+  withTimeout,
+} from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
 import { parseTranslationMode } from "../../lib/translation";
 import { logger } from "../../lib/logger";
@@ -211,15 +215,17 @@ function extractionPublicError(err: unknown): string {
 async function resolveMessageBinaries(
   message: ParsedUserMessageContent,
   res: Response,
+  parentSignal?: AbortSignal,
 ): Promise<ParsedUserMessageContent> {
   if (!message.hasBinaries) return message;
+  if (parentSignal?.aborted) throw parentSignal.reason ?? new Error("Attachment extraction cancelled");
   if (!res.headersSent) {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders?.();
   }
-  if (!res.writableEnded) {
+  if (!parentSignal?.aborted && !res.writableEnded) {
     res.write(`data: ${JSON.stringify({ status: "reading-files" })}\n\n`);
   }
   return withTimeout(
@@ -227,7 +233,7 @@ async function resolveMessageBinaries(
       resolveBinaryAttachments(
         message,
         (name) => {
-          if (!res.writableEnded) {
+          if (!parentSignal?.aborted && !res.writableEnded) {
             res.write(`data: ${JSON.stringify({ status: "reading-files", name })}\n\n`);
           }
         },
@@ -235,6 +241,7 @@ async function resolveMessageBinaries(
       ),
     FILE_EXTRACTION_TIMEOUT_MS,
     "File extraction",
+    parentSignal,
   );
 }
 
@@ -853,6 +860,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
     return;
   }
 
+  const cancellation = createResponseCancellation(res);
   try {
     const [conversation] = await db
       .select()
@@ -915,8 +923,9 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       }));
 
     try {
-      newMessage = await resolveMessageBinaries(newMessage, res);
+      newMessage = await resolveMessageBinaries(newMessage, res, cancellation.signal);
     } catch (err) {
+      if (cancellation.signal.aborted) return;
       logger.warn({ err, conversationId }, "Attachment extraction failed");
       const message = extractionPublicError(err);
       if (!res.headersSent) {
@@ -928,11 +937,13 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       return;
     }
 
+    if (cancellation.signal.aborted) return;
     const history = await db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(asc(messages.createdAt), asc(messages.id));
+    if (cancellation.signal.aborted) return;
 
     const historicalImageBudget = createHistoricalImageBudget();
     const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
@@ -972,6 +983,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         ? newMessage.modelText
         : modelContentFor(newMessage, supportsVision),
     });
+    if (cancellation.signal.aborted) return;
 
     const { client, provider } = getClientForModel(modelId);
 
@@ -1000,6 +1012,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       translationMode,
       conversationId,
       requestedFileFormat,
+      cancellation,
       publicAiError,
       onComplete: async ({
         content,
@@ -1009,6 +1022,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         generatedFiles,
           generatedAssets,
       }) => {
+        if (cancellation.signal.aborted) return;
         const persisted = await persistChatCompletion({
           userId,
           conversationId,
@@ -1035,6 +1049,8 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
     } else if (!res.writableEnded) {
       res.end();
     }
+  } finally {
+    cancellation.dispose();
   }
 });
 
@@ -1066,6 +1082,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     return;
   }
 
+  const cancellation = createResponseCancellation(res);
   try {
     if (parsed.data.fileFormat) {
       res.status(400).json({
@@ -1123,8 +1140,9 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       }));
 
     try {
-      newMessage = await resolveMessageBinaries(newMessage, res);
+      newMessage = await resolveMessageBinaries(newMessage, res, cancellation.signal);
     } catch (err) {
+      if (cancellation.signal.aborted) return;
       logger.warn({ err }, "Attachment extraction failed");
       const message = extractionPublicError(err);
       if (!res.headersSent) {
@@ -1136,6 +1154,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
+    if (cancellation.signal.aborted) return;
     const historicalImageBudget = createHistoricalImageBudget();
     const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
     for (const hist of [...(parsed.data.history ?? [])].reverse()) {
@@ -1147,6 +1166,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
               hist.attachments as IncomingAttachment[] | undefined,
             ),
             res,
+            cancellation.signal,
           );
           historicalChatMessages.push({
             role: "user",
@@ -1157,6 +1177,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
             ),
           });
         } catch (error) {
+          if (cancellation.signal.aborted) return;
           logger.warn(
             { err: error },
             "Private-session history attachment could not be reconstructed; omitting its payload",
@@ -1178,6 +1199,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
         ? newMessage.modelText
         : modelContentFor(newMessage, supportsVision),
     });
+    if (cancellation.signal.aborted) return;
 
     const { client, provider } = getClientForModel(modelId);
     await streamChatReply({
@@ -1204,6 +1226,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       audioAttachmentsForTools,
       translationMode,
       includeArtifactContent: true,
+      cancellation,
       publicAiError,
     });
   } catch (err) {
@@ -1213,6 +1236,8 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     } else if (!res.writableEnded) {
       res.end();
     }
+  } finally {
+    cancellation.dispose();
   }
 });
 

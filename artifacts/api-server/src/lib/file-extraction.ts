@@ -1,5 +1,8 @@
 import { Unzip, UnzipInflate } from "fflate";
 import * as mammoth from "mammoth";
+import { existsSync } from "node:fs";
+import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
 import { extractText, getDocumentProxy } from "unpdf";
 import { TranscriptionError, transcribeAudio } from "./audio-transcription";
 import {
@@ -158,14 +161,16 @@ function streamZipEntries(
   buffer: Buffer,
   accept: (name: string) => boolean,
   budget: { perEntryBytes: number; totalBytes: number },
+  accountAllEntries = false,
 ): { contents: Map<string, Uint8Array>; aborted: boolean } {
   const contents = new Map<string, Uint8Array>();
   let decompressedTotal = 0;
   let aborted = false;
 
   const unzipper = new Unzip((file) => {
-    if (aborted || !accept(file.name)) return;
-    const chunks: Uint8Array[] = [];
+    const collect = accept(file.name);
+    if (aborted || (!collect && !accountAllEntries)) return;
+    const chunks: Uint8Array[] | undefined = collect ? [] : undefined;
     let entryBytes = 0;
     file.ondata = (err, chunk, final) => {
       if (err) throw err;
@@ -175,8 +180,8 @@ function streamZipEntries(
         aborted = true;
         throw new ZipBudgetExceededError();
       }
-      chunks.push(chunk);
-      if (final) {
+      if (chunks) chunks.push(chunk);
+      if (final && chunks) {
         let totalLength = 0;
         for (const part of chunks) totalLength += part.length;
         const merged = new Uint8Array(totalLength);
@@ -200,6 +205,119 @@ function streamZipEntries(
     }
   }
   return { contents, aborted };
+}
+
+function zipExpandedBudgetError(): FileExtractionError {
+  return new FileExtractionError(
+    `ZIPの展開後サイズが${formatBytes(MAX_ZIP_TOTAL_UNCOMPRESSED)}または1エントリ${formatBytes(MAX_ZIP_ENTRY_BYTES)}の上限を超えたため解析できません。`,
+  );
+}
+
+/**
+ * Run the streaming pass over every entry before an Office parser sees the
+ * archive. This is deliberately separate from the selective content pass:
+ * ignored images and metadata still count toward the decompression budget.
+ */
+function assertZipExpandedBudget(buffer: Buffer): ZipDirectoryInfo {
+  const directory = assertZipReadable(buffer);
+  const oversizedEntry = directory.entries.find(
+    (entry) => entry.uncompressedSize > MAX_ZIP_ENTRY_BYTES,
+  );
+  if (oversizedEntry) {
+    throw new FileExtractionError(
+      `ZIPのエントリ「${oversizedEntry.name}」の展開後サイズが${formatBytes(MAX_ZIP_ENTRY_BYTES)}を超えるため解析できません。`,
+    );
+  }
+  const { aborted } = streamZipEntries(
+    buffer,
+    () => true,
+    { perEntryBytes: MAX_ZIP_ENTRY_BYTES, totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED },
+    true,
+  );
+  if (aborted) throw zipExpandedBudgetError();
+  return directory;
+}
+
+type IsolatedExtractionResult = { ok: true; text: string } | {
+  ok: false;
+  message: string;
+};
+
+const ISOLATED_WORKER_URL = new URL("./file-extraction-worker.mjs", import.meta.url);
+
+function extractionWorkerAvailable(): boolean {
+  return existsSync(fileURLToPath(ISOLATED_WORKER_URL));
+}
+
+/**
+ * Synchronous document parsers run in a worker in the built server. A rejected
+ * Promise cannot stop PDF.js or a decompressor already executing JavaScript on
+ * the event loop, while terminating this worker does.
+ */
+export async function runIsolatedBinaryExtraction(
+  attachment: BinaryAttachment,
+  signal?: AbortSignal,
+  workerUrl: URL = ISOLATED_WORKER_URL,
+): Promise<string> {
+  if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
+  if (!extractionWorkerAvailable() && workerUrl === ISOLATED_WORKER_URL) {
+    return extractSynchronousBinaryText(attachment);
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(workerUrl);
+    const cleanup = () => {
+      signal?.removeEventListener("abort", onAbort);
+      worker.removeAllListeners();
+    };
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const onAbort = () => {
+      const reason = signal?.reason ?? new Error("Attachment extraction cancelled");
+      void worker.terminate();
+      finish(() => reject(reason));
+    };
+
+    worker.once("message", (result: IsolatedExtractionResult) => {
+      finish(() => {
+        if (result.ok) resolve(result.text);
+        else reject(new FileExtractionError(result.message));
+      });
+      void worker.terminate();
+    });
+    worker.once("error", (error) => {
+      finish(() => reject(error));
+    });
+    worker.once("exit", (code) => {
+      finish(() =>
+        reject(
+          new Error(
+            code === 0
+              ? "Attachment extraction worker exited without a result"
+              : `Attachment extraction worker exited with code ${code}`,
+          ),
+        ),
+      );
+    });
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    try {
+      worker.postMessage({
+        family: attachment.family,
+        buffer: attachment.buffer,
+      });
+    } catch (error) {
+      finish(() => reject(error));
+      void worker.terminate();
+    }
+  });
 }
 
 function isPasswordError(err: unknown): boolean {
@@ -244,6 +362,7 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
 }
 
 export async function extractDocxText(buffer: Buffer): Promise<string> {
+  assertZipExpandedBudget(buffer);
   let value: string;
   try {
     const result = await mammoth.extractRawText({ buffer });
@@ -264,8 +383,6 @@ export async function extractDocxText(buffer: Buffer): Promise<string> {
  * are parsed straight from their XML parts with hard caps. No formulas are
  * evaluated and no styles/dates are interpreted — values are read as data.
  */
-const XLSX_ENTRY_BYTES = 4 * 1024 * 1024;
-const XLSX_TOTAL_BYTES = 32 * 1024 * 1024;
 const MAX_XLSX_SHARED_STRINGS = 200_000;
 
 function toCsvCell(value: string): string {
@@ -394,7 +511,7 @@ function normalizeXlsxSheetTarget(target: string): string {
 }
 
 export function extractXlsxText(buffer: Buffer): string {
-  assertZipReadable(buffer);
+  assertZipExpandedBudget(buffer);
 
   const fixedEntries = new Set([
     "xl/workbook.xml",
@@ -404,7 +521,8 @@ export function extractXlsxText(buffer: Buffer): string {
   const { contents } = streamZipEntries(
     buffer,
     (name) => fixedEntries.has(name) || /^xl\/worksheets\/sheet\d+\.xml$/.test(name),
-    { perEntryBytes: XLSX_ENTRY_BYTES, totalBytes: XLSX_TOTAL_BYTES },
+    { perEntryBytes: MAX_ZIP_ENTRY_BYTES, totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED },
+    true,
   );
 
   const decoder = new TextDecoder("utf-8", { fatal: false });
@@ -459,13 +577,15 @@ function extractSlideText(xml: string): string {
 }
 
 export function extractPptxText(buffer: Buffer): string {
-  assertZipReadable(buffer);
+  assertZipExpandedBudget(buffer);
   const slideNameRegex = /^ppt\/slides\/slide(\d+)\.xml$/;
   const { contents, aborted } = streamZipEntries(
     buffer,
     (name) => slideNameRegex.test(name),
-    { perEntryBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 },
+    { perEntryBytes: MAX_ZIP_ENTRY_BYTES, totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED },
+    true,
   );
+  if (aborted) throw zipExpandedBudgetError();
 
   const slides = [...contents.entries()]
     .map(([name, bytes]) => ({
@@ -565,9 +685,8 @@ export function extractZipText(buffer: Buffer): string {
  * Dispatch one binary attachment to its parser. All failure paths raise
  * FileExtractionError / TranscriptionError carrying a user-facing message.
  */
-export async function extractBinaryText(
+async function extractSynchronousBinaryText(
   attachment: BinaryAttachment,
-  signal?: AbortSignal,
 ): Promise<string> {
   switch (attachment.family) {
     case "pdf":
@@ -580,6 +699,20 @@ export async function extractBinaryText(
       return extractPptxText(attachment.buffer);
     case "zip":
       return extractZipText(attachment.buffer);
+    case "audio":
+      throw new FileExtractionError("音声ファイルは同期文書解析の対象外です。");
+    default: {
+      const exhaustive: never = attachment.family;
+      throw new FileExtractionError(`未対応の添付種別です: ${String(exhaustive)}`);
+    }
+  }
+}
+
+export async function extractBinaryText(
+  attachment: BinaryAttachment,
+  signal?: AbortSignal,
+): Promise<string> {
+  switch (attachment.family) {
     case "audio": {
       const text = await transcribeAudio({
         buffer: attachment.buffer,
@@ -592,6 +725,12 @@ export async function extractBinaryText(
       }
       return capText(`[音声の文字起こし結果]\n${text}`, MAX_EXTRACTED_CHARS);
     }
+    case "pdf":
+    case "docx":
+    case "xlsx":
+    case "pptx":
+    case "zip":
+      return runIsolatedBinaryExtraction(attachment, signal);
     default: {
       const exhaustive: never = attachment.family;
       throw new FileExtractionError(`未対応の添付種別です: ${String(exhaustive)}`);
@@ -614,6 +753,7 @@ export async function resolveBinaryAttachments(
 
   const incoming: IncomingAttachment[] = [];
   for (const attachment of parsed.attachments) {
+    if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
     if (attachment.kind === "image") {
       incoming.push({ kind: "image", name: attachment.name, content: attachment.content, isBase64: true });
       continue;
@@ -627,6 +767,9 @@ export async function resolveBinaryAttachments(
     const startedAt = Date.now();
     try {
       const text = await extractBinaryText(attachment, signal);
+      if (signal?.aborted) {
+        throw signal.reason ?? new Error("Attachment extraction cancelled");
+      }
       logger.info(
         {
           name: attachment.name,
@@ -638,6 +781,7 @@ export async function resolveBinaryAttachments(
       );
       incoming.push({ kind: "file", name: attachment.name, content: text, isBase64: false });
     } catch (err) {
+      if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
       if (err instanceof FileExtractionError || err instanceof TranscriptionError) throw err;
       logger.warn({ err, name: attachment.name, family: attachment.family }, "Unexpected extraction failure");
       throw new FileExtractionError(
