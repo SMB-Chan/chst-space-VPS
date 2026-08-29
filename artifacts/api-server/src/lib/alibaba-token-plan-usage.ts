@@ -5,12 +5,22 @@ const TOKEN_PLAN_USAGE_ENDPOINT =
   "https://bailian-singapore-cs.alibabacloud.com/cli/api.json" +
   `?action=IntlBroadScopeAspnGateway&product=sfm_bailian&api=${encodeURIComponent(TOKEN_PLAN_USAGE_API)}`;
 const TOKEN_PLAN_REGION = "ap-southeast-1";
+export const TOKEN_PLAN_DASHSCOPE_BASE_URL =
+  "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
+export const MODEL_STUDIO_DASHSCOPE_BASE_URL =
+  "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+const TOKEN_PLAN_DASHSCOPE_HOST = "token-plan.ap-southeast-1.maas.aliyuncs.com";
+const MODEL_STUDIO_DASHSCOPE_HOSTS = new Set([
+  "dashscope-intl.aliyuncs.com",
+  "dashscope.aliyuncs.com",
+]);
 const DEFAULT_TIMEOUT_MS = 3_000;
 const DEFAULT_CACHE_MS = 30_000;
 const DEFAULT_WARN_REMAINING_PERCENT = 25;
 const DEFAULT_BLOCK_HEAVY_REMAINING_PERCENT = 10;
 
 export type AlibabaTokenPlanQuotaDecision = "allow" | "warn" | "block" | "unknown";
+export type AlibabaDashScopeKeyKind = "token-plan" | "model-studio" | "unknown";
 
 export interface AlibabaTokenPlanUsageSnapshot {
   checkedAt: string;
@@ -134,8 +144,63 @@ export function isAlibabaTokenPlanQuotaGuardEnabled(
   return parseBoolean(env.ALIBABA_TOKEN_PLAN_QUOTA_GUARD, true);
 }
 
+export function isAlibabaTokenPlanQuotaFailOpen(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return parseBoolean(env.ALIBABA_TOKEN_PLAN_QUOTA_FAIL_OPEN, false);
+}
+
+export function classifyAlibabaDashScopeKey(
+  apiKey: string | undefined,
+): AlibabaDashScopeKeyKind {
+  const normalized = apiKey?.trim() ?? "";
+  if (/^sk-sp-/i.test(normalized)) return "token-plan";
+  if (/^sk-/i.test(normalized)) return "model-studio";
+  return "unknown";
+}
+
 export function isAlibabaTokenPlanChatKey(apiKey: string | undefined): boolean {
-  return Boolean(apiKey?.trim().startsWith("sk-sp-"));
+  return classifyAlibabaDashScopeKey(apiKey) === "token-plan";
+}
+
+function normalizeDashScopeUrl(raw: string): string {
+  const url = new URL(raw);
+  if (url.protocol !== "https:") {
+    throw new Error("DashScope endpoint must use HTTPS");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("DashScope endpoint must not contain credentials, query, or fragment");
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+
+/**
+ * Token Plan and regular Model Studio credentials use different endpoints.
+ * Keep the default safe for each credential class and reject known crossings.
+ */
+export function resolveAlibabaDashScopeBaseUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const keyKind = classifyAlibabaDashScopeKey(env.DASHSCOPE_API_KEY);
+  if (keyKind === "unknown") {
+    throw new Error("DASHSCOPE_API_KEY has an unsupported key format");
+  }
+
+  const configured = env.DASHSCOPE_BASE_URL?.trim();
+  const fallback =
+    keyKind === "token-plan"
+      ? TOKEN_PLAN_DASHSCOPE_BASE_URL
+      : MODEL_STUDIO_DASHSCOPE_BASE_URL;
+  const normalized = normalizeDashScopeUrl(configured || fallback);
+  const host = new URL(normalized).hostname.toLowerCase();
+
+  if (keyKind === "token-plan" && MODEL_STUDIO_DASHSCOPE_HOSTS.has(host)) {
+    throw new Error("Token Plan key cannot use a general Model Studio endpoint");
+  }
+  if (keyKind === "model-studio" && host === TOKEN_PLAN_DASHSCOPE_HOST) {
+    throw new Error("General Model Studio key cannot use a Token Plan endpoint");
+  }
+  return normalized;
 }
 
 export async function fetchAlibabaTokenPlanUsage(
@@ -198,10 +263,10 @@ export async function fetchAlibabaTokenPlanUsage(
         : {}),
     };
     if (
-      snapshot.weeklyRemainingPercent === undefined &&
+      snapshot.weeklyRemainingPercent === undefined ||
       snapshot.fiveHourRemainingPercent === undefined
     ) {
-      throw new Error("Alibaba Token Plan quota response did not contain an active quota window");
+      throw new Error("Alibaba Token Plan quota response did not contain both quota windows");
     }
     return snapshot;
   } finally {
@@ -224,9 +289,9 @@ export async function getAlibabaTokenPlanUsage(
       cachedUsage = { snapshot, expiresAt: now + cacheMs };
     }
     return snapshot;
-  } catch (error) {
+  } catch {
+    cachedUsage = null;
     logger.warn(
-      { err: error },
       "Alibaba Token Plan quota telemetry unavailable; continuing without authoritative quota data",
     );
     return null;
@@ -246,26 +311,29 @@ export function assessAlibabaTokenPlanQuota(
     };
   }
 
-  const windows = [
-    snapshot.fiveHourRemainingPercent !== undefined
-      ? {
-          window: "5-hour" as const,
-          remaining: snapshot.fiveHourRemainingPercent,
-          resetAt: snapshot.fiveHourResetAt,
-        }
-      : undefined,
-    snapshot.weeklyRemainingPercent !== undefined
-      ? {
-          window: "1-week" as const,
-          remaining: snapshot.weeklyRemainingPercent,
-          resetAt: snapshot.weeklyResetAt,
-        }
-      : undefined,
-  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-  if (windows.length === 0) {
-    return { decision: "unknown", heavy, reason: "No active quota window was returned" };
+  if (
+    snapshot.weeklyRemainingPercent === undefined ||
+    snapshot.fiveHourRemainingPercent === undefined
+  ) {
+    return {
+      decision: "unknown",
+      heavy,
+      reason: "Token Plan quota telemetry is incomplete",
+    };
   }
+
+  const windows = [
+    {
+      window: "5-hour" as const,
+      remaining: snapshot.fiveHourRemainingPercent,
+      resetAt: snapshot.fiveHourResetAt,
+    },
+    {
+      window: "1-week" as const,
+      remaining: snapshot.weeklyRemainingPercent,
+      resetAt: snapshot.weeklyResetAt,
+    },
+  ];
 
   const limiting = windows.reduce((lowest, item) =>
     item.remaining < lowest.remaining ? item : lowest,
@@ -424,9 +492,18 @@ export function createAlibabaTokenPlanQuotaGuardedFetch(
         },
         "Alibaba Token Plan quota headroom is low",
       );
+    } else if (
+      assessment.decision === "unknown" &&
+      heavy &&
+      !isAlibabaTokenPlanQuotaFailOpen(env)
+    ) {
+      logger.warn(
+        "Heavy Alibaba chat request blocked because Token Plan quota telemetry is unavailable",
+      );
+      throw new AlibabaTokenPlanQuotaGuardError(assessment);
     } else if (assessment.decision === "unknown" && heavy) {
       logger.warn(
-        "Heavy Alibaba chat request is proceeding because Token Plan quota telemetry is unavailable",
+        "Heavy Alibaba chat request is proceeding under the explicit Token Plan quota fail-open override",
       );
     }
 
