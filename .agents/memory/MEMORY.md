@@ -11,3 +11,4 @@
 - [Qwen Realtime transport](qwen-realtime-transport.md) — Qwen Audio RealtimeはWorkspace WSS、PTT null、16kHz入力/24kHz出力、短命チケット中継を前提にする。
 - [起動時ヘルスチェック](startup-readiness.md) — DBスキーマ初期化前にlistenし、準備中は503、完了後に200を返してデプロイ監視の起動レースを避ける。
 - [添付解析workerのbuild](attachment-worker-build.md) — logging pluginの追加entrypointと衝突するため、terminable workerは別bundleとして明示出力する。
+- [Git履歴のAPI復元](github-history-reconstruction.md) — GitHub Git Data APIではblob/treeを先に揃え、親treeとcommit metadataを厳密に渡してSHA一致を検証する。
