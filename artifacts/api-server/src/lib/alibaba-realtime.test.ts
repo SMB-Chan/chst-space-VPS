@@ -65,6 +65,25 @@ describe("Alibaba Qwen Audio realtime session broker", () => {
     }
   });
 
+  it("allows only one active or reserved session per user", () => {
+    const userId = `single-realtime-session-${randomUUID()}`;
+    createAlibabaRealtimeSession({
+      userId,
+      modelId: "o4-mini",
+    }, env);
+
+    try {
+      createAlibabaRealtimeSession({
+        userId,
+        modelId: "o4-mini",
+      }, env);
+      throw new Error("expected duplicate session reservation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AlibabaRealtimeError);
+      expect((error as AlibabaRealtimeError).publicMessage).toContain("別のタブで使用中");
+    }
+  });
+
   it("normalizes provider audio and transcript events without leaking provider metadata", () => {
     const state = { inputTranscript: "", responseTranscript: "" };
     expect(normalizeAlibabaRealtimeEvent({

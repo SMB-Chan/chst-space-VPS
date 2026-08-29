@@ -4,6 +4,7 @@ import { getBrowserEgressMetrics } from "../lib/browser-egress-proxy";
 import { shouldIncludeOperationalHealthMetrics } from "../lib/health-config";
 import { getBrowserFetchMetrics } from "../lib/render-fetch";
 import { getSharedAiUsageMetrics } from "../middlewares/sharedAiUsageGuard";
+import { startupReadiness } from "../lib/startup-readiness";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,15 @@ function optionalOperationalMetrics(): Record<string, unknown> {
 }
 
 async function healthResponse(res: Parameters<Parameters<IRouter["get"]>[1]>[1]): Promise<void> {
+  if (!startupReadiness.isReady()) {
+    res.status(503).json({
+      status: "starting",
+      detail: "Service is still starting",
+      ...optionalOperationalMetrics(),
+    });
+    return;
+  }
+
   try {
     await pool.query("SELECT 1");
     res.json({

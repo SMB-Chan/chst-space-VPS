@@ -347,12 +347,31 @@ router.get("/openai/capabilities", async (_req, res) => {
   res.json(await getCapabilityRegistryWithAvailability());
 });
 
-router.post("/openai/realtime/session", requireAuth, (req, res) => {
+router.post("/openai/realtime/session", requireAuth, async (req, res) => {
   try {
     const userId = getUserId(req);
     const modelId = typeof req.body?.modelId === "string" ? req.body.modelId.trim() : "";
-    const conversationId =
-      typeof req.body?.conversationId === "number" ? req.body.conversationId : undefined;
+    const rawConversationId = req.body?.conversationId;
+    const conversationId = rawConversationId === undefined
+      ? undefined
+      : typeof rawConversationId === "number" && Number.isSafeInteger(rawConversationId) && rawConversationId > 0
+        ? rawConversationId
+        : null;
+    if (conversationId === null) {
+      res.status(400).json({ error: "会話IDが不正です。" });
+      return;
+    }
+    if (conversationId !== undefined) {
+      const [conversation] = await db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+        .limit(1);
+      if (!conversation) {
+        res.status(404).json({ error: "Conversation not found" });
+        return;
+      }
+    }
     const session = createAlibabaRealtimeSession({ userId, modelId, conversationId });
     res.setHeader("Cache-Control", "no-store");
     res.json(session);
@@ -1239,7 +1258,9 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
     res.setHeader("Content-Type", asset.mimeType);
     res.setHeader(
       "Content-Disposition",
-      asset.mimeType.startsWith("audio/") || asset.mimeType.startsWith("image/")
+      asset.mimeType.startsWith("audio/") ||
+        asset.mimeType.startsWith("image/") ||
+        asset.mimeType.startsWith("video/")
         ? "inline"
         : `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
     );

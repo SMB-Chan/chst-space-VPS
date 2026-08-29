@@ -9,3 +9,4 @@
 - [マージ後セットアップ](post-merge-setup.md) — frozen install後にDBライブラリの生成型を再ビルドし、依存変更時はlockfileも同期する。
 - [GitHub API書き込み制限](github-api-rate-limit.md) — GitHub連携のgit-data更新は毎秒制限があるため、blob作成を並列化せず間隔を空ける。
 - [Qwen Realtime transport](qwen-realtime-transport.md) — Qwen Audio RealtimeはWorkspace WSS、PTT null、16kHz入力/24kHz出力、短命チケット中継を前提にする。
+- [起動時ヘルスチェック](startup-readiness.md) — DBスキーマ初期化前にlistenし、準備中は503、完了後に200を返してデプロイ監視の起動レースを避ける。

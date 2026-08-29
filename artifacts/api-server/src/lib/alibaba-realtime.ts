@@ -73,6 +73,14 @@ function pruneTickets(now = Date.now()): void {
   }
 }
 
+function pendingTicketCount(userId?: string): number {
+  let count = 0;
+  for (const ticket of tickets.values()) {
+    if (!ticket.claimed && (userId === undefined || ticket.userId === userId)) count += 1;
+  }
+  return count;
+}
+
 function normalizeConversationId(value: unknown): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
@@ -101,14 +109,17 @@ export function createAlibabaRealtimeSession(
     throw new AlibabaRealtimeError("Invalid conversation id", "会話IDが不正です。", false);
   }
   pruneTickets();
-  if (activeUsers.has(request.userId)) {
+  if (
+    (activeUsers.has(request.userId) ? 1 : 0) + pendingTicketCount(request.userId) >=
+    MAX_SESSIONS_PER_USER
+  ) {
     throw new AlibabaRealtimeError(
-      "Realtime session already active for user",
+      "Realtime session already active or reserved for user",
       "リアルタイム音声はすでに別のタブで使用中です。",
       false,
     );
   }
-  if (activeUsers.size >= MAX_ACTIVE_SESSIONS) {
+  if (activeUsers.size + pendingTicketCount() >= MAX_ACTIVE_SESSIONS) {
     throw new AlibabaRealtimeError(
       "Realtime session capacity exhausted",
       "リアルタイム音声が混み合っています。少し待ってから再試行してください。",
@@ -303,6 +314,11 @@ export function attachAlibabaRealtimeWebSocket(
     const ticket = readTicket(request);
     if (!ticket) {
       rejectUpgrade(socket, 401, "Unauthorized");
+      return;
+    }
+    if (activeUsers.has(ticket.userId)) {
+      tickets.delete(ticket.token);
+      rejectUpgrade(socket, 409, "Conflict");
       return;
     }
     ticket.claimed = true;

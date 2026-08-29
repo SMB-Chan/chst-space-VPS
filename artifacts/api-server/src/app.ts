@@ -23,6 +23,7 @@ import {
   tokenPlanQuotaStatusHeaders,
 } from "./middlewares/tokenPlanQuotaPreflightGuard";
 import { isAllowedCorsOrigin, parseAllowedOrigins } from "./lib/cors-origins";
+import { requireStartupReadiness } from "./lib/startup-readiness";
 
 const app: Express = express();
 
@@ -75,6 +76,9 @@ app.use("/api", apiSecurityHeaders);
 
 // Health checks are mounted before Clerk so deployment probes never depend on auth.
 app.use("/api", healthRouter);
+// Keep the port reachable while startup migrations run, but do not allow
+// application requests through until the schema initialization has completed.
+app.use("/api", requireStartupReadiness);
 
 const configuredClerkHosts = getConfiguredClerkHosts();
 
