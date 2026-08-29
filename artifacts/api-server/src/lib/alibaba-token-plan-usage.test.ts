@@ -132,7 +132,11 @@ describe("Alibaba Token Plan quota telemetry", () => {
 
   it("warns rather than blocks normal requests when weekly headroom is low", () => {
     const assessment = assessAlibabaTokenPlanQuota(
-      { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 7 },
+      {
+        checkedAt: new Date().toISOString(),
+        weeklyRemainingPercent: 7,
+        fiveHourRemainingPercent: 80,
+      },
       false,
       env(),
     );
@@ -150,7 +154,11 @@ describe("Alibaba Token Plan quota telemetry", () => {
 
   it("lets operators tune the heavy-request floor", () => {
     const assessment = assessAlibabaTokenPlanQuota(
-      { checkedAt: new Date().toISOString(), weeklyRemainingPercent: 18 },
+      {
+        checkedAt: new Date().toISOString(),
+        weeklyRemainingPercent: 18,
+        fiveHourRemainingPercent: 80,
+      },
       true,
       env({
         ALIBABA_TOKEN_PLAN_WARN_REMAINING_PERCENT: "30",
