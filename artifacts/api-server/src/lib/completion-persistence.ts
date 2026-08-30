@@ -3,6 +3,8 @@ import { db } from "@workspace/db";
 import { assets, artifacts, conversations, messages } from "@workspace/db/schema";
 import type { ExtractedArtifact } from "./artifacts";
 import type { GeneratedFile } from "./file-generation";
+import type { GeneratedAsset } from "./specialist-capabilities";
+import { validateGeneratedAsset } from "./generated-assets";
 import { logger } from "./logger";
 
 export const DEFAULT_MAX_USER_GENERATED_FILE_BYTES = 50 * 1024 * 1024;
@@ -38,6 +40,7 @@ export interface PersistChatCompletionInput {
   sources: { title: string; url: string }[];
   audit?: { content: string; modelId: string };
   generatedFiles?: GeneratedFile[];
+  generatedAssets?: GeneratedAsset[];
   extractedArtifacts?: ExtractedArtifact[];
 }
 
@@ -79,7 +82,22 @@ export async function persistChatCompletion(
   options: { quotaBytes?: number } = {},
 ): Promise<PersistCompletionResult> {
   const generatedFiles = input.generatedFiles ?? [];
+  const generatedAssets = input.generatedAssets ?? [];
   for (const file of generatedFiles) validateGeneratedFile(file);
+  for (const asset of generatedAssets) {
+    try {
+      validateGeneratedAsset(asset);
+    } catch {
+      throw new Error("Generated specialist asset metadata is invalid");
+    }
+    if (
+      asset.capability !== "image-generate" &&
+      asset.capability !== "image-edit" &&
+      asset.capability !== "audio-synthesis"
+    ) {
+      throw new Error("Generated specialist asset metadata is invalid");
+    }
+  }
 
   const quotaBytes = options.quotaBytes ?? getGeneratedFileQuotaBytes();
   if (!Number.isSafeInteger(quotaBytes) || quotaBytes < 0) {
@@ -109,7 +127,10 @@ export async function persistChatCompletion(
     }
 
     let usedBytes = 0;
-    const hasCandidates = generatedFiles.length > 0 || (input.extractedArtifacts?.length ?? 0) > 0;
+    const hasCandidates =
+      generatedFiles.length > 0 ||
+      generatedAssets.length > 0 ||
+      (input.extractedArtifacts?.length ?? 0) > 0;
     if (quotaBytes > 0 && hasCandidates) {
       const binaryRows = await tx
         .select({ size: assets.size })
@@ -125,6 +146,7 @@ export async function persistChatCompletion(
 
     let quotaExceeded = false;
     const acceptedGeneratedFiles: GeneratedFile[] = [];
+    const acceptedGeneratedAssets: GeneratedAsset[] = [];
     const acceptedArtifacts: Array<{ sourceIndex: number; artifact: ExtractedArtifact }> = [];
 
     const acceptIfWithinQuota = (size: number): boolean => {
@@ -140,6 +162,9 @@ export async function persistChatCompletion(
     // text artifact blocks when the remaining storage budget is tight.
     for (const file of generatedFiles) {
       if (acceptIfWithinQuota(file.size)) acceptedGeneratedFiles.push(file);
+    }
+    for (const asset of generatedAssets) {
+      if (acceptIfWithinQuota(asset.size)) acceptedGeneratedAssets.push(asset);
     }
     for (const [sourceIndex, artifact] of (input.extractedArtifacts ?? [])
       .slice(0, MAX_ARTIFACTS_PER_MESSAGE)
@@ -175,11 +200,11 @@ export async function persistChatCompletion(
     }
 
     let persistedAssets: PersistedGeneratedAsset[] = [];
-    if (acceptedGeneratedFiles.length > 0) {
+    if (acceptedGeneratedFiles.length > 0 || acceptedGeneratedAssets.length > 0) {
       persistedAssets = await tx
         .insert(assets)
         .values(
-          acceptedGeneratedFiles.map((file) => ({
+          [...acceptedGeneratedFiles, ...acceptedGeneratedAssets].map((file) => ({
             conversationId: input.conversationId,
             messageId: assistantMessage.id,
             filename: file.filename,
@@ -232,6 +257,7 @@ export async function persistChatCompletion(
           quotaBytes,
           usedBytes,
           generatedFiles: generatedFiles.length,
+          generatedAssets: generatedAssets.length,
           persistedAssets: persistedAssets.length,
           extractedArtifacts: input.extractedArtifacts?.length ?? 0,
           persistedArtifacts: persistedArtifacts.length,

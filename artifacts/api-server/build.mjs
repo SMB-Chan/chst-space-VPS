@@ -14,13 +14,10 @@ async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
-  await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+  const sharedBuildOptions = {
     platform: "node",
     bundle: true,
     format: "esm",
-    outdir: distDir,
-    outExtension: { ".js": ".mjs" },
     logLevel: "info",
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
@@ -120,6 +117,20 @@ globalThis.__filename = __bannerUrl.fileURLToPath(import.meta.url);
 globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
+  };
+
+  await esbuild({
+    ...sharedBuildOptions,
+    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    outdir: distDir,
+    outExtension: { ".js": ".mjs" },
+  });
+
+  await esbuild({
+    ...sharedBuildOptions,
+    plugins: [],
+    entryPoints: [path.resolve(artifactDir, "src/lib/file-extraction-worker.ts")],
+    outfile: path.resolve(distDir, "file-extraction-worker.mjs"),
   });
 
   const fontsDir = path.resolve(artifactDir, "fonts");

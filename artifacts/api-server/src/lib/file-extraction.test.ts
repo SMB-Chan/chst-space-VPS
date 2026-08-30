@@ -2,6 +2,7 @@ import { Document, Packer, Paragraph, TextRun } from "docx";
 import { strToU8, zipSync } from "fflate";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { describe, expect, it, vi } from "vitest";
+import { transcribeAudio } from "./audio-transcription";
 import {
   extractBinaryText,
   extractDocxText,
@@ -11,6 +12,7 @@ import {
   extractZipText,
   FileExtractionError,
   resolveBinaryAttachments,
+  runIsolatedBinaryExtraction,
 } from "./file-extraction";
 import { modelContentFor, parseUserMessageContent, type BinaryAttachment } from "./message-content";
 
@@ -110,6 +112,22 @@ function zipBuffer(entries: Record<string, string | Uint8Array>): Buffer {
     data[name] = typeof content === "string" ? strToU8(content) : content;
   }
   return Buffer.from(zipSync(data));
+}
+
+function lieAboutZipEntrySize(buffer: Buffer, uncompressedSize: number): Buffer {
+  const forged = Buffer.from(buffer);
+  const signature = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
+  const centralDirectoryOffset = forged.indexOf(signature);
+  if (centralDirectoryOffset < 0) throw new Error("Central directory not found");
+  forged.writeUInt32LE(uncompressedSize, centralDirectoryOffset + 24);
+  return forged;
+}
+
+function audioDataUrl(): string {
+  return `data:audio/mpeg;base64,${Buffer.concat([
+    Buffer.from("ID3"),
+    Buffer.alloc(16),
+  ]).toString("base64")}`;
 }
 
 function makePptx(slides: Record<string, string>): Buffer {
@@ -264,6 +282,24 @@ describe("extractZipText", () => {
     expect(buffer.length).toBeLessThan(5 * 1024 * 1024);
     expect(() => extractZipText(buffer)).toThrow(/展開後サイズ/);
   }, 30_000);
+
+  it("stops on real expanded bytes when the central directory lies", () => {
+    const honest = zipBuffer({ "payload.txt": "x".repeat(4 * 1024 * 1024 + 1) });
+    const forged = lieAboutZipEntrySize(honest, 1);
+    expect(() => extractZipText(forged)).not.toThrow();
+    expect(extractZipText(forged)).toContain("展開サイズ上限");
+    expect(extractZipText(forged)).not.toContain("=== payload.txt ===");
+  });
+});
+
+describe("Office ZIP preflight", () => {
+  it("rejects a compressed DOCX bomb before Mammoth receives it", async () => {
+    const bomb = zipBuffer({
+      "[Content_Types].xml": "<Types/>",
+      "word/document.xml": "x".repeat(4 * 1024 * 1024 + 1),
+    });
+    await expect(extractDocxText(bomb)).rejects.toThrow(/エントリ.*4\.0MB/);
+  }, 30_000);
 });
 
 describe("extractBinaryText", () => {
@@ -318,5 +354,54 @@ describe("resolveBinaryAttachments", () => {
     expect(corrupted.hasBinaries).toBe(true);
     await expect(resolveBinaryAttachments(corrupted)).rejects.toThrow(FileExtractionError);
     await expect(resolveBinaryAttachments(parsed)).resolves.toBe(parsed);
+  });
+
+  it("aborts in-flight audio transcription when the response disconnects", async () => {
+    const controller = new AbortController();
+    vi.mocked(transcribeAudio).mockClear();
+    vi.mocked(transcribeAudio).mockImplementationOnce(
+      ({ signal }) =>
+        new Promise<string>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const parsed = parseUserMessageContent("文字起こし", [
+      { kind: "file", name: "memo.mp3", content: audioDataUrl(), isBase64: true },
+    ]);
+    const extraction = resolveBinaryAttachments(parsed, undefined, controller.signal);
+    controller.abort(new Error("Client disconnected"));
+    await expect(extraction).rejects.toThrow("Client disconnected");
+    expect(transcribeAudio).toHaveBeenCalledOnce();
+  });
+
+  it("stops before the next attachment after cancellation", async () => {
+    const controller = new AbortController();
+    vi.mocked(transcribeAudio).mockClear();
+    vi.mocked(transcribeAudio).mockImplementationOnce(async () => {
+      controller.abort(new Error("Client disconnected"));
+      return "first transcript";
+    });
+    vi.mocked(transcribeAudio).mockImplementationOnce(async () => "must not run");
+    const parsed = parseUserMessageContent("文字起こし", [
+      { kind: "file", name: "first.mp3", content: audioDataUrl(), isBase64: true },
+      { kind: "file", name: "second.mp3", content: audioDataUrl(), isBase64: true },
+    ]);
+    await expect(resolveBinaryAttachments(parsed, undefined, controller.signal)).rejects.toThrow(
+      "Client disconnected",
+    );
+    expect(transcribeAudio).toHaveBeenCalledOnce();
+  });
+});
+
+describe("isolated extraction cancellation", () => {
+  it("terminates a synchronous worker on timeout instead of leaving it running", async () => {
+    const workerUrl = new URL(
+      "data:text/javascript,import%20%7B%20parentPort%20%7D%20from%20%22node%3Aworker_threads%22%3B%20parentPort.on(%22message%22%2C%20()%20%3D%3E%20%7B%20while%20(true)%20%7B%7D%20%7D)%3B",
+    );
+    const attachment = binaryAttachment("stuck.pdf", Buffer.from("%PDF-1.7"), "pdf");
+    const signal = AbortSignal.timeout(30);
+    const started = Date.now();
+    await expect(runIsolatedBinaryExtraction(attachment, signal, workerUrl)).rejects.toBeDefined();
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

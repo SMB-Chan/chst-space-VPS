@@ -69,6 +69,57 @@ BEGIN
 END $$;
 `.trim();
 
+export const ENSURE_ALIBABA_VIDEO_JOBS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS alibaba_video_jobs (
+  id serial PRIMARY KEY,
+  user_id text NOT NULL,
+  conversation_id integer NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  request_message_id integer NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  result_message_id integer REFERENCES messages(id) ON DELETE SET NULL,
+  asset_id integer REFERENCES assets(id) ON DELETE SET NULL,
+  provider_task_id text NOT NULL,
+  provider_request_id text,
+  idempotency_key text,
+  model_id text NOT NULL,
+  mode text NOT NULL,
+  status text NOT NULL DEFAULT 'PENDING',
+  failure_code text,
+  failure_message text,
+  attempt_count integer NOT NULL DEFAULT 0,
+  next_poll_at timestamptz,
+  last_polled_at timestamptz,
+  lease_owner text,
+  lease_expires_at timestamptz,
+  provider_expires_at timestamptz NOT NULL,
+  completed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS alibaba_video_jobs_provider_task_id_uidx
+  ON alibaba_video_jobs(provider_task_id);
+ALTER TABLE alibaba_video_jobs
+  ADD COLUMN IF NOT EXISTS idempotency_key text;
+UPDATE alibaba_video_jobs
+SET idempotency_key = 'legacy-' || id::text
+WHERE idempotency_key IS NULL;
+ALTER TABLE alibaba_video_jobs ALTER COLUMN idempotency_key SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS alibaba_video_jobs_user_idempotency_key_uidx
+  ON alibaba_video_jobs(user_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS alibaba_video_jobs_user_created_at_idx
+  ON alibaba_video_jobs(user_id, created_at);
+CREATE INDEX IF NOT EXISTS alibaba_video_jobs_due_idx
+  ON alibaba_video_jobs(status, next_poll_at);
+CREATE INDEX IF NOT EXISTS alibaba_video_jobs_conversation_idx
+  ON alibaba_video_jobs(conversation_id);
+
+-- A crashed worker can leave a lease behind. Leases are deliberately finite;
+-- clearing already-expired leases at startup makes due work immediately claimable.
+UPDATE alibaba_video_jobs
+SET lease_owner = NULL,
+    lease_expires_at = NULL
+WHERE lease_expires_at IS NOT NULL AND lease_expires_at <= now();
+`.trim();
+
 export const ENSURE_AI_USAGE_SCHEMA_SQL = `
 BEGIN;
 
@@ -140,6 +191,12 @@ export async function ensureAssetsSchema(
   await query(ENSURE_ASSETS_SCHEMA_SQL);
 }
 
+export async function ensureAlibabaVideoJobsSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_ALIBABA_VIDEO_JOBS_SCHEMA_SQL);
+}
+
 export async function ensureAiUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -150,5 +207,6 @@ export async function ensureChatSchema(): Promise<void> {
   const { db } = await import("@workspace/db");
   await ensureMessageSchema((sql) => db.execute(sql));
   await ensureAssetsSchema((sql) => db.execute(sql));
+  await ensureAlibabaVideoJobsSchema((sql) => db.execute(sql));
   await ensureAiUsageSchema((sql) => db.execute(sql));
 }

@@ -6,6 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './capabilityDescriptor';
+export * from './capabilityDescriptorId';
+export * from './capabilityDescriptorStatus';
+export * from './capabilityModel';
+export * from './capabilityModelCapabilitiesItem';
+export * from './capabilityModelProvider';
+export * from './capabilityRegistry';
 export * from './healthStatus';
 export * from './openaiArtifact';
 export * from './openaiAttachment';
@@ -14,6 +21,7 @@ export * from './openaiConversation';
 export * from './openaiConversationInput';
 export * from './openaiConversationWithMessages';
 export * from './openaiError';
+export * from './openaiGeneratedAsset';
 export * from './openaiMessage';
 export * from './openaiMessageDeleteInput';
 export * from './openaiMessageInput';
@@ -24,6 +32,20 @@ export * from './openaiModel';
 export * from './openaiModelProvider';
 export * from './openaiModelReasoning';
 export * from './openaiSource';
+export * from './openaiVideoJob';
+export * from './openaiVideoJobAsset';
+export * from './openaiVideoJobAssetMimeType';
+export * from './openaiVideoJobInput';
+export * from './openaiVideoJobInputMode';
+export * from './openaiVideoJobInputRatio';
+export * from './openaiVideoJobInputResolution';
+export * from './openaiVideoJobMode';
+export * from './openaiVideoJobStatus';
+export * from './realtimeSession';
+export * from './realtimeSessionInput';
+export * from './realtimeSessionMaxSessionSeconds';
+export * from './realtimeSessionModelId';
+export * from './realtimeSessionWebsocketPath';
 export * from './sendOpenaiEphemeralMessageAuditReasoning';
 export * from './sendOpenaiEphemeralMessageParams';
 export * from './sendOpenaiEphemeralMessageReasoning';

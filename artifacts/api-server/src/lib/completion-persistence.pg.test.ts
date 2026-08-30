@@ -216,4 +216,45 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     expect(await tableCount("assets", conversationId)).toBe(1);
     expect(await tableCount("artifacts", conversationId)).toBe(1);
   });
+
+  it("persists generated audio with metadata for authenticated playback", async () => {
+    const user = userId("audio");
+    const conversationId = await createConversation(user, "audio");
+    const buffer = Buffer.from("ID3-audio");
+
+    const result = await persistChatCompletion(
+      {
+        userId: user,
+        conversationId,
+        userContent: "read this aloud",
+        assistantContent: "音声を生成しました。",
+        modelId: "qwen3.8-flash",
+        sources: [],
+        generatedAssets: [
+          {
+            buffer,
+            filename: "alibaba-qwen-audio.mp3",
+            mimeType: "audio/mpeg",
+            size: buffer.length,
+            capability: "audio-synthesis",
+          },
+        ],
+      },
+      { quotaBytes: 100 },
+    );
+
+    expect(result.assets).toEqual([
+      {
+        id: expect.any(Number),
+        filename: "alibaba-qwen-audio.mp3",
+        mimeType: "audio/mpeg",
+        size: buffer.length,
+      },
+    ]);
+    const row = await pool.query<{ mime_type: string; size: number }>(
+      "SELECT mime_type, size FROM assets WHERE conversation_id = $1",
+      [conversationId],
+    );
+    expect(row.rows).toEqual([{ mime_type: "audio/mpeg", size: buffer.length }]);
+  });
 });

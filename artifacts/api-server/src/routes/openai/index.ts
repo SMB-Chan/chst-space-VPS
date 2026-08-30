@@ -1,9 +1,11 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { db } from "@workspace/db";
-import { conversations, messages, artifacts, assets } from "@workspace/db/schema";
+import { conversations, messages, artifacts, assets, alibabaVideoJobs } from "@workspace/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import {
   CreateOpenaiConversationBody,
+  CreateOpenaiVideoJobBody,
   DeleteOpenaiMessagesBody,
   SendOpenaiMessageBody,
   UpdateOpenaiConversationBody,
@@ -16,7 +18,15 @@ import {
   parseReasoningLevel,
   getClientForModel,
 } from "../../lib/ai-clients";
-import { streamChatReply, withTimeout } from "../../lib/chat-stream";
+import {
+  getAvailableChatModels,
+  getCapabilityRegistryWithAvailability,
+} from "../../lib/specialist-capabilities";
+import {
+  createResponseCancellation,
+  streamChatReply,
+  withTimeout,
+} from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
 import { parseTranslationMode } from "../../lib/translation";
 import { logger } from "../../lib/logger";
@@ -44,6 +54,24 @@ import {
   type IncomingAttachment,
   type ParsedUserMessageContent,
 } from "../../lib/message-content";
+import {
+  AlibabaRealtimeError,
+  createAlibabaRealtimeSession,
+} from "../../lib/alibaba-realtime";
+import {
+  ALIBABA_CAPABILITY_DEFAULTS,
+  modelHasAlibabaCapability,
+} from "../../lib/alibaba-capabilities";
+import {
+  AlibabaVideoError,
+  cancelAlibabaVideoTask,
+  submitAlibabaVideoTask,
+  type AlibabaVideoMode,
+} from "../../lib/alibaba-video";
+import {
+  alibabaVideoProviderExpiresAt,
+  canCancelAlibabaVideoStatus,
+} from "../../lib/alibaba-video-job-state";
 
 const router = Router();
 
@@ -127,11 +155,31 @@ async function getHydratedMessages(conversationId: number, userId: string) {
     .from(artifacts)
     .where(and(eq(artifacts.conversationId, conversationId), eq(artifacts.userId, userId)))
     .orderBy(asc(artifacts.id));
+  const generatedAssetRows = await db
+    .select({
+      id: assets.id,
+      messageId: assets.messageId,
+      filename: assets.filename,
+      mimeType: assets.mimeType,
+      size: assets.size,
+    })
+    .from(assets)
+    .where(eq(assets.conversationId, conversationId))
+    .orderBy(asc(assets.id));
 
   return messageRows.map((message) => ({
     ...message,
     sources: parseStoredSources(message.sources),
     assetIds: parseStoredAssetIds(message.assetIds),
+    generatedAssets: generatedAssetRows
+      .filter((asset) => asset.messageId === message.id)
+      .map((asset) => ({
+        id: asset.id,
+        filename: asset.filename,
+        mimeType: asset.mimeType,
+        size: asset.size,
+        downloadUrl: `/api/openai/assets/${asset.id}`,
+      })),
     artifacts: artifactRows
       .filter((artifact) => artifact.messageId === message.id)
       .map(({ messageId: _messageId, ...artifact }) => ({
@@ -167,15 +215,17 @@ function extractionPublicError(err: unknown): string {
 async function resolveMessageBinaries(
   message: ParsedUserMessageContent,
   res: Response,
+  parentSignal?: AbortSignal,
 ): Promise<ParsedUserMessageContent> {
   if (!message.hasBinaries) return message;
+  if (parentSignal?.aborted) throw parentSignal.reason ?? new Error("Attachment extraction cancelled");
   if (!res.headersSent) {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders?.();
   }
-  if (!res.writableEnded) {
+  if (!parentSignal?.aborted && !res.writableEnded) {
     res.write(`data: ${JSON.stringify({ status: "reading-files" })}\n\n`);
   }
   return withTimeout(
@@ -183,7 +233,7 @@ async function resolveMessageBinaries(
       resolveBinaryAttachments(
         message,
         (name) => {
-          if (!res.writableEnded) {
+          if (!parentSignal?.aborted && !res.writableEnded) {
             res.write(`data: ${JSON.stringify({ status: "reading-files", name })}\n\n`);
           }
         },
@@ -191,13 +241,413 @@ async function resolveMessageBinaries(
       ),
     FILE_EXTRACTION_TIMEOUT_MS,
     "File extraction",
+    parentSignal,
   );
+}
+
+type VideoJobStatus =
+  | "SUBMITTING"
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "CANCELED"
+  | "UNKNOWN";
+
+function videoModelForMode(mode: AlibabaVideoMode, modelId?: string): string {
+  const capability = `video.${mode}` as "video.t2v" | "video.i2v" | "video.r2v";
+  const selected = modelId?.trim() || ALIBABA_CAPABILITY_DEFAULTS[capability];
+  if (!selected || !modelHasAlibabaCapability(selected, capability)) {
+    throw new AlibabaVideoError(
+      `Model ${selected || "(empty)"} does not support ${capability}`,
+      "指定された動画モデルはこの処理に対応していません。",
+    );
+  }
+  return selected;
+}
+
+function videoJobPublicMessage(status: string): string {
+  switch (status) {
+    case "SUBMITTING":
+      return "動画生成を開始しています。";
+    case "PENDING":
+      return "動画生成の順番を待っています。";
+    case "RUNNING":
+      return "動画を生成しています。";
+    case "SUCCEEDED":
+      return "動画生成が完了しました。";
+    case "CANCELED":
+      return "動画生成をキャンセルしました。";
+    case "FAILED":
+      return "動画生成に失敗しました。";
+    default:
+      return "動画生成の状態を確認しています。";
+  }
+}
+
+async function toPublicVideoJob(job: typeof alibabaVideoJobs.$inferSelect) {
+  let resultAsset: {
+    id: number;
+    filename: string;
+    mimeType: string;
+    size: number;
+    downloadUrl: string;
+  } | null = null;
+  if (job.assetId) {
+    const [asset] = await db
+      .select({
+        id: assets.id,
+        filename: assets.filename,
+        mimeType: assets.mimeType,
+        size: assets.size,
+      })
+      .from(assets)
+      .where(and(eq(assets.id, job.assetId), eq(assets.conversationId, job.conversationId)))
+      .limit(1);
+    if (asset) resultAsset = { ...asset, downloadUrl: `/api/openai/assets/${asset.id}` };
+  }
+  return {
+    id: job.id,
+    conversationId: job.conversationId,
+    requestMessageId: job.requestMessageId,
+    modelId: job.modelId,
+    mode: job.mode,
+    status: job.status as VideoJobStatus,
+    failureCode: job.failureCode,
+    failureMessage: job.failureMessage,
+    resultAsset,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.completedAt,
+  };
+}
+
+async function getOwnedVideoJob(id: number, userId: string) {
+  const [job] = await db
+    .select()
+    .from(alibabaVideoJobs)
+    .where(and(eq(alibabaVideoJobs.id, id), eq(alibabaVideoJobs.userId, userId)))
+    .limit(1);
+  return job;
+}
+
+async function markVideoSubmissionFailed(jobId: number, userId: string, error: unknown): Promise<void> {
+  await db
+    .update(alibabaVideoJobs)
+    .set({
+      status: "FAILED",
+      failureCode: "PROVIDER_SUBMISSION_FAILED",
+      failureMessage: error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000),
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(alibabaVideoJobs.id, jobId), eq(alibabaVideoJobs.userId, userId)));
 }
 
 router.use("/openai/artifacts", requireAuth);
 
-router.get("/openai/models", (_req, res) => {
-  res.json(AVAILABLE_MODELS);
+router.get("/openai/models", async (_req, res) => {
+  res.json(await getAvailableChatModels());
+});
+
+router.get("/openai/capabilities", async (_req, res) => {
+  res.json(await getCapabilityRegistryWithAvailability());
+});
+
+router.post("/openai/realtime/session", requireAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const modelId = typeof req.body?.modelId === "string" ? req.body.modelId.trim() : "";
+    const rawConversationId = req.body?.conversationId;
+    const conversationId = rawConversationId === undefined
+      ? undefined
+      : typeof rawConversationId === "number" && Number.isSafeInteger(rawConversationId) && rawConversationId > 0
+        ? rawConversationId
+        : null;
+    if (conversationId === null) {
+      res.status(400).json({ error: "会話IDが不正です。" });
+      return;
+    }
+    if (conversationId !== undefined) {
+      const [conversation] = await db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+        .limit(1);
+      if (!conversation) {
+        res.status(404).json({ error: "Conversation not found" });
+        return;
+      }
+    }
+    const session = createAlibabaRealtimeSession({ userId, modelId, conversationId });
+    res.setHeader("Cache-Control", "no-store");
+    res.json(session);
+  } catch (error) {
+    if (error instanceof AlibabaRealtimeError) {
+      res.status(error.retryable ? 503 : 400).json({ error: error.publicMessage });
+      return;
+    }
+    req.log.error({ err: error }, "Failed to create realtime session");
+    res.status(500).json({ error: "リアルタイム音声を開始できませんでした。" });
+  }
+});
+
+router.post("/openai/conversations/:conversationId/video-jobs", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const conversationId = parsePositiveInt(req.params.conversationId);
+  if (conversationId === undefined) {
+    res.status(400).json({ error: "Invalid conversation ID" });
+    return;
+  }
+
+  const parsed = CreateOpenaiVideoJobBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "動画の入力または実行確認が不正です。" });
+    return;
+  }
+
+  const input = parsed.data;
+  const mode = input.mode as AlibabaVideoMode;
+  let modelId: string;
+  try {
+    modelId = videoModelForMode(mode, input.modelId);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof AlibabaVideoError ? error.publicMessage : "指定された動画モデルは利用できません。",
+    });
+    return;
+  }
+
+  let job: typeof alibabaVideoJobs.$inferSelect;
+  try {
+    const now = new Date();
+    job = await db.transaction(async (tx) => {
+      const [conversation] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+        .limit(1);
+      if (!conversation) {
+        const error = new Error("Conversation not found");
+        error.name = "ConversationNotFound";
+        throw error;
+      }
+
+      const [requestMessage] = await tx
+        .insert(messages)
+        .values({
+          conversationId,
+          role: "user",
+          content: [
+            input.prompt.trim(),
+            "",
+            `動画生成: ${mode.toUpperCase()}`,
+            input.referenceImages?.length
+              ? `参照画像: ${input.referenceImages.length}枚`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        })
+        .returning({ id: messages.id });
+      if (!requestMessage) throw new Error("Video request message was not created");
+
+      const [created] = await tx
+        .insert(alibabaVideoJobs)
+        .values({
+          userId,
+          conversationId,
+          requestMessageId: requestMessage.id,
+          // Reserve the idempotency key before calling the provider. The
+          // placeholder is never polled by the worker and is replaced below.
+          providerTaskId: `pending-${randomUUID()}`,
+          idempotencyKey: input.idempotencyKey,
+          modelId,
+          mode,
+          status: "SUBMITTING",
+          providerExpiresAt: alibabaVideoProviderExpiresAt(now),
+          updatedAt: now,
+        })
+        .returning();
+      if (!created) throw new Error("Video job was not created");
+      return created;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "ConversationNotFound") {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    // A concurrent retry with the same key returns the already-reserved job.
+    if ((error as { code?: unknown })?.code === "23505") {
+      const existing = await db
+        .select()
+        .from(alibabaVideoJobs)
+        .where(
+          and(
+            eq(alibabaVideoJobs.userId, userId),
+            eq(alibabaVideoJobs.idempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1);
+      if (existing[0]) {
+        res.status(200).json(await toPublicVideoJob(existing[0]));
+        return;
+      }
+    }
+    req.log.error({ err: error, conversationId }, "Failed to reserve Alibaba video job");
+    res.status(500).json({ error: "動画ジョブを準備できませんでした。" });
+    return;
+  }
+
+  let submitted;
+  try {
+    submitted = await submitAlibabaVideoTask({
+      mode,
+      prompt: input.prompt,
+      modelId,
+      referenceImages: input.referenceImages,
+      resolution: input.resolution,
+      ratio: input.ratio,
+      duration: input.duration,
+      watermark: input.watermark,
+      seed: input.seed,
+    });
+  } catch (error) {
+    try {
+      await markVideoSubmissionFailed(job.id, userId, error);
+    } catch (persistError) {
+      req.log.error(
+        { err: persistError, jobId: job.id },
+        "Failed to record Alibaba video submission failure",
+      );
+    }
+    const publicMessage =
+      error instanceof AlibabaVideoError
+        ? error.publicMessage
+        : "動画生成サービスへの送信に失敗しました。";
+    res.status(503).json({ error: publicMessage });
+    return;
+  }
+
+  let persisted: typeof alibabaVideoJobs.$inferSelect | undefined;
+  let persistenceError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const [updated] = await db
+        .update(alibabaVideoJobs)
+        .set({
+          providerTaskId: submitted.taskId,
+          providerRequestId: submitted.requestId,
+          status: submitted.status,
+          nextPollAt: submitted.status === "PENDING" || submitted.status === "RUNNING" ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(alibabaVideoJobs.id, job.id), eq(alibabaVideoJobs.userId, userId)))
+        .returning();
+      if (updated) {
+        persisted = updated;
+        break;
+      }
+      persistenceError = new Error("Video job reservation disappeared before provider task was linked");
+    } catch (error) {
+      persistenceError = error;
+    }
+  }
+  if (!persisted) {
+    // Never submit again: the provider task was accepted, but the durable
+    // link needs operational repair/retry rather than another billable call.
+    req.log.error(
+      { err: persistenceError, jobId: job.id, providerTaskId: submitted.taskId },
+      "Alibaba video provider task accepted but could not be linked to job",
+    );
+    res.status(503).json({
+      error: "動画生成は受け付けられましたが、状態の保存に時間がかかっています。再送信せず、しばらくしてから履歴を確認してください。",
+    });
+    return;
+  }
+
+  res.status(201).json(await toPublicVideoJob(persisted));
+});
+
+router.get("/openai/video-jobs/:jobId", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const jobId = parsePositiveInt(req.params.jobId);
+  if (jobId === undefined) {
+    res.status(400).json({ error: "Invalid video job id" });
+    return;
+  }
+  try {
+    const job = await getOwnedVideoJob(jobId, userId);
+    if (!job) {
+      res.status(404).json({ error: "Video job not found" });
+      return;
+    }
+    res.json(await toPublicVideoJob(job));
+  } catch (error) {
+    req.log.error({ err: error, jobId }, "Failed to get Alibaba video job");
+    res.status(500).json({ error: "動画ジョブの状態を取得できませんでした。" });
+  }
+});
+
+router.delete("/openai/video-jobs/:jobId", requireAuth, async (req, res) => {
+  const userId = getUserId(req);
+  const jobId = parsePositiveInt(req.params.jobId);
+  if (jobId === undefined) {
+    res.status(400).json({ error: "Invalid video job id" });
+    return;
+  }
+  try {
+    const job = await getOwnedVideoJob(jobId, userId);
+    if (!job) {
+      res.status(404).json({ error: "Video job not found" });
+      return;
+    }
+    if (!canCancelAlibabaVideoStatus(job.status as "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "UNKNOWN")) {
+      res.status(409).json({ error: "この動画ジョブはすでにキャンセルできません。" });
+      return;
+    }
+
+    let canceled;
+    try {
+      canceled = await cancelAlibabaVideoTask(job.providerTaskId);
+    } catch (error) {
+      res.status(503).json({
+        error: error instanceof AlibabaVideoError ? error.publicMessage : "動画生成のキャンセルに失敗しました。",
+      });
+      return;
+    }
+
+    const [updated] = await db
+      .update(alibabaVideoJobs)
+      .set({
+        status: canceled.status === "CANCELED" ? "CANCELED" : job.status,
+        providerRequestId: canceled.requestId ?? job.providerRequestId,
+        completedAt: canceled.status === "CANCELED" ? new Date() : job.completedAt,
+        nextPollAt: canceled.status === "CANCELED" ? null : job.nextPollAt,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(alibabaVideoJobs.id, jobId),
+          eq(alibabaVideoJobs.userId, userId),
+          eq(alibabaVideoJobs.status, "PENDING"),
+        ),
+      )
+      .returning();
+    if (!updated) {
+      const current = await getOwnedVideoJob(jobId, userId);
+      if (current?.status === "CANCELED" || current?.status === "FAILED" || current?.status === "SUCCEEDED") {
+        res.json(await toPublicVideoJob(current));
+        return;
+      }
+      res.status(409).json({ error: "動画ジョブの状態が変わったためキャンセルできませんでした。" });
+      return;
+    }
+    res.json(await toPublicVideoJob(updated));
+  } catch (error) {
+    req.log.error({ err: error, jobId }, "Failed to cancel Alibaba video job");
+    res.status(500).json({ error: "動画ジョブをキャンセルできませんでした。" });
+  }
 });
 
 router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) => {
@@ -410,6 +860,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
     return;
   }
 
+  const cancellation = createResponseCancellation(res);
   try {
     const [conversation] = await db
       .select()
@@ -463,9 +914,18 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       return;
     }
 
+    const audioAttachmentsForTools = newMessage.binaries
+      .filter((attachment) => attachment.family === "audio")
+      .map((attachment) => ({
+        name: attachment.name,
+        buffer: attachment.buffer,
+        mime: attachment.mime,
+      }));
+
     try {
-      newMessage = await resolveMessageBinaries(newMessage, res);
+      newMessage = await resolveMessageBinaries(newMessage, res, cancellation.signal);
     } catch (err) {
+      if (cancellation.signal.aborted) return;
       logger.warn({ err, conversationId }, "Attachment extraction failed");
       const message = extractionPublicError(err);
       if (!res.headersSent) {
@@ -477,11 +937,13 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       return;
     }
 
+    if (cancellation.signal.aborted) return;
     const history = await db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(asc(messages.createdAt), asc(messages.id));
+    if (cancellation.signal.aborted) return;
 
     const historicalImageBudget = createHistoricalImageBudget();
     const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
@@ -521,6 +983,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         ? newMessage.modelText
         : modelContentFor(newMessage, supportsVision),
     });
+    if (cancellation.signal.aborted) return;
 
     const { client, provider } = getClientForModel(modelId);
 
@@ -544,9 +1007,12 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       visionBridgeImages: useVisionBridge
         ? newMessage.images.map((image) => image.content)
         : undefined,
+      imageAttachmentsForTools: newMessage.images,
+      audioAttachmentsForTools,
       translationMode,
       conversationId,
       requestedFileFormat,
+      cancellation,
       publicAiError,
       onComplete: async ({
         content,
@@ -554,7 +1020,9 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
         audit,
         artifacts: extractedArtifacts,
         generatedFiles,
+          generatedAssets,
       }) => {
+        if (cancellation.signal.aborted) return;
         const persisted = await persistChatCompletion({
           userId,
           conversationId,
@@ -564,6 +1032,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
           sources,
           audit,
           generatedFiles,
+           generatedAssets,
           extractedArtifacts,
         });
         return {
@@ -580,6 +1049,8 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
     } else if (!res.writableEnded) {
       res.end();
     }
+  } finally {
+    cancellation.dispose();
   }
 });
 
@@ -611,6 +1082,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     return;
   }
 
+  const cancellation = createResponseCancellation(res);
   try {
     if (parsed.data.fileFormat) {
       res.status(400).json({
@@ -659,9 +1131,18 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
+    const audioAttachmentsForTools = newMessage.binaries
+      .filter((attachment) => attachment.family === "audio")
+      .map((attachment) => ({
+        name: attachment.name,
+        buffer: attachment.buffer,
+        mime: attachment.mime,
+      }));
+
     try {
-      newMessage = await resolveMessageBinaries(newMessage, res);
+      newMessage = await resolveMessageBinaries(newMessage, res, cancellation.signal);
     } catch (err) {
+      if (cancellation.signal.aborted) return;
       logger.warn({ err }, "Attachment extraction failed");
       const message = extractionPublicError(err);
       if (!res.headersSent) {
@@ -673,6 +1154,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
+    if (cancellation.signal.aborted) return;
     const historicalImageBudget = createHistoricalImageBudget();
     const historicalChatMessages: { role: "user" | "assistant"; content: unknown }[] = [];
     for (const hist of [...(parsed.data.history ?? [])].reverse()) {
@@ -684,6 +1166,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
               hist.attachments as IncomingAttachment[] | undefined,
             ),
             res,
+            cancellation.signal,
           );
           historicalChatMessages.push({
             role: "user",
@@ -694,6 +1177,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
             ),
           });
         } catch (error) {
+          if (cancellation.signal.aborted) return;
           logger.warn(
             { err: error },
             "Private-session history attachment could not be reconstructed; omitting its payload",
@@ -715,6 +1199,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
         ? newMessage.modelText
         : modelContentFor(newMessage, supportsVision),
     });
+    if (cancellation.signal.aborted) return;
 
     const { client, provider } = getClientForModel(modelId);
     await streamChatReply({
@@ -737,8 +1222,11 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       visionBridgeImages: useVisionBridge
         ? newMessage.images.map((image) => image.content)
         : undefined,
+      imageAttachmentsForTools: newMessage.images,
+      audioAttachmentsForTools,
       translationMode,
       includeArtifactContent: true,
+      cancellation,
       publicAiError,
     });
   } catch (err) {
@@ -748,6 +1236,8 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     } else if (!res.writableEnded) {
       res.end();
     }
+  } finally {
+    cancellation.dispose();
   }
 });
 
@@ -793,7 +1283,11 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
     res.setHeader("Content-Type", asset.mimeType);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
+      asset.mimeType.startsWith("audio/") ||
+        asset.mimeType.startsWith("image/") ||
+        asset.mimeType.startsWith("video/")
+        ? "inline"
+        : `attachment; filename*=UTF-8''${encodeURIComponent(asset.filename)}`,
     );
     res.setHeader("Content-Length", String(buffer.length));
     res.setHeader("Cache-Control", "private, no-store");

@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState } from "react";
-import { OpenaiMessage, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
+import { OpenaiMessage, OpenaiVideoJob, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square } from "lucide-react";
+import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles, Volume2, Video, Ban } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -39,6 +39,13 @@ type DisplayMessage = OpenaiMessage & {
   auditModelId?: string | null;
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
+  generatedAssets?: {
+    id: number;
+    filename: string;
+    mimeType: string;
+    size: number;
+    downloadUrl?: string;
+  }[] | null;
 };
 
 function normalizeSources(value: unknown): { title: string; url: string }[] | null {
@@ -73,11 +80,129 @@ interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
   streamingPhase?: StreamingPhase;
+  specialistProgress?: { capability: string; phase: string; message?: string } | null;
+  streamingFiles?: { id: number; filename: string; mimeType: string }[];
   streamingAudit?: string;
   isStreaming?: boolean;
   onStop?: () => void;
   streamingWarning?: string | null;
   onDismissWarning?: () => void;
+  videoJob?: OpenaiVideoJob | null;
+  onCancelVideo?: () => void;
+}
+
+function VideoJobCard({
+  job,
+  onCancel,
+}: {
+  job: OpenaiVideoJob;
+  onCancel?: () => void;
+}) {
+  const busy = job.status === "SUBMITTING" || job.status === "PENDING" || job.status === "RUNNING";
+  const statusLabel: Record<OpenaiVideoJob["status"], string> = {
+    SUBMITTING: "送信中",
+    PENDING: "待機中",
+    RUNNING: "生成中",
+    SUCCEEDED: "完了",
+    FAILED: "失敗",
+    CANCELED: "キャンセル済み",
+    UNKNOWN: "不明",
+  };
+  const asset = job.resultAsset;
+  return (
+    <div className={cn(
+      "rounded-2xl border px-4 py-4 shadow-sm",
+      busy
+        ? "border-violet-500/30 bg-violet-500/5"
+        : job.status === "FAILED" || job.status === "UNKNOWN"
+          ? "border-amber-500/30 bg-amber-500/5"
+          : "border-border bg-card",
+    )}>
+      <div className="flex items-center gap-2 text-sm">
+        {busy ? <Loader2 className="h-4 w-4 animate-spin text-violet-500" /> : <Video className="h-4 w-4 text-violet-500" />}
+        <span className="font-medium">HappyHorse 動画生成</span>
+        <span className="text-xs text-muted-foreground">{job.mode.toUpperCase()}・{statusLabel[job.status]}</span>
+        {job.status === "PENDING" && onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/20"
+          >
+            <Ban className="h-3 w-3" /> キャンセル
+          </button>
+        ) : null}
+      </div>
+      {busy ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {job.status === "SUBMITTING" ? "生成サービスに送信しています。" : job.status === "PENDING" ? "生成キューで順番を待っています。" : "動画を生成しています。完了するとここに表示されます。"}
+        </p>
+      ) : null}
+      {job.failureMessage ? (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{job.failureMessage}</p>
+      ) : null}
+      {asset ? (
+        <div className="mt-3 grid gap-2">
+          <video
+            controls
+            preload="metadata"
+            src={asset.downloadUrl || getGetOpenaiAssetUrl(asset.id)}
+            className="w-full max-w-2xl rounded-xl border border-border bg-black"
+            aria-label={`生成動画 ${asset.filename}`}
+          />
+          <a
+            href={asset.downloadUrl || getGetOpenaiAssetUrl(asset.id)}
+            download={asset.filename}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-primary/40 hover:bg-primary/5"
+          >
+            <Download className="h-4 w-4 text-primary" />
+            <span className="max-w-[240px] truncate">{asset.filename}</span>
+          </a>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SpecialistProgress({
+  progress,
+}: {
+  progress: { capability: string; phase: string; message?: string };
+}) {
+  const labels: Record<string, string> = {
+    generate_image: "画像生成",
+    edit_image: "画像編集",
+    transcribe_audio: "音声認識",
+    synthesize_speech: "音声合成",
+  };
+  const label = labels[progress.capability] ?? "専門能力";
+  const failed = progress.phase === "failed";
+  const completed = progress.phase === "completed";
+  const phaseLabel =
+    progress.phase === "planned"
+      ? "準備中"
+      : progress.phase === "running"
+        ? "実行中"
+        : completed
+          ? "完了"
+          : "失敗";
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+        failed
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+      )}
+    >
+      {failed || completed ? (
+        <Sparkles className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+      )}
+      <span className="font-medium">{label}</span>
+      <span className="text-current/80">{progress.message ?? phaseLabel}</span>
+    </div>
+  );
 }
 
 function PhaseDots() {
@@ -126,40 +251,88 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
   return (
     <div className="w-full grid gap-2">
       {artifacts.map((artifact, index) => (
-        <a
-          key={artifact.id ?? `${artifact.filename}-${index}`}
-          href={artifact.downloadUrl}
-          download={artifact.filename}
-          className={cn(
-            "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
-            artifact.downloadUrl ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-70 pointer-events-none",
-          )}
-        >
-          <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <FileText className="w-[1.125rem] h-[1.125rem]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium truncate">{artifact.filename}</div>
-            <div className="text-[11px] text-muted-foreground truncate">{artifact.mime} ・ {formatBytes(artifact.size)}</div>
-          </div>
-          <Download className="w-4 h-4 text-muted-foreground shrink-0" />
-        </a>
+        <div key={artifact.id ?? `${artifact.filename}-${index}`} className="grid gap-2">
+          {artifact.mime.startsWith("image/") && artifact.downloadUrl ? (
+            <img src={artifact.downloadUrl} alt={artifact.filename} className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain" />
+          ) : null}
+          {artifact.mime.startsWith("audio/") && artifact.downloadUrl ? (
+            <audio
+              controls
+              preload="metadata"
+              src={artifact.downloadUrl}
+              className="w-full max-w-xl"
+              aria-label={`音声 ${artifact.filename}`}
+            />
+          ) : null}
+          <a
+            href={artifact.downloadUrl}
+            download={artifact.filename}
+            className={cn(
+              "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
+              artifact.downloadUrl ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-70 pointer-events-none",
+            )}
+          >
+            <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              {artifact.mime.startsWith("audio/") ? (
+                <Volume2 className="w-[1.125rem] h-[1.125rem]" />
+              ) : (
+                <FileText className="w-[1.125rem] h-[1.125rem]" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium truncate">{artifact.filename}</div>
+              <div className="text-[11px] text-muted-foreground truncate">{artifact.mime} ・ {formatBytes(artifact.size)}</div>
+            </div>
+            <Download className="w-4 h-4 text-muted-foreground shrink-0" />
+          </a>
+        </div>
       ))}
     </div>
   );
 }
 
-function FileDownloadButton({ assetId }: { assetId: number }) {
+function FileDownloadButton({
+  assetId,
+  filename,
+  mimeType,
+}: {
+  assetId: number;
+  filename?: string;
+  mimeType?: string;
+}) {
+  const downloadUrl = getGetOpenaiAssetUrl(assetId);
   return (
-    <a
-      href={getGetOpenaiAssetUrl(assetId)}
-      download
-      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
-    >
-      <FileText className="w-4 h-4 text-primary" />
-      <span className="font-medium truncate max-w-[180px]">生成ファイルをダウンロード</span>
-      <Download className="w-3.5 h-3.5 text-muted-foreground" />
-    </a>
+    <div className="grid gap-2">
+      {mimeType?.startsWith("image/") ? (
+        <img
+          src={downloadUrl}
+          alt={filename ?? "生成画像"}
+          className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain"
+        />
+      ) : null}
+      {mimeType?.startsWith("audio/") ? (
+        <audio
+          controls
+          preload="metadata"
+          src={downloadUrl}
+          className="w-full max-w-xl"
+          aria-label={`音声 ${filename ?? "生成音声"}`}
+        />
+      ) : null}
+      <a
+        href={downloadUrl}
+        download={filename}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
+      >
+        {mimeType?.startsWith("audio/") ? (
+          <Volume2 className="w-4 h-4 text-primary" />
+        ) : (
+          <FileText className="w-4 h-4 text-primary" />
+        )}
+        <span className="font-medium truncate max-w-[180px]">{filename ?? "生成ファイルをダウンロード"}</span>
+        <Download className="w-3.5 h-3.5 text-muted-foreground" />
+      </a>
+    </div>
   );
 }
 
@@ -203,11 +376,15 @@ export function MessageFeed({
   messages,
   isLoading,
   streamingPhase = null,
+  specialistProgress = null,
+  streamingFiles = [],
   streamingAudit = "",
   isStreaming = false,
   onStop,
   streamingWarning,
   onDismissWarning,
+  videoJob = null,
+  onCancelVideo,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -273,6 +450,7 @@ export function MessageFeed({
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
           let sources = normalizeSources(message.sources);
           const assetIds = normalizeAssetIds(message.assetIds);
+          const generatedAssets = display.generatedAssets ?? [];
           if (!isUser) {
             if (!sources || sources.length === 0) {
               // Try to extract legacy sources from the inline block
@@ -370,6 +548,10 @@ export function MessageFeed({
                   <GenerationBadge phase={streamingPhase} />
                 )}
 
+                {!isUser && message.id === STREAMING_ASSISTANT_ID && specialistProgress && (
+                  <SpecialistProgress progress={specialistProgress} />
+                )}
+
                 {!isUser &&
                   message.id === STREAMING_ASSISTANT_ID &&
                   (streamingPhase === "generating-file" ||
@@ -416,10 +598,27 @@ export function MessageFeed({
                 {!isUser && display.artifacts && display.artifacts.length > 0 && (
                   <ArtifactCards artifacts={display.artifacts} />
                 )}
-                {!isUser && assetIds && assetIds.length > 0 && (
+                {!isUser && generatedAssets.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {generatedAssets.map((asset) => (
+                      <FileDownloadButton
+                        key={asset.id}
+                        assetId={asset.id}
+                        filename={asset.filename}
+                        mimeType={asset.mimeType}
+                      />
+                    ))}
+                  </div>
+                )}
+                {!isUser && generatedAssets.length === 0 && assetIds && assetIds.length > 0 && (
                   <div className="flex flex-wrap gap-2 px-1">
                     {assetIds.map((assetId) => (
-                      <FileDownloadButton key={assetId} assetId={assetId} />
+                      <FileDownloadButton
+                        key={assetId}
+                        assetId={assetId}
+                        filename={streamingFiles.find((file) => file.id === assetId)?.filename}
+                        mimeType={streamingFiles.find((file) => file.id === assetId)?.mimeType}
+                      />
                     ))}
                   </div>
                 )}
@@ -433,6 +632,7 @@ export function MessageFeed({
             </div>
           );
         })}
+        {videoJob ? <VideoJobCard job={videoJob} onCancel={onCancelVideo} /> : null}
         <div ref={bottomRef} />
       </div>
     </div>

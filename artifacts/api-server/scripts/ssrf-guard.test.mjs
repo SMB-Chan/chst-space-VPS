@@ -11,6 +11,12 @@ execSync(
   { cwd: root, stdio: "pipe" }
 );
 const { isPrivateAddress } = await import(out);
+const videoOut = join(root, ".ssrf-video-test-bundle.mjs");
+execSync(
+  `pnpm exec esbuild src/lib/alibaba-video.ts --bundle --format=esm --platform=node --packages=external --outfile=${videoOut}`,
+  { cwd: root, stdio: "pipe" }
+);
+const { downloadHappyHorseVideoResult } = await import(videoOut);
 
 const blocked = [
   // IPv4 loopback / private / link-local / CGNAT / unspecified / multicast
@@ -39,7 +45,21 @@ for (const ip of blocked) {
 for (const ip of allowed) {
   if (isPrivateAddress(ip)) { console.error("FAIL: should allow", ip); failures++; }
 }
-execSync(`rm -f ${out}`);
+const noNetworkFetch = () => { throw new Error("network should not be reached"); };
+for (const url of [
+  "https://example.com/video.mp4",
+  "http://dashscope-intl.aliyuncs.com/video.mp4",
+  "https://user:pass@result.oss-cn-shenzhen.aliyuncs.com/video.mp4",
+]) {
+  try {
+    await downloadHappyHorseVideoResult(url, undefined, noNetworkFetch);
+    console.error("FAIL: should block untrusted video URL", url);
+    failures++;
+  } catch {
+    // Expected: the allowlist rejects before fetch is called.
+  }
+}
+execSync(`rm -f ${out} ${videoOut}`);
 if (failures > 0) {
   console.error(`${failures} SSRF guard test(s) failed`);
   process.exit(1);

@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CapabilityRegistry,
   HealthStatus,
   OpenaiConversation,
   OpenaiConversationInput,
@@ -29,6 +30,10 @@ import type {
   OpenaiMessageDeleteInput,
   OpenaiMessageInput,
   OpenaiModel,
+  OpenaiVideoJob,
+  OpenaiVideoJobInput,
+  RealtimeSession,
+  RealtimeSessionInput,
   SendOpenaiEphemeralMessageParams,
   SendOpenaiMessageParams
 } from './api.schemas';
@@ -214,6 +219,374 @@ export function useListOpenaiModels<TData = Awaited<ReturnType<typeof listOpenai
 
 
 
+
+export const getListOpenaiCapabilitiesUrl = () => {
+
+
+
+
+  return `/api/openai/capabilities`
+}
+
+/**
+ * @summary List chat and specialist AI capabilities
+ */
+export const listOpenaiCapabilities = async ( options?: Parameters<typeof customFetch>[1]): Promise<CapabilityRegistry> => {
+
+  return customFetch<CapabilityRegistry>(getListOpenaiCapabilitiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpenaiCapabilitiesQueryKey = () => {
+    return [
+    `/api/openai/capabilities`
+    ] as const;
+    }
+
+
+export const getListOpenaiCapabilitiesQueryOptions = <TData = Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpenaiCapabilitiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpenaiCapabilities>>> = ({ signal }) => listOpenaiCapabilities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOpenaiCapabilitiesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpenaiCapabilities>>>
+export type ListOpenaiCapabilitiesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List chat and specialist AI capabilities
+ */
+
+export function useListOpenaiCapabilities<TData = Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOpenaiCapabilitiesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateOpenaiRealtimeSessionUrl = () => {
+
+
+
+
+  return `/api/openai/realtime/session`
+}
+
+/**
+ * @summary Create an authenticated Qwen Audio realtime session
+ */
+export const createOpenaiRealtimeSession = async (realtimeSessionInput: RealtimeSessionInput, options?: Parameters<typeof customFetch>[1]): Promise<RealtimeSession> => {
+
+  return customFetch<RealtimeSession>(getCreateOpenaiRealtimeSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(realtimeSessionInput)
+  }
+);}
+
+
+
+
+
+export const getCreateOpenaiRealtimeSessionMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpenaiRealtimeSession>>, TError,{data: BodyType<RealtimeSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpenaiRealtimeSession>>, TError,{data: BodyType<RealtimeSessionInput>}, TContext> => {
+
+const mutationKey = ['createOpenaiRealtimeSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpenaiRealtimeSession>>, {data: BodyType<RealtimeSessionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpenaiRealtimeSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpenaiRealtimeSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpenaiRealtimeSession>>>
+    export type CreateOpenaiRealtimeSessionMutationBody = BodyType<RealtimeSessionInput>
+    export type CreateOpenaiRealtimeSessionMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Create an authenticated Qwen Audio realtime session
+ */
+export const useCreateOpenaiRealtimeSession = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpenaiRealtimeSession>>, TError,{data: BodyType<RealtimeSessionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createOpenaiRealtimeSession>>,
+        TError,
+        {data: BodyType<RealtimeSessionInput>},
+        TContext
+      > => {
+      return useMutation(getCreateOpenaiRealtimeSessionMutationOptions(options));
+    }
+
+export const getCreateOpenaiVideoJobUrl = (id: number,) => {
+
+
+
+
+  return `/api/openai/conversations/${id}/video-jobs`
+}
+
+/**
+ * @summary Start an authenticated asynchronous HappyHorse video generation job
+ */
+export const createOpenaiVideoJob = async (id: number,
+    openaiVideoJobInput: OpenaiVideoJobInput, options?: Parameters<typeof customFetch>[1]): Promise<OpenaiVideoJob> => {
+
+  return customFetch<OpenaiVideoJob>(getCreateOpenaiVideoJobUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(openaiVideoJobInput)
+  }
+);}
+
+
+
+
+
+export const getCreateOpenaiVideoJobMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpenaiVideoJob>>, TError,{id: number;data: BodyType<OpenaiVideoJobInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpenaiVideoJob>>, TError,{id: number;data: BodyType<OpenaiVideoJobInput>}, TContext> => {
+
+const mutationKey = ['createOpenaiVideoJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpenaiVideoJob>>, {id: number;data: BodyType<OpenaiVideoJobInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  createOpenaiVideoJob(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpenaiVideoJobMutationResult = NonNullable<Awaited<ReturnType<typeof createOpenaiVideoJob>>>
+    export type CreateOpenaiVideoJobMutationBody = BodyType<OpenaiVideoJobInput>
+    export type CreateOpenaiVideoJobMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Start an authenticated asynchronous HappyHorse video generation job
+ */
+export const useCreateOpenaiVideoJob = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpenaiVideoJob>>, TError,{id: number;data: BodyType<OpenaiVideoJobInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createOpenaiVideoJob>>,
+        TError,
+        {id: number;data: BodyType<OpenaiVideoJobInput>},
+        TContext
+      > => {
+      return useMutation(getCreateOpenaiVideoJobMutationOptions(options));
+    }
+
+export const getGetOpenaiVideoJobUrl = (jobId: number,) => {
+
+
+
+
+  return `/api/openai/video-jobs/${jobId}`
+}
+
+/**
+ * @summary Get an owned HappyHorse video generation job
+ */
+export const getOpenaiVideoJob = async (jobId: number, options?: Parameters<typeof customFetch>[1]): Promise<OpenaiVideoJob> => {
+
+  return customFetch<OpenaiVideoJob>(getGetOpenaiVideoJobUrl(jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpenaiVideoJobQueryKey = (jobId: number,) => {
+    return [
+    `/api/openai/video-jobs/${jobId}`
+    ] as const;
+    }
+
+
+export const getGetOpenaiVideoJobQueryOptions = <TData = Awaited<ReturnType<typeof getOpenaiVideoJob>>, TError = ErrorType<OpenaiError>>(jobId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiVideoJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpenaiVideoJobQueryKey(jobId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpenaiVideoJob>>> = ({ signal }) => getOpenaiVideoJob(jobId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: jobId !== null && jobId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpenaiVideoJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOpenaiVideoJobQueryResult = NonNullable<Awaited<ReturnType<typeof getOpenaiVideoJob>>>
+export type GetOpenaiVideoJobQueryError = ErrorType<OpenaiError>
+
+
+/**
+ * @summary Get an owned HappyHorse video generation job
+ */
+
+export function useGetOpenaiVideoJob<TData = Awaited<ReturnType<typeof getOpenaiVideoJob>>, TError = ErrorType<OpenaiError>>(
+ jobId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiVideoJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOpenaiVideoJobQueryOptions(jobId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCancelOpenaiVideoJobUrl = (jobId: number,) => {
+
+
+
+
+  return `/api/openai/video-jobs/${jobId}`
+}
+
+/**
+ * @summary Cancel an owned pending HappyHorse video generation job
+ */
+export const cancelOpenaiVideoJob = async (jobId: number, options?: Parameters<typeof customFetch>[1]): Promise<OpenaiVideoJob> => {
+
+  return customFetch<OpenaiVideoJob>(getCancelOpenaiVideoJobUrl(jobId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelOpenaiVideoJobMutationOptions = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelOpenaiVideoJob>>, TError,{jobId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelOpenaiVideoJob>>, TError,{jobId: number}, TContext> => {
+
+const mutationKey = ['cancelOpenaiVideoJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelOpenaiVideoJob>>, {jobId: number}> = (props) => {
+          const {jobId} = props ?? {};
+
+          return  cancelOpenaiVideoJob(jobId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelOpenaiVideoJobMutationResult = NonNullable<Awaited<ReturnType<typeof cancelOpenaiVideoJob>>>
+
+    export type CancelOpenaiVideoJobMutationError = ErrorType<OpenaiError>
+
+    /**
+ * @summary Cancel an owned pending HappyHorse video generation job
+ */
+export const useCancelOpenaiVideoJob = <TError = ErrorType<OpenaiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelOpenaiVideoJob>>, TError,{jobId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelOpenaiVideoJob>>,
+        TError,
+        {jobId: number},
+        TContext
+      > => {
+      return useMutation(getCancelOpenaiVideoJobMutationOptions(options));
+    }
 
 export const getDownloadOpenaiArtifactUrl = (id: number,) => {
 

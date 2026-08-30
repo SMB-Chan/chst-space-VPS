@@ -40,6 +40,152 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/OpenaiModel"
+  /openai/capabilities:
+    get:
+      operationId: listOpenaiCapabilities
+      tags: [openai]
+      summary: List chat and specialist AI capabilities
+      responses:
+        "200":
+          description: Capability registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityRegistry"
+  /openai/realtime/session:
+    post:
+      operationId: createOpenaiRealtimeSession
+      tags: [openai]
+      summary: Create an authenticated Qwen Audio realtime session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RealtimeSessionInput"
+      responses:
+        "200":
+          description: Short-lived browser session ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealtimeSession"
+        "400":
+          description: Invalid request or unavailable specialist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+  /openai/conversations/{id}/video-jobs:
+    post:
+      operationId: createOpenaiVideoJob
+      tags: [openai]
+      summary: Start an authenticated asynchronous HappyHorse video generation job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenaiVideoJobInput"
+      responses:
+        "201":
+          description: Created video generation job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiVideoJob"
+        "200":
+          description: Existing job returned for a repeated idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiVideoJob"
+        "400":
+          description: Invalid video request or missing confirmation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+        "503":
+          description: Provider submission or persistence is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+  /openai/video-jobs/{jobId}:
+    get:
+      operationId: getOpenaiVideoJob
+      tags: [openai]
+      summary: Get an owned HappyHorse video generation job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Video generation job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiVideoJob"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+    delete:
+      operationId: cancelOpenaiVideoJob
+      tags: [openai]
+      summary: Cancel an owned pending HappyHorse video generation job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Canceled or already terminal video job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiVideoJob"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+        "409":
+          description: Job is no longer cancelable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
+        "503":
+          description: Realtime capacity is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
   /openai/artifacts/{id}:
     get:
       operationId: downloadOpenaiArtifact
@@ -394,6 +540,54 @@ components:
         - supportsVision
         - supportsReasoning
         - reasoning
+    CapabilityRegistry:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityDescriptor"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityModel"
+      required: [capabilities, models]
+    CapabilityDescriptor:
+      type: object
+      properties:
+        id:
+          type: string
+          enum: [chat, reasoning, vision, image-generate, image-edit, speech-to-text, audio-synthesis, realtime, video]
+        label:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [available, catalog-only]
+        models:
+          type: array
+          items:
+            type: string
+      required: [id, label, description, status, models]
+    CapabilityModel:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        provider:
+          type: string
+          enum: [openai, dashscope]
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [chat, reasoning, vision, image-generate, image-edit, speech-to-text, audio-synthesis, realtime, video]
+        configured:
+          type: boolean
+      required: [id, label, provider, capabilities, configured]
     OpenaiConversation:
       type: object
       properties:
@@ -445,6 +639,25 @@ components:
         - mime
         - size
         - downloadUrl
+    OpenaiGeneratedAsset:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+        downloadUrl:
+          type: string
+      required:
+        - id
+        - filename
+        - mimeType
+        - size
+        - downloadUrl
     OpenaiMessage:
       type: object
       properties:
@@ -479,6 +692,11 @@ components:
           type: array
           items:
             type: integer
+          nullable: true
+        generatedAssets:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenaiGeneratedAsset'
           nullable: true
         createdAt:
           type: string
@@ -590,6 +808,127 @@ components:
         - title
         - createdAt
         - messages
+    RealtimeSessionInput:
+      type: object
+      properties:
+        conversationId:
+          type: integer
+          minimum: 1
+        modelId:
+          type: string
+          minLength: 1
+      required: [modelId]
+    RealtimeSession:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: integer
+        modelId:
+          type: string
+          enum: [qwen-audio-3.0-realtime-plus]
+        websocketPath:
+          type: string
+          enum: [/api/openai/realtime]
+        maxSessionSeconds:
+          type: integer
+          enum: [300]
+      required: [token, expiresAt, modelId, websocketPath, maxSessionSeconds]
+    OpenaiVideoJobInput:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        mode:
+          type: string
+          enum: [t2v, i2v, r2v]
+        modelId:
+          type: string
+        referenceImages:
+          type: array
+          maxItems: 9
+          items:
+            type: string
+        resolution:
+          type: string
+          enum: [720P, 1080P]
+        ratio:
+          type: string
+          enum: ["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4", "9:21", "21:9"]
+        duration:
+          type: integer
+          minimum: 3
+          maximum: 15
+        watermark:
+          type: boolean
+        seed:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        confirmation:
+          type: boolean
+          enum: [true]
+        idempotencyKey:
+          type: string
+          minLength: 16
+          maxLength: 128
+      required: [prompt, mode, confirmation, idempotencyKey]
+    OpenaiVideoJobAsset:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mimeType:
+          type: string
+          enum: [video/mp4]
+        size:
+          type: integer
+        downloadUrl:
+          type: string
+      required: [id, filename, mimeType, size, downloadUrl]
+    OpenaiVideoJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        requestMessageId:
+          type: integer
+        modelId:
+          type: string
+        mode:
+          type: string
+          enum: [t2v, i2v, r2v]
+        status:
+          type: string
+          enum: [SUBMITTING, PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED, UNKNOWN]
+        failureCode:
+          type: string
+          nullable: true
+        failureMessage:
+          type: string
+          nullable: true
+        resultAsset:
+          allOf:
+            - $ref: "#/components/schemas/OpenaiVideoJobAsset"
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, conversationId, requestMessageId, modelId, mode, status, failureCode, failureMessage, resultAsset, createdAt, updatedAt, completedAt]
     OpenaiError:
       type: object
       properties:

@@ -3,11 +3,15 @@ import app from "./app";
 import { closeBrowser } from "./lib/render-fetch";
 import {
   ensureAiUsageSchema,
+  ensureAlibabaVideoJobsSchema,
   ensureAssetsSchema,
   ensureMessageSchema,
 } from "./lib/ensure-schema";
 import { createGracefulShutdown } from "./lib/graceful-shutdown";
+import { startAlibabaVideoWorker } from "./lib/alibaba-video-worker";
+import { attachAlibabaRealtimeWebSocket } from "./lib/alibaba-realtime";
 import { logger } from "./lib/logger";
+import { startupReadiness } from "./lib/startup-readiness";
 
 const rawPort = process.env["PORT"] ?? "5000";
 
@@ -18,15 +22,8 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function main(): Promise<void> {
-  try {
-    await ensureMessageSchema((sql) => pool.query(sql));
-    await ensureAssetsSchema((sql) => pool.query(sql));
-    await ensureAiUsageSchema((sql) => pool.query(sql));
-  } catch (err) {
-    logger.error({ err }, "Failed to ensure database schema");
-    process.exit(1);
-  }
-
+  startupReadiness.markNotReady();
+  const videoWorker = startAlibabaVideoWorker();
   const server = app.listen(port, (err) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
@@ -35,18 +32,44 @@ async function main(): Promise<void> {
 
     logger.info({ port }, "Server listening");
   });
-
+  const realtimeSocket = attachAlibabaRealtimeWebSocket(server);
   const shutdown = createGracefulShutdown({
     server,
     resources: [
+      { name: "alibaba-video-worker", close: videoWorker.close },
+      { name: "alibaba-realtime-websocket", close: realtimeSocket.close },
       { name: "browser-egress", close: closeBrowser },
       { name: "postgres", close: async () => pool.end() },
     ],
     logger,
   });
 
-  process.once("SIGTERM", () => void shutdown("SIGTERM"));
-  process.once("SIGINT", () => void shutdown("SIGINT"));
+  server.once("error", (err) => {
+    logger.error({ err }, "Error listening on port");
+    void shutdown("listen-error");
+  });
+
+  process.once("SIGTERM", () => {
+    startupReadiness.markNotReady();
+    void shutdown("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    startupReadiness.markNotReady();
+    void shutdown("SIGINT");
+  });
+
+  try {
+    await ensureMessageSchema((sql) => pool.query(sql));
+    await ensureAssetsSchema((sql) => pool.query(sql));
+    await ensureAlibabaVideoJobsSchema((sql) => pool.query(sql));
+    await ensureAiUsageSchema((sql) => pool.query(sql));
+    startupReadiness.markReady();
+    logger.info("Server ready");
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure database schema");
+    await shutdown("startup-failure");
+    process.exitCode = 1;
+  }
 }
 
 void main();
