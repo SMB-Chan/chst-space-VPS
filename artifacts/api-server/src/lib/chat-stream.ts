@@ -50,6 +50,7 @@ import {
   isResearchTool,
   type GeneratedAsset,
   type SpecialistToolCall,
+  type SpecialistToolResult,
 } from "./specialist-capabilities";
 import {
   findRelevantMemories,
@@ -636,17 +637,40 @@ export async function streamChatReply(args: {
                 })}\n\n`,
               );
             }
-            const result = await withTimeout(
-              (signal) =>
-                executeSpecialistTool(toolCall, {
-                  imageAttachments: imageAttachmentsForTools,
-                  audioAttachments: audioAttachmentsForTools,
-                  signal,
-                }),
-              RESEARCH_STEP_TIMEOUT_MS,
-              "Research step",
-              clientAbort.signal,
-            );
+            const result = await (async () => {
+              try {
+                return await withTimeout(
+                  (signal) =>
+                    executeSpecialistTool(toolCall, {
+                      imageAttachments: imageAttachmentsForTools,
+                      audioAttachments: audioAttachmentsForTools,
+                      signal,
+                    }),
+                  RESEARCH_STEP_TIMEOUT_MS,
+                  "Research step",
+                  clientAbort.signal,
+                );
+              } catch (toolError) {
+                if (clientAbort.signal.aborted) throw toolError;
+                logger.warn(
+                  safeFailureFields(
+                    toolError,
+                    "chat-stream",
+                    "RESEARCH_TOOL_FAILED",
+                  ),
+                  `Research tool ${toolCall.name} failed; returning error to model`,
+                );
+                return {
+                  ok: false,
+                  capability: toolCall.name as SpecialistToolResult["capability"],
+                  summary:
+                    toolError instanceof Error
+                      ? toolError.message
+                      : "ツール実行中にエラーが発生しました",
+                  text: "",
+                } satisfies SpecialistToolResult;
+              }
+            })();
             if (result.sources) {
               for (const source of result.sources) {
                 if (!allResearchSources.some((s) => s.url === source.url)) {
@@ -790,17 +814,40 @@ export async function streamChatReply(args: {
             })}\n\n`,
           );
         }
-        const specialistResult = await withTimeout(
-          (signal) =>
-            executeSpecialistTool(toolCall, {
-              imageAttachments: imageAttachmentsForTools,
-              audioAttachments: audioAttachmentsForTools,
-              signal,
-            }),
-          SPECIALIST_TIMEOUT_MS,
-          "Specialist capability",
-          clientAbort.signal,
-        );
+        const specialistResult = await (async () => {
+          try {
+            return await withTimeout(
+              (signal) =>
+                executeSpecialistTool(toolCall, {
+                  imageAttachments: imageAttachmentsForTools,
+                  audioAttachments: audioAttachmentsForTools,
+                  signal,
+                }),
+              SPECIALIST_TIMEOUT_MS,
+              "Specialist capability",
+              clientAbort.signal,
+            );
+          } catch (toolError) {
+            if (clientAbort.signal.aborted) throw toolError;
+            logger.warn(
+              safeFailureFields(
+                toolError,
+                "chat-stream",
+                "NON_RESEARCH_TOOL_FAILED",
+              ),
+              `Non-research tool ${toolCall.name} failed; returning error to model`,
+            );
+            return {
+              ok: false,
+              capability: toolCall.name as SpecialistToolResult["capability"],
+              summary:
+                toolError instanceof Error
+                  ? toolError.message
+                  : "専門能力の実行に失敗しました",
+              text: "",
+            } satisfies SpecialistToolResult;
+          }
+        })();
         if (specialistResult.asset) generatedAssets = [specialistResult.asset];
         if (!clientGone()) {
           res.write(
@@ -886,17 +933,40 @@ export async function streamChatReply(args: {
             })}\n\n`,
           );
         }
-        const specialistResult = await withTimeout(
-          (signal) =>
-            executeSpecialistTool(toolCall, {
-              imageAttachments: imageAttachmentsForTools,
-              audioAttachments: audioAttachmentsForTools,
-              signal,
-            }),
-          SPECIALIST_TIMEOUT_MS,
-          "Specialist capability",
-          clientAbort.signal,
-        );
+        const specialistResult = await (async () => {
+          try {
+            return await withTimeout(
+              (signal) =>
+                executeSpecialistTool(toolCall, {
+                  imageAttachments: imageAttachmentsForTools,
+                  audioAttachments: audioAttachmentsForTools,
+                  signal,
+                }),
+              SPECIALIST_TIMEOUT_MS,
+              "Specialist capability",
+              clientAbort.signal,
+            );
+          } catch (toolError) {
+            if (clientAbort.signal.aborted) throw toolError;
+            logger.warn(
+              safeFailureFields(
+                toolError,
+                "chat-stream",
+                "BROKER_TOOL_FAILED",
+              ),
+              `Broker tool ${toolCall.name} failed; returning error to model`,
+            );
+            return {
+              ok: false,
+              capability: toolCall.name as SpecialistToolResult["capability"],
+              summary:
+                toolError instanceof Error
+                  ? toolError.message
+                  : "専門能力の実行に失敗しました",
+              text: "",
+            } satisfies SpecialistToolResult;
+          }
+        })();
         if (specialistResult.asset) generatedAssets = [specialistResult.asset];
         if (!clientGone()) {
           res.write(
