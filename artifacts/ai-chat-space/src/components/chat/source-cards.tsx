@@ -54,7 +54,9 @@ export function SourceCards({ sources }: SourceCardsProps) {
               />
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2 break-words">
-                  <span className="text-primary/70 font-mono text-[10px] mr-1">[{i + 1}]</span>
+                  <span className="text-primary/70 font-mono text-[10px] mr-1">
+                    [{i + 1}]
+                  </span>
                   {(source.title || domain).slice(0, 180)}
                 </div>
                 <div className="text-[10px] text-muted-foreground/70 truncate leading-snug">
