@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AVAILABLE_MODELS,
   dashscopeClient,
+  openaiClient,
   type ModelProvider,
 } from "./ai-clients";
 import { transcribeDashScopeAudio } from "./audio-transcription";
@@ -47,34 +48,34 @@ export interface CapabilityDescriptor {
   models: string[];
 }
 
-const SPECIALIST_MODEL_BASE: CapabilityModel[] = ALIBABA_MODEL_CATALOG
-  .filter((model) => model.kind !== "chat")
-  .map((model) => ({
-    id: model.id,
-    label: model.label,
-    provider: "dashscope" as const,
-    capabilities: model.capabilities.flatMap((capability): CapabilityId[] => {
-      switch (capability) {
-        case "image.generate":
-          return ["image-generate"];
-        case "image.edit":
-          return ["image-edit"];
-        case "audio.asr":
-          return ["speech-to-text"];
-        case "audio.tts":
-          return ["audio-synthesis"];
-        case "audio.realtime":
-          return ["realtime"];
-        case "video.t2v":
-        case "video.i2v":
-        case "video.r2v":
-          return ["video"];
-        default:
-          return [];
-      }
-    }),
-    configured: false,
-  }));
+const SPECIALIST_MODEL_BASE: CapabilityModel[] = ALIBABA_MODEL_CATALOG.filter(
+  (model) => model.kind !== "chat",
+).map((model) => ({
+  id: model.id,
+  label: model.label,
+  provider: "dashscope" as const,
+  capabilities: model.capabilities.flatMap((capability): CapabilityId[] => {
+    switch (capability) {
+      case "image.generate":
+        return ["image-generate"];
+      case "image.edit":
+        return ["image-edit"];
+      case "audio.asr":
+        return ["speech-to-text"];
+      case "audio.tts":
+        return ["audio-synthesis"];
+      case "audio.realtime":
+        return ["realtime"];
+      case "video.t2v":
+      case "video.i2v":
+      case "video.r2v":
+        return ["video"];
+      default:
+        return [];
+    }
+  }),
+  configured: false,
+}));
 
 // Paraformer remains a compatibility fallback for regular Model Studio
 // installations. Token Plan keys are deliberately not accepted for custom
@@ -87,7 +88,10 @@ SPECIALIST_MODEL_BASE.push({
   configured: false,
 });
 
-const CAPABILITY_DETAILS: Record<CapabilityId, Omit<CapabilityDescriptor, "id" | "models" | "status">> = {
+const CAPABILITY_DETAILS: Record<
+  CapabilityId,
+  Omit<CapabilityDescriptor, "id" | "models" | "status">
+> = {
   chat: {
     label: "チャット",
     description: "会話応答を生成するモデル",
@@ -153,7 +157,9 @@ async function readDashScopeModelIds(): Promise<Set<string> | null> {
     if (!response.ok) throw new Error(`model list returned ${response.status}`);
     const payload = (await response.json()) as { data?: { id?: unknown }[] };
     const ids = new Set(
-      (payload.data ?? []).flatMap((item) => (typeof item.id === "string" ? [item.id] : [])),
+      (payload.data ?? []).flatMap((item) =>
+        typeof item.id === "string" ? [item.id] : [],
+      ),
     );
     if (ids.size === 0) throw new Error("model list was empty");
     dashScopeModelCache = { ids, expiresAt: Date.now() + 5 * 60_000 };
@@ -166,7 +172,53 @@ async function readDashScopeModelIds(): Promise<Set<string> | null> {
   }
 }
 
-function chatModelCapabilities(model: (typeof AVAILABLE_MODELS)[number]): CapabilityId[] {
+let openAiModelCache:
+  | { ids: Set<string>; expiresAt: number }
+  | { ids: null; expiresAt: number }
+  | null = null;
+
+function openAiModelsUrl(): string {
+  const configured =
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL?.trim() ||
+    "https://api.openai.com/v1";
+  return `${configured.replace(/\/+$/, "")}/models`;
+}
+
+async function readOpenAiModelIds(): Promise<Set<string> | null> {
+  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) return null;
+  if (openAiModelCache && openAiModelCache.expiresAt > Date.now()) {
+    return openAiModelCache.ids;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch(openAiModelsUrl(), {
+      headers: {
+        Authorization: `Bearer ${process.env.AI_INTEGRATIONS_OPENAI_API_KEY}`,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`model list returned ${response.status}`);
+    const payload = (await response.json()) as { data?: { id?: unknown }[] };
+    const ids = new Set(
+      (payload.data ?? []).flatMap((item) =>
+        typeof item.id === "string" ? [item.id] : [],
+      ),
+    );
+    if (ids.size === 0) throw new Error("model list was empty");
+    openAiModelCache = { ids, expiresAt: Date.now() + 5 * 60_000 };
+    return ids;
+  } catch {
+    openAiModelCache = { ids: null, expiresAt: Date.now() + 60_000 };
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function chatModelCapabilities(
+  model: (typeof AVAILABLE_MODELS)[number],
+): CapabilityId[] {
   return [
     "chat",
     ...(model.supportsReasoning ? (["reasoning"] as const) : []),
@@ -180,15 +232,26 @@ function regularDashScopeTranscriptionConfigured(): boolean {
 }
 
 function specialistModelConfigured(model: CapabilityModel): boolean {
-  if (model.id === "paraformer-v2") return regularDashScopeTranscriptionConfigured();
-  if (model.id === "qwen-audio-3.0-asr-flash") return isAlibabaSpecialistConfigured();
-  if (model.capabilities.includes("image-generate") || model.capabilities.includes("image-edit")) {
+  if (model.id === "paraformer-v2")
+    return regularDashScopeTranscriptionConfigured();
+  if (model.id === "qwen-audio-3.0-asr-flash")
+    return isAlibabaSpecialistConfigured();
+  if (
+    model.capabilities.includes("image-generate") ||
+    model.capabilities.includes("image-edit")
+  ) {
     return isAlibabaSpecialistConfigured();
   }
-  if (model.id === "qwen-audio-3.0-tts-plus" && model.capabilities.includes("audio-synthesis")) {
+  if (
+    model.id === "qwen-audio-3.0-tts-plus" &&
+    model.capabilities.includes("audio-synthesis")
+  ) {
     return isAlibabaSpecialistConfigured();
   }
-  if (model.id === "qwen-audio-3.0-realtime-plus" && model.capabilities.includes("realtime")) {
+  if (
+    model.id === "qwen-audio-3.0-realtime-plus" &&
+    model.capabilities.includes("realtime")
+  ) {
     return isAlibabaSpecialistConfigured();
   }
   // HappyHorse remains catalog-only in the chat model registry; its dedicated
@@ -196,9 +259,15 @@ function specialistModelConfigured(model: CapabilityModel): boolean {
   return false;
 }
 
-function capabilityStatus(id: CapabilityId, models: CapabilityModel[]): "available" | "catalog-only" {
-  if (id === "chat" || id === "reasoning" || id === "vision") return "available";
-  return models.some((model) => model.configured && model.capabilities.includes(id))
+function capabilityStatus(
+  id: CapabilityId,
+  models: CapabilityModel[],
+): "available" | "catalog-only" {
+  if (id === "chat" || id === "reasoning" || id === "vision")
+    return "available";
+  return models.some(
+    (model) => model.configured && model.capabilities.includes(id),
+  )
     ? "available"
     : "catalog-only";
 }
@@ -227,17 +296,78 @@ export function getCapabilityRegistry(): {
     id,
     ...CAPABILITY_DETAILS[id],
     status: capabilityStatus(id, models),
-    models: models.filter((model) => model.capabilities.includes(id)).map((model) => model.id),
+    models: models
+      .filter((model) => model.capabilities.includes(id))
+      .map((model) => model.id),
   }));
   return { capabilities, models };
 }
 
-export async function getAvailableChatModels(): Promise<(typeof AVAILABLE_MODELS)[number][]> {
-  const ids = await readDashScopeModelIds();
-  if (!ids) return [...AVAILABLE_MODELS];
-  return AVAILABLE_MODELS.filter(
-    (model) => model.provider === "openai" || ids.has(model.id),
-  );
+function inferProvider(id: string): ModelProvider {
+  if (id.startsWith("gpt-") || id.startsWith("o") || id.startsWith("chatgpt-"))
+    return "openai";
+  return "dashscope";
+}
+
+function formatDiscoveredLabel(id: string): string {
+  return id
+    .split(/[-_.]/)
+    .map((part) =>
+      part.length <= 2
+        ? part.toUpperCase()
+        : part.charAt(0).toUpperCase() + part.slice(1),
+    )
+    .join(" ");
+}
+
+export async function getAvailableChatModels(): Promise<
+  (typeof AVAILABLE_MODELS)[number][]
+> {
+  const [dashScopeIds, openAiIds] = await Promise.all([
+    readDashScopeModelIds(),
+    readOpenAiModelIds(),
+  ]);
+
+  const catalogIds = new Set(AVAILABLE_MODELS.map((m) => m.id));
+  const result: (typeof AVAILABLE_MODELS)[number][] = [];
+
+  for (const model of AVAILABLE_MODELS) {
+    if (model.provider === "openai") {
+      if (!openAiIds || openAiIds.has(model.id)) result.push(model);
+    } else {
+      if (!dashScopeIds || dashScopeIds.has(model.id)) result.push(model);
+    }
+  }
+
+  const allDiscoveredIds = new Set<string>();
+  if (dashScopeIds) for (const id of dashScopeIds) allDiscoveredIds.add(id);
+  if (openAiIds) for (const id of openAiIds) allDiscoveredIds.add(id);
+
+  const CHAT_MODEL_PATTERNS = [
+    /^gpt-/i,
+    /^o\d/i,
+    /^chatgpt-/i,
+    /^qwen/i,
+    /^deepseek/i,
+    /^glm/i,
+  ];
+
+  for (const id of allDiscoveredIds) {
+    if (catalogIds.has(id)) continue;
+    if (!CHAT_MODEL_PATTERNS.some((pattern) => pattern.test(id))) continue;
+    const provider = inferProvider(id);
+    result.push({
+      id,
+      label: formatDiscoveredLabel(id),
+      provider,
+      description: "動的に検出されたモデル",
+      supportsVision: false,
+      supportsReasoning: false,
+      reasoning: "none",
+    });
+  }
+
+  return result;
 }
 
 export async function getCapabilityRegistryWithAvailability(): Promise<{
@@ -248,7 +378,10 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
   const models = getCapabilityModels().map((model) => {
     if (model.provider === "openai") return { ...model, configured: true };
     if (model.capabilities.includes("chat")) {
-      return { ...model, configured: Boolean(dashscopeClient) && (!ids || ids.has(model.id)) };
+      return {
+        ...model,
+        configured: Boolean(dashscopeClient) && (!ids || ids.has(model.id)),
+      };
     }
     return model;
   });
@@ -256,7 +389,9 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
     id,
     ...CAPABILITY_DETAILS[id],
     status: capabilityStatus(id, models),
-    models: models.filter((model) => model.capabilities.includes(id)).map((model) => model.id),
+    models: models
+      .filter((model) => model.capabilities.includes(id))
+      .map((model) => model.id),
   }));
   return { capabilities, models };
 }
@@ -267,7 +402,8 @@ export type GeneratedAsset = StoredGeneratedAsset & {
 
 export interface SpecialistToolResult {
   ok: boolean;
-  capability: "image-generate" | "image-edit" | "speech-to-text" | "audio-synthesis";
+  capability:
+    "image-generate" | "image-edit" | "speech-to-text" | "audio-synthesis";
   summary: string;
   text?: string;
   asset?: GeneratedAsset;
@@ -326,9 +462,12 @@ const synthesizeSpeechArgs = z.object({
   volume: z.number().min(0).max(100).optional(),
 });
 
-export function getSpecialistTools(context: SpecialistToolContext): SpecialistToolDefinition[] {
+export function getSpecialistTools(
+  context: SpecialistToolContext,
+): SpecialistToolDefinition[] {
   const specialistConfigured = isAlibabaSpecialistConfigured();
-  if (!specialistConfigured && !regularDashScopeTranscriptionConfigured()) return [];
+  if (!specialistConfigured && !regularDashScopeTranscriptionConfigured())
+    return [];
   const tools: SpecialistToolDefinition[] = [];
 
   if (specialistConfigured) {
@@ -342,7 +481,10 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
           type: "object",
           properties: {
             prompt: { type: "string", minLength: 1, maxLength: 4_000 },
-            size: { type: "string", enum: ["1024x1024", "1536x1024", "1024x1536"] },
+            size: {
+              type: "string",
+              enum: ["1024x1024", "1536x1024", "1024x1536"],
+            },
           },
           required: ["prompt"],
           additionalProperties: false,
@@ -403,8 +545,15 @@ export function getSpecialistTools(context: SpecialistToolContext): SpecialistTo
           type: "object",
           properties: {
             attachmentName: { type: "string", minLength: 1, maxLength: 255 },
-            modelId: { type: "string", enum: ["qwen-audio-3.0-asr-flash", "paraformer-v2"] },
-            languageHints: { type: "array", maxItems: 4, items: { type: "string", minLength: 2, maxLength: 16 } },
+            modelId: {
+              type: "string",
+              enum: ["qwen-audio-3.0-asr-flash", "paraformer-v2"],
+            },
+            languageHints: {
+              type: "array",
+              maxItems: 4,
+              items: { type: "string", minLength: 2, maxLength: 16 },
+            },
           },
           required: ["attachmentName"],
           additionalProperties: false,
@@ -488,7 +637,9 @@ export async function executeSpecialistTool(
     }
     if (call.name === "edit_image") {
       const args = parseToolArgs(imageEditArgs, call.arguments);
-      const image = context.imageAttachments?.find((item) => item.name === args.imageName);
+      const image = context.imageAttachments?.find(
+        (item) => item.name === args.imageName,
+      );
       if (!image) throw new Error("指定された編集対象の画像が見つかりません");
       const asset = await editImage(
         image,
@@ -507,15 +658,20 @@ export async function executeSpecialistTool(
     }
     if (call.name === "transcribe_audio") {
       const args = parseToolArgs(transcribeArgs, call.arguments);
-      const audio = context.audioAttachments?.find((item) => item.name === args.attachmentName);
+      const audio = context.audioAttachments?.find(
+        (item) => item.name === args.attachmentName,
+      );
       if (!audio) throw new Error("指定された音声添付が見つかりません");
-      const text = await transcribeDashScopeAudio({
-        buffer: audio.buffer,
-        filename: audio.name,
-        mime: audio.mime,
-        signal: context.signal,
-        languageHints: args.languageHints,
-      }, args.modelId);
+      const text = await transcribeDashScopeAudio(
+        {
+          buffer: audio.buffer,
+          filename: audio.name,
+          mime: audio.mime,
+          signal: context.signal,
+          languageHints: args.languageHints,
+        },
+        args.modelId,
+      );
       return {
         ok: true,
         capability: "speech-to-text",
@@ -536,7 +692,10 @@ export async function executeSpecialistTool(
         volume: args.volume,
         signal: context.signal,
       });
-      const asset: GeneratedAsset = { ...speech, capability: "audio-synthesis" };
+      const asset: GeneratedAsset = {
+        ...speech,
+        capability: "audio-synthesis",
+      };
       return {
         ok: true,
         capability: "audio-synthesis",
@@ -556,7 +715,8 @@ export async function executeSpecialistTool(
             : call.name === "synthesize_speech"
               ? "audio-synthesis"
               : "image-generate",
-      summary: error instanceof Error ? error.message : "専門能力の実行に失敗しました",
+      summary:
+        error instanceof Error ? error.message : "専門能力の実行に失敗しました",
     };
   }
 }
