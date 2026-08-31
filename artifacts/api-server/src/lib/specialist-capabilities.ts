@@ -30,6 +30,7 @@ export const CAPABILITY_IDS = [
   "audio-synthesis",
   "realtime",
   "video",
+  "web-search",
 ] as const;
 
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
@@ -129,6 +130,10 @@ const CAPABILITY_DETAILS: Record<
   video: {
     label: "動画生成",
     description: "テキストや画像から動画を生成する能力",
+  },
+  "web-search": {
+    label: "Web検索",
+    description: "Webを検索して最新情報・事実確認を行う能力",
   },
 };
 
@@ -388,7 +393,11 @@ export type GeneratedAsset = StoredGeneratedAsset & {
 export interface SpecialistToolResult {
   ok: boolean;
   capability:
-    "image-generate" | "image-edit" | "speech-to-text" | "audio-synthesis";
+    | "image-generate"
+    | "image-edit"
+    | "speech-to-text"
+    | "audio-synthesis"
+    | "web-search";
   summary: string;
   text?: string;
   asset?: GeneratedAsset;
@@ -447,12 +456,14 @@ const synthesizeSpeechArgs = z.object({
   volume: z.number().min(0).max(100).optional(),
 });
 
+const webSearchArgs = z.object({
+  query: z.string().trim().min(1).max(500),
+});
+
 export function getSpecialistTools(
   context: SpecialistToolContext,
 ): SpecialistToolDefinition[] {
   const specialistConfigured = isAlibabaSpecialistConfigured();
-  if (!specialistConfigured && !regularDashScopeTranscriptionConfigured())
-    return [];
   const tools: SpecialistToolDefinition[] = [];
 
   if (specialistConfigured) {
@@ -519,7 +530,10 @@ export function getSpecialistTools(
       },
     });
   }
-  if (specialistConfigured && context.audioAttachments?.length) {
+  if (
+    (specialistConfigured || regularDashScopeTranscriptionConfigured()) &&
+    context.audioAttachments?.length
+  ) {
     tools.push({
       type: "function",
       function: {
@@ -546,6 +560,27 @@ export function getSpecialistTools(
       },
     });
   }
+  tools.push({
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "Web検索を実行します。最新の情報・事実確認・複数の情報源からの裏付けが必要な場合に使用してください。検索クエリは具体的で対象を絞ったものにしてください。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            minLength: 1,
+            maxLength: 500,
+            description: "検索クエリ",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  });
   return tools;
 }
 
@@ -688,6 +723,32 @@ export async function executeSpecialistTool(
         asset,
       };
     }
+    if (call.name === "web_search") {
+      const args = parseToolArgs(webSearchArgs, call.arguments);
+      const { searchWeb } = await import("./web-search");
+      const results = await searchWeb(args.query, context.signal);
+      if (results.length === 0) {
+        return {
+          ok: true,
+          capability: "web-search",
+          summary: "Web検索で結果が見つかりませんでした。",
+          text: "",
+        };
+      }
+      const formatted = results
+        .slice(0, 5)
+        .map(
+          (r, i) =>
+            `[${i + 1}] ${r.title}\n    URL: ${r.url}\n    概要: ${r.snippet}`,
+        )
+        .join("\n\n");
+      return {
+        ok: true,
+        capability: "web-search",
+        summary: `Web検索で${results.length}件の結果を取得しました。`,
+        text: formatted,
+      };
+    }
     throw new Error("許可されていない専門能力です");
   } catch (error) {
     return {
@@ -699,7 +760,9 @@ export async function executeSpecialistTool(
             ? "speech-to-text"
             : call.name === "synthesize_speech"
               ? "audio-synthesis"
-              : "image-generate",
+              : call.name === "web_search"
+                ? "web-search"
+                : "image-generate",
       summary:
         error instanceof Error ? error.message : "専門能力の実行に失敗しました",
     };
