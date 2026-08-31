@@ -1,8 +1,10 @@
 import { z } from "zod";
+import type OpenAI from "openai";
 import {
   AVAILABLE_MODELS,
   dashscopeClient,
   openaiClient,
+  type ChatModel,
   type ModelProvider,
 } from "./ai-clients";
 import { transcribeDashScopeAudio } from "./audio-transcription";
@@ -130,95 +132,63 @@ const CAPABILITY_DETAILS: Record<
   },
 };
 
-let dashScopeModelCache:
-  | { ids: Set<string>; expiresAt: number }
-  | { ids: null; expiresAt: number }
-  | null = null;
+type ModelDiscoveryCache = {
+  client: OpenAI;
+  ids: Set<string> | null;
+  expiresAt: number;
+};
 
-function dashScopeModelsUrl(): string {
-  const configured =
-    process.env.DASHSCOPE_BASE_URL?.trim() ||
-    "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1";
-  return `${configured.replace(/\/+$/, "")}/models`;
+let dashScopeModelCache: ModelDiscoveryCache | null = null;
+let openAiModelCache: ModelDiscoveryCache | null = null;
+
+async function readModelIds(
+  client: OpenAI | null,
+  cache: ModelDiscoveryCache | null,
+  setCache: (next: ModelDiscoveryCache) => void,
+): Promise<Set<string> | null> {
+  if (!client) return null;
+  if (cache?.client === client && cache.expiresAt > Date.now()) {
+    return cache.ids;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await client.models.list({ signal: controller.signal });
+    const ids = new Set(
+      response.data.flatMap((item) =>
+        typeof item.id === "string" ? [item.id] : [],
+      ),
+    );
+    if (ids.size === 0) throw new Error("model list was empty");
+    setCache({ client, ids, expiresAt: Date.now() + 5 * 60_000 });
+    return ids;
+  } catch {
+    setCache({ client, ids: null, expiresAt: Date.now() + 60_000 });
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function readDashScopeModelIds(): Promise<Set<string> | null> {
-  if (!dashscopeClient || !process.env.DASHSCOPE_API_KEY) return null;
-  if (dashScopeModelCache && dashScopeModelCache.expiresAt > Date.now()) {
-    return dashScopeModelCache.ids;
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5_000);
-  try {
-    const response = await fetch(dashScopeModelsUrl(), {
-      headers: { Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}` },
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`model list returned ${response.status}`);
-    const payload = (await response.json()) as { data?: { id?: unknown }[] };
-    const ids = new Set(
-      (payload.data ?? []).flatMap((item) =>
-        typeof item.id === "string" ? [item.id] : [],
-      ),
-    );
-    if (ids.size === 0) throw new Error("model list was empty");
-    dashScopeModelCache = { ids, expiresAt: Date.now() + 5 * 60_000 };
-    return ids;
-  } catch {
-    dashScopeModelCache = { ids: null, expiresAt: Date.now() + 60_000 };
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-let openAiModelCache:
-  | { ids: Set<string>; expiresAt: number }
-  | { ids: null; expiresAt: number }
-  | null = null;
-
-function openAiModelsUrl(): string {
-  const configured =
-    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL?.trim() ||
-    "https://api.openai.com/v1";
-  return `${configured.replace(/\/+$/, "")}/models`;
+  return readModelIds(dashscopeClient, dashScopeModelCache, (next) => {
+    dashScopeModelCache = next;
+  });
 }
 
 async function readOpenAiModelIds(): Promise<Set<string> | null> {
-  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) return null;
-  if (openAiModelCache && openAiModelCache.expiresAt > Date.now()) {
-    return openAiModelCache.ids;
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5_000);
-  try {
-    const response = await fetch(openAiModelsUrl(), {
-      headers: {
-        Authorization: `Bearer ${process.env.AI_INTEGRATIONS_OPENAI_API_KEY}`,
-      },
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`model list returned ${response.status}`);
-    const payload = (await response.json()) as { data?: { id?: unknown }[] };
-    const ids = new Set(
-      (payload.data ?? []).flatMap((item) =>
-        typeof item.id === "string" ? [item.id] : [],
-      ),
-    );
-    if (ids.size === 0) throw new Error("model list was empty");
-    openAiModelCache = { ids, expiresAt: Date.now() + 5 * 60_000 };
-    return ids;
-  } catch {
-    openAiModelCache = { ids: null, expiresAt: Date.now() + 60_000 };
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return readModelIds(openaiClient, openAiModelCache, (next) => {
+    openAiModelCache = next;
+  });
 }
 
-function chatModelCapabilities(
-  model: (typeof AVAILABLE_MODELS)[number],
-): CapabilityId[] {
+export function resetModelDiscoveryCache(): void {
+  dashScopeModelCache = null;
+  openAiModelCache = null;
+}
+
+function chatModelCapabilities(model: ChatModel): CapabilityId[] {
   return [
     "chat",
     ...(model.supportsReasoning ? (["reasoning"] as const) : []),
@@ -303,12 +273,6 @@ export function getCapabilityRegistry(): {
   return { capabilities, models };
 }
 
-function inferProvider(id: string): ModelProvider {
-  if (id.startsWith("gpt-") || id.startsWith("o") || id.startsWith("chatgpt-"))
-    return "openai";
-  return "dashscope";
-}
-
 function formatDiscoveredLabel(id: string): string {
   return id
     .split(/[-_.]/)
@@ -320,42 +284,50 @@ function formatDiscoveredLabel(id: string): string {
     .join(" ");
 }
 
-export async function getAvailableChatModels(): Promise<
-  (typeof AVAILABLE_MODELS)[number][]
-> {
-  const [dashScopeIds, openAiIds] = await Promise.all([
-    readDashScopeModelIds(),
-    readOpenAiModelIds(),
-  ]);
+const CHAT_MODEL_PATTERNS = [
+  /^gpt-/i,
+  /^o\d/i,
+  /^chatgpt-/i,
+  /^qwen/i,
+  /^deepseek/i,
+  /^glm/i,
+];
 
-  const catalogIds = new Set(AVAILABLE_MODELS.map((m) => m.id));
-  const result: (typeof AVAILABLE_MODELS)[number][] = [];
+export function mergeAvailableChatModels(
+  discoveredModels: ReadonlyArray<{
+    provider: ModelProvider;
+    ids: ReadonlySet<string> | null;
+  }>,
+): ChatModel[] {
+  const idsByProvider = new Map(
+    discoveredModels.map(({ provider, ids }) => [provider, ids]),
+  );
+  const catalogIds = new Set<string>(AVAILABLE_MODELS.map((m) => m.id));
+  const result: ChatModel[] = [];
+  const resultIds = new Set<string>();
 
   for (const model of AVAILABLE_MODELS) {
-    if (model.provider === "openai") {
-      if (!openAiIds || openAiIds.has(model.id)) result.push(model);
-    } else {
-      if (!dashScopeIds || dashScopeIds.has(model.id)) result.push(model);
+    const providerIds = idsByProvider.get(model.provider);
+    if (!providerIds || providerIds.has(model.id)) {
+      result.push(model);
+      resultIds.add(model.id);
     }
   }
 
-  const allDiscoveredIds = new Set<string>();
-  if (dashScopeIds) for (const id of dashScopeIds) allDiscoveredIds.add(id);
-  if (openAiIds) for (const id of openAiIds) allDiscoveredIds.add(id);
-
-  const CHAT_MODEL_PATTERNS = [
-    /^gpt-/i,
-    /^o\d/i,
-    /^chatgpt-/i,
-    /^qwen/i,
-    /^deepseek/i,
-    /^glm/i,
+  const discovered = [
+    ...discoveredModels.flatMap(({ provider, ids }) =>
+      ids
+        ? [...ids].map((id) => ({
+            id,
+            provider,
+          }))
+        : [],
+    ),
   ];
 
-  for (const id of allDiscoveredIds) {
-    if (catalogIds.has(id)) continue;
+  for (const { id, provider } of discovered) {
+    if (catalogIds.has(id) || resultIds.has(id)) continue;
     if (!CHAT_MODEL_PATTERNS.some((pattern) => pattern.test(id))) continue;
-    const provider = inferProvider(id);
     result.push({
       id,
       label: formatDiscoveredLabel(id),
@@ -365,9 +337,22 @@ export async function getAvailableChatModels(): Promise<
       supportsReasoning: false,
       reasoning: "none",
     });
+    resultIds.add(id);
   }
 
   return result;
+}
+
+export async function getAvailableChatModels(): Promise<ChatModel[]> {
+  const [dashScopeIds, openAiIds] = await Promise.all([
+    readDashScopeModelIds(),
+    readOpenAiModelIds(),
+  ]);
+
+  return mergeAvailableChatModels([
+    { provider: "dashscope", ids: dashScopeIds },
+    { provider: "openai", ids: openAiIds },
+  ]);
 }
 
 export async function getCapabilityRegistryWithAvailability(): Promise<{

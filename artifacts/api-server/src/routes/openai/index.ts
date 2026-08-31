@@ -18,11 +18,11 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth, getUserId } from "../middleware";
 import {
-  AVAILABLE_MODELS,
   DEFAULT_MODEL,
-  VISION_MODEL_IDS,
   parseReasoningLevel,
   getClientForModel,
+  type ChatModel,
+  type ReasoningLevel,
 } from "../../lib/ai-clients";
 import {
   getAvailableChatModels,
@@ -32,9 +32,13 @@ import {
   createResponseCancellation,
   streamChatReply,
   withTimeout,
+  type ResponseCancellation,
 } from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
-import { parseTranslationMode } from "../../lib/translation";
+import {
+  parseTranslationMode,
+  type TranslationMode,
+} from "../../lib/translation";
 import { logger, safeFailureFields } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
 import {
@@ -162,11 +166,11 @@ function contentDisposition(filename: string): string {
 
 interface ResolvedChatParams {
   modelId: string;
-  modelDef: (typeof AVAILABLE_MODELS)[number];
+  modelDef: ChatModel;
   reasoningLevel: ReasoningLevel;
-  auditModelId: string | undefined;
+  auditModel?: ChatModel;
   auditReasoningLevel: ReasoningLevel;
-  translationMode: TranslationMode;
+  translationMode?: TranslationMode;
   supportsVision: boolean;
   useVisionBridge: boolean;
   audioAttachmentsForTools: { name: string; buffer: Buffer; mime: string }[];
@@ -197,7 +201,8 @@ async function resolveSharedChatParams(
 
   const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
   const requestedModelId = parsedData.modelId || modelQuery || DEFAULT_MODEL;
-  const modelDef = AVAILABLE_MODELS.find(
+  const availableModels = await getAvailableChatModels();
+  const modelDef = availableModels.find(
     (model) => model.id === requestedModelId,
   );
   if (!modelDef) {
@@ -208,16 +213,16 @@ async function resolveSharedChatParams(
   const reasoningLevel = parseReasoningLevel(req.query.reasoning);
   const auditModelQuery =
     typeof req.query.auditModel === "string" ? req.query.auditModel : "";
-  const auditModelId =
+  const auditModel =
     auditModelQuery &&
     auditModelQuery !== modelId &&
-    AVAILABLE_MODELS.some((m) => m.id === auditModelQuery)
-      ? auditModelQuery
+    availableModels.find((m) => m.id === auditModelQuery)
+      ? availableModels.find((m) => m.id === auditModelQuery)
       : undefined;
   const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
   const translationMode = parseTranslationMode(req.query.translate);
 
-  const supportsVision = VISION_MODEL_IDS.has(modelId);
+  const supportsVision = modelDef.supportsVision;
   const useVisionBridge =
     newMessage.hasImages && !supportsVision && isVisionBridgeAvailable();
   if (newMessage.hasImages && !supportsVision && !useVisionBridge) {
@@ -266,7 +271,7 @@ async function resolveSharedChatParams(
     modelId,
     modelDef,
     reasoningLevel,
-    auditModelId,
+    auditModel,
     auditReasoningLevel,
     translationMode,
     supportsVision,
@@ -1154,7 +1159,7 @@ router.post(
         modelId,
         modelDef,
         reasoningLevel,
-        auditModelId,
+        auditModel,
         auditReasoningLevel,
         translationMode,
         supportsVision,
@@ -1221,7 +1226,10 @@ router.post(
       });
       if (cancellation.signal.aborted) return;
 
-      const { client, provider } = getClientForModel(modelId);
+      const { client, provider } = getClientForModel(
+        modelId,
+        modelDef.provider,
+      );
 
       await streamChatReply({
         req,
@@ -1235,7 +1243,7 @@ router.post(
         chatMessages: chatMessages as Parameters<
           typeof streamChatReply
         >[0]["chatMessages"],
-        auditModelId,
+        auditModel,
         attachmentsForAudit: {
           textFiles: newMessage.attachments
             .filter((attachment) => attachment.kind === "file")
@@ -1345,7 +1353,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       modelId,
       modelDef,
       reasoningLevel,
-      auditModelId,
+      auditModel,
       auditReasoningLevel,
       translationMode,
       supportsVision,
@@ -1411,7 +1419,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
     });
     if (cancellation.signal.aborted) return;
 
-    const { client, provider } = getClientForModel(modelId);
+    const { client, provider } = getClientForModel(modelId, modelDef.provider);
     await streamChatReply({
       req,
       res,
@@ -1424,7 +1432,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       chatMessages: chatMessages as Parameters<
         typeof streamChatReply
       >[0]["chatMessages"],
-      auditModelId,
+      auditModel,
       attachmentsForAudit: {
         textFiles: newMessage.attachments
           .filter((attachment) => attachment.kind === "file")
