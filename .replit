@@ -23,6 +23,8 @@ timeoutMs = 180000
 
 [userenv.shared]
 DASHSCOPE_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+
+[userenv.production]
 FRONTEND_URL = "https://chat-smb.replit.app"
 
 [nix]
