@@ -56,7 +56,14 @@ function CodeBlock({
 }
 
 function citeSourceLinks(content: string): string {
-  return content.replace(/\[(\d+)\]/g, "[[$1]](#source-$1)");
+  // Split on fenced code blocks and inline code so citation
+  // transforms only apply to prose, not to code examples like `[1]`.
+  const parts = content.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  return parts
+    .map((part, index) =>
+      index % 2 === 0 ? part.replace(/\[(\d+)\]/g, "[[$1]](#source-$1)") : part,
+    )
+    .join("");
 }
 
 export function Markdown({ content, className }: MarkdownProps) {

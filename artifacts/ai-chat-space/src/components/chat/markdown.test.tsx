@@ -55,4 +55,28 @@ describe("Markdown", () => {
     );
     expect(html).not.toContain("javascript:");
   });
+
+  it("transforms [N] citations in prose but not inside code blocks", () => {
+    const html = renderToStaticMarkup(
+      <Markdown
+        content={[
+          "The answer is known [1].",
+          "",
+          "```js",
+          "const arr = [1]",
+          "```",
+          "",
+          "Inline `x = [2]` stays literal.",
+        ].join("\n")}
+      />,
+    );
+    // Prose citation becomes a scroll button (rendered as <button> by citeSourceLinks)
+    expect(html).toContain("<button");
+    // Code block [1] and inline code [2] must NOT become citation buttons
+    expect(html).toContain("const arr = [1]");
+    expect(html).toContain("x = [2]");
+    // Count buttons: only the prose [1] should produce one, not code [1] or inline [2]
+    const buttonCount = (html.match(/<button/g) ?? []).length;
+    expect(buttonCount).toBe(1);
+  });
 });
