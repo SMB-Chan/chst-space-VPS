@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TOKEN_PLAN_QUOTA_RESPONSE_HEADERS,
   assessAlibabaLargeTurnQuota,
   estimateAlibabaTokenPlanTurn,
   tokenPlanQuotaHeaders,
+  tokenPlanQuotaPreflightGuard,
+  tokenPlanQuotaStatusHeaders,
 } from "./tokenPlanQuotaPreflightGuard";
 
 function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -193,5 +195,148 @@ describe("Token Plan browser-safe quota headers", () => {
         weeklyRemainingPercent: 80,
       }),
     ).toEqual({});
+  });
+});
+
+function mockRes(): {
+  res: {
+    status: ReturnType<typeof vi.fn>;
+    json: ReturnType<typeof vi.fn>;
+    setHeader: ReturnType<typeof vi.fn>;
+  };
+  next: ReturnType<typeof vi.fn>;
+} {
+  const res = {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+    setHeader: vi.fn(),
+  };
+  const next = vi.fn();
+  return { res, next };
+}
+
+describe("tokenPlanQuotaPreflightGuard middleware integration", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    vi.stubEnv("ALIBABA_TOKEN_PLAN_QUOTA_GUARD", "1");
+    vi.stubEnv("DASHSCOPE_API_KEY", "sk-sp-test-token-plan-key");
+    vi.stubEnv("ALIBABA_TOKEN_PLAN_WARN_LARGE_TURN_REMAINING_PERCENT", "35");
+    vi.stubEnv("ALIBABA_TOKEN_PLAN_BLOCK_LARGE_TURN_REMAINING_PERCENT", "20");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("passes through immediately for non-Token-Plan keys", async () => {
+    vi.stubEnv("DASHSCOPE_API_KEY", "sk-regular-model-studio-key");
+    const { res, next } = mockRes();
+    const req = {
+      body: { modelId: "qwen3.8-max", content: "x".repeat(5000) },
+      query: {},
+    } as never;
+    await tokenPlanQuotaPreflightGuard(req, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("passes through for small turns without querying quota", async () => {
+    const { res, next } = mockRes();
+    const req = {
+      body: { modelId: "qwen3.8-max", content: "短い質問" },
+      query: {},
+    } as never;
+    await tokenPlanQuotaPreflightGuard(req, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 for large turns when quota telemetry is unavailable", async () => {
+    vi.doMock("../lib/alibaba-token-plan-usage", async (importOriginal) => {
+      const actual =
+        await importOriginal<
+          typeof import("../lib/alibaba-token-plan-usage")
+        >();
+      return {
+        ...actual,
+        getAlibabaTokenPlanUsage: vi.fn().mockResolvedValue(null),
+      };
+    });
+    const { res, next } = mockRes();
+    const req = {
+      body: { modelId: "qwen3.8-max", content: "x".repeat(5000) },
+      query: { reasoning: "high" },
+    } as never;
+    await tokenPlanQuotaPreflightGuard(req, res as never, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringContaining("残量を確認できない"),
+      }),
+    );
+  });
+
+  it("passes through for large turns when fail-open override is enabled and telemetry is unavailable", async () => {
+    vi.stubEnv("ALIBABA_TOKEN_PLAN_QUOTA_FAIL_OPEN", "1");
+    vi.doMock("../lib/alibaba-token-plan-usage", async (importOriginal) => {
+      const actual =
+        await importOriginal<
+          typeof import("../lib/alibaba-token-plan-usage")
+        >();
+      return {
+        ...actual,
+        getAlibabaTokenPlanUsage: vi.fn().mockResolvedValue(null),
+      };
+    });
+    const { res, next } = mockRes();
+    const req = {
+      body: { modelId: "qwen3.8-max", content: "x".repeat(5000) },
+      query: { reasoning: "high" },
+    } as never;
+    await tokenPlanQuotaPreflightGuard(req, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+});
+
+describe("tokenPlanQuotaStatusHeaders middleware integration", () => {
+  beforeEach(() => {
+    vi.stubEnv("ALIBABA_TOKEN_PLAN_QUOTA_GUARD", "1");
+    vi.stubEnv("DASHSCOPE_API_KEY", "sk-sp-test-token-plan-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("skips quota headers for non-Token-Plan keys", async () => {
+    vi.stubEnv("DASHSCOPE_API_KEY", "sk-regular-key");
+    const { res, next } = mockRes();
+    await tokenPlanQuotaStatusHeaders({} as never, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.setHeader).not.toHaveBeenCalled();
+  });
+
+  it("calls next without setting headers when telemetry throws", async () => {
+    vi.doMock("../lib/alibaba-token-plan-usage", async (importOriginal) => {
+      const actual =
+        await importOriginal<
+          typeof import("../lib/alibaba-token-plan-usage")
+        >();
+      return {
+        ...actual,
+        getAlibabaTokenPlanUsage: vi
+          .fn()
+          .mockRejectedValue(new Error("network")),
+      };
+    });
+    const { res, next } = mockRes();
+    await tokenPlanQuotaStatusHeaders({} as never, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.setHeader).not.toHaveBeenCalled();
   });
 });

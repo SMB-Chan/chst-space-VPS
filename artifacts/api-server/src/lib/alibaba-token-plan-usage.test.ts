@@ -439,3 +439,64 @@ describe("Alibaba DashScope credential routing", () => {
     }
   });
 });
+
+describe("secret-safe error messages and logs", () => {
+  it.each([
+    ["Token Plan key", "sk-sp-secret-token-plan-key-12345"],
+    ["Model Studio key", "sk-secret-model-studio-key-67890"],
+    ["Console access token", "console-secret-token-abcde"],
+  ])("never includes %s in startup error messages", (_label, secret) => {
+    const errors: string[] = [];
+    try {
+      resolveAlibabaDashScopeBaseUrl({ DASHSCOPE_API_KEY: secret });
+    } catch (e) {
+      errors.push(String(e));
+    }
+    try {
+      resolveAlibabaDashScopeBaseUrl({
+        DASHSCOPE_API_KEY: secret,
+        DASHSCOPE_BASE_URL:
+          "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+      });
+    } catch (e) {
+      errors.push(String(e));
+    }
+    for (const msg of errors) {
+      expect(msg).not.toContain(secret);
+    }
+  });
+
+  it("does not include API key in quota fetch error messages", async () => {
+    const key = "sk-sp-secret-quota-key-xyz";
+    const errors: string[] = [];
+    try {
+      await getAlibabaTokenPlanUsage({
+        DASHSCOPE_API_KEY: key,
+        ALIBABA_CONSOLE_ACCESS_TOKEN: "",
+        ALIBABA_TOKEN_PLAN_QUOTA_GUARD: "1",
+      });
+    } catch (e) {
+      errors.push(String(e));
+    }
+    for (const msg of errors) {
+      expect(msg).not.toContain(key);
+    }
+  });
+
+  it("does not include console access token in quota telemetry errors", async () => {
+    const consoleToken = "super-secret-console-token-abc123";
+    const errors: string[] = [];
+    try {
+      await getAlibabaTokenPlanUsage({
+        DASHSCOPE_API_KEY: "sk-sp-regular-key",
+        ALIBABA_CONSOLE_ACCESS_TOKEN: consoleToken,
+        ALIBABA_TOKEN_PLAN_QUOTA_GUARD: "1",
+      });
+    } catch (e) {
+      errors.push(String(e));
+    }
+    for (const msg of errors) {
+      expect(msg).not.toContain(consoleToken);
+    }
+  });
+});
