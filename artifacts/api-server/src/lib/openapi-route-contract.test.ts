@@ -31,7 +31,9 @@ function openapiRoutes(source: string): Set<string> {
     if (!currentPath) continue;
     const methodMatch = line.match(/^    ([a-z]+):\s*$/);
     if (methodMatch && HTTP_METHODS.has(methodMatch[1])) {
-      routes.add(`${methodMatch[1].toUpperCase()} ${normalizePath(currentPath)}`);
+      routes.add(
+        `${methodMatch[1].toUpperCase()} ${normalizePath(currentPath)}`,
+      );
     }
   }
   return routes;
@@ -44,7 +46,10 @@ describe("OpenAPI and Express route contract", () => {
       resolve(repoRoot, "artifacts/api-server/src/routes/openai/index.ts"),
       "utf8",
     );
-    const specSource = readFileSync(resolve(repoRoot, "lib/api-spec/openapi.yaml"), "utf8");
+    const specSource = readFileSync(
+      resolve(repoRoot, "lib/api-spec/openapi.yaml"),
+      "utf8",
+    );
 
     const implementation = implementationRoutes(routeSource);
     const spec = openapiRoutes(specSource);

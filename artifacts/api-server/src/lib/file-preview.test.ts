@@ -80,9 +80,11 @@ describe("file-preview", () => {
       }
 
       const data =
-        format === "xlsx" ? SAMPLE_SHEET_DATA :
-        format === "pptx" ? SAMPLE_SLIDE_DATA :
-        SAMPLE_FILE_DATA;
+        format === "xlsx"
+          ? SAMPLE_SHEET_DATA
+          : format === "pptx"
+            ? SAMPLE_SLIDE_DATA
+            : SAMPLE_FILE_DATA;
       const file = await renderFile(format, wrapFileData(data));
       const images = await previewGeneratedFile(file, { maxPages: 1 });
 

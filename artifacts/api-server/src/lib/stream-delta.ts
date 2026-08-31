@@ -15,7 +15,10 @@ export function mergeStreamDelta(acc: string, delta: string): string {
 const CLOSED_THINK_RE = /<think>([\s\S]*?)<\/think>/gi;
 
 /** Pull completed <think>…</think> blocks out of visible answer text. */
-export function splitThinkTags(text: string): { reasoning: string; content: string } {
+export function splitThinkTags(text: string): {
+  reasoning: string;
+  content: string;
+} {
   const blocks: string[] = [];
   const content = text
     .replace(CLOSED_THINK_RE, (_match, inner: string) => {

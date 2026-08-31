@@ -1,6 +1,6 @@
-import { Link } from 'wouter';
-import { Command, Sparkles, Globe, FileText } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Link } from "wouter";
+import { Command, Sparkles, Globe, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export function HomePage() {
   return (
@@ -12,7 +12,10 @@ export function HomePage() {
         </div>
         <div className="flex items-center gap-2">
           <Link href="/sign-in">
-            <Button variant="ghost" className="text-foreground/80 hover:text-foreground">
+            <Button
+              variant="ghost"
+              className="text-foreground/80 hover:text-foreground"
+            >
               サインイン
             </Button>
           </Link>
@@ -37,7 +40,10 @@ export function HomePage() {
         </p>
         <div className="flex items-center gap-3">
           <Link href="/sign-up">
-            <Button size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 px-8">
+            <Button
+              size="lg"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 px-8"
+            >
               アカウント作成
             </Button>
           </Link>
@@ -50,11 +56,26 @@ export function HomePage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-16 max-w-3xl w-full">
           {[
-            { icon: Sparkles, title: '複数モデル対応', desc: 'OpenAIとQwenのモデルを切り替えて利用' },
-            { icon: Globe, title: 'Web検索', desc: '最新情報を検索して回答に反映' },
-            { icon: FileText, title: 'ファイル添付', desc: 'ドキュメントや画像を添付して質問' },
+            {
+              icon: Sparkles,
+              title: "複数モデル対応",
+              desc: "OpenAIとQwenのモデルを切り替えて利用",
+            },
+            {
+              icon: Globe,
+              title: "Web検索",
+              desc: "最新情報を検索して回答に反映",
+            },
+            {
+              icon: FileText,
+              title: "ファイル添付",
+              desc: "ドキュメントや画像を添付して質問",
+            },
           ].map(({ icon: Icon, title, desc }) => (
-            <div key={title} className="rounded-xl border border-border bg-card p-5 text-left">
+            <div
+              key={title}
+              className="rounded-xl border border-border bg-card p-5 text-left"
+            >
               <Icon className="w-5 h-5 text-primary mb-3" />
               <div className="font-medium mb-1">{title}</div>
               <div className="text-sm text-muted-foreground">{desc}</div>

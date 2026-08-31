@@ -1,6 +1,7 @@
 import { logger } from "./logger";
 
-const TOKEN_PLAN_USAGE_API = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage";
+const TOKEN_PLAN_USAGE_API =
+  "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage";
 const TOKEN_PLAN_USAGE_ENDPOINT =
   "https://bailian-singapore-cs.alibabacloud.com/cli/api.json" +
   `?action=IntlBroadScopeAspnGateway&product=sfm_bailian&api=${encodeURIComponent(TOKEN_PLAN_USAGE_API)}`;
@@ -19,7 +20,8 @@ const DEFAULT_CACHE_MS = 30_000;
 const DEFAULT_WARN_REMAINING_PERCENT = 25;
 const DEFAULT_BLOCK_HEAVY_REMAINING_PERCENT = 10;
 
-export type AlibabaTokenPlanQuotaDecision = "allow" | "warn" | "block" | "unknown";
+export type AlibabaTokenPlanQuotaDecision =
+  "allow" | "warn" | "block" | "unknown";
 export type AlibabaDashScopeKeyKind = "token-plan" | "model-studio" | "unknown";
 
 export interface AlibabaTokenPlanUsageSnapshot {
@@ -48,9 +50,10 @@ interface RawTokenPlanUsage {
   per1WeekResetTime?: unknown;
 }
 
-let cachedUsage:
-  | { expiresAt: number; snapshot: AlibabaTokenPlanUsageSnapshot }
-  | null = null;
+let cachedUsage: {
+  expiresAt: number;
+  snapshot: AlibabaTokenPlanUsageSnapshot;
+} | null = null;
 
 function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined || raw.trim() === "") return fallback;
@@ -60,7 +63,9 @@ function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
 function parsePercent(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : fallback;
+  return Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : fallback;
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
@@ -94,7 +99,10 @@ function resetIso(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function findUsageObject(value: unknown, depth = 0): RawTokenPlanUsage | undefined {
+function findUsageObject(
+  value: unknown,
+  depth = 0,
+): RawTokenPlanUsage | undefined {
   if (depth > 8 || !value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   if (
@@ -169,7 +177,9 @@ function normalizeDashScopeUrl(raw: string): string {
     throw new Error("DashScope endpoint must use HTTPS");
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new Error("DashScope endpoint must not contain credentials, query, or fragment");
+    throw new Error(
+      "DashScope endpoint must not contain credentials, query, or fragment",
+    );
   }
   return url.toString().replace(/\/+$/, "");
 }
@@ -195,10 +205,14 @@ export function resolveAlibabaDashScopeBaseUrl(
   const host = new URL(normalized).hostname.toLowerCase();
 
   if (keyKind === "token-plan" && MODEL_STUDIO_DASHSCOPE_HOSTS.has(host)) {
-    throw new Error("Token Plan key cannot use a general Model Studio endpoint");
+    throw new Error(
+      "Token Plan key cannot use a general Model Studio endpoint",
+    );
   }
   if (keyKind === "model-studio" && host === TOKEN_PLAN_DASHSCOPE_HOST) {
-    throw new Error("General Model Studio key cannot use a Token Plan endpoint");
+    throw new Error(
+      "General Model Studio key cannot use a Token Plan endpoint",
+    );
   }
   return normalized;
 }
@@ -211,10 +225,14 @@ export async function fetchAlibabaTokenPlanUsage(
   const accessToken = env.ALIBABA_CONSOLE_ACCESS_TOKEN?.trim();
   if (!accessToken) return null;
 
-  const timeoutMs = parsePositiveInt(env.ALIBABA_TOKEN_PLAN_QUOTA_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  const timeoutMs = parsePositiveInt(
+    env.ALIBABA_TOKEN_PLAN_QUOTA_TIMEOUT_MS,
+    DEFAULT_TIMEOUT_MS,
+  );
   const controller = new AbortController();
   const timeout = setTimeout(
-    () => controller.abort(new Error("Alibaba Token Plan quota check timed out")),
+    () =>
+      controller.abort(new Error("Alibaba Token Plan quota check timed out")),
     timeoutMs,
   );
   try {
@@ -230,14 +248,21 @@ export async function fetchAlibabaTokenPlanUsage(
       redirect: "error",
     });
     if (!response.ok) {
-      throw new Error(`Alibaba Token Plan quota endpoint returned HTTP ${response.status}`);
+      throw new Error(
+        `Alibaba Token Plan quota endpoint returned HTTP ${response.status}`,
+      );
     }
     const payload = (await response.json()) as unknown;
     if (responseLooksLoggedOut(payload)) {
-      throw new Error("Alibaba console access token is expired or not logged in");
+      throw new Error(
+        "Alibaba console access token is expired or not logged in",
+      );
     }
     const usage = findUsageObject(payload);
-    if (!usage) throw new Error("Alibaba Token Plan quota response did not contain usage data");
+    if (!usage)
+      throw new Error(
+        "Alibaba Token Plan quota response did not contain usage data",
+      );
 
     const weeklyUsedPercent = usedPercent(usage.per1WeekPercentage);
     const fiveHourUsedPercent = usedPercent(usage.per5HourPercentage);
@@ -266,7 +291,9 @@ export async function fetchAlibabaTokenPlanUsage(
       snapshot.weeklyRemainingPercent === undefined ||
       snapshot.fiveHourRemainingPercent === undefined
     ) {
-      throw new Error("Alibaba Token Plan quota response did not contain both quota windows");
+      throw new Error(
+        "Alibaba Token Plan quota response did not contain both quota windows",
+      );
     }
     return snapshot;
   } finally {
@@ -279,13 +306,21 @@ export async function getAlibabaTokenPlanUsage(
   fetchImpl: typeof fetch = fetch,
 ): Promise<AlibabaTokenPlanUsageSnapshot | null> {
   const now = Date.now();
-  if (env === process.env && fetchImpl === fetch && cachedUsage && cachedUsage.expiresAt > now) {
+  if (
+    env === process.env &&
+    fetchImpl === fetch &&
+    cachedUsage &&
+    cachedUsage.expiresAt > now
+  ) {
     return cachedUsage.snapshot;
   }
   try {
     const snapshot = await fetchAlibabaTokenPlanUsage(env, fetchImpl);
     if (snapshot && env === process.env && fetchImpl === fetch) {
-      const cacheMs = parsePositiveInt(env.ALIBABA_TOKEN_PLAN_QUOTA_CACHE_MS, DEFAULT_CACHE_MS);
+      const cacheMs = parsePositiveInt(
+        env.ALIBABA_TOKEN_PLAN_QUOTA_CACHE_MS,
+        DEFAULT_CACHE_MS,
+      );
       cachedUsage = { snapshot, expiresAt: now + cacheMs };
     }
     return snapshot;
@@ -380,7 +415,10 @@ export function assessAlibabaTokenPlanQuota(
   };
 }
 
-function countMessageCost(value: unknown): { textChars: number; images: number } {
+function countMessageCost(value: unknown): {
+  textChars: number;
+  images: number;
+} {
   if (typeof value === "string") return { textChars: value.length, images: 0 };
   if (!Array.isArray(value)) return { textChars: 0, images: 0 };
   let textChars = 0;
@@ -388,7 +426,8 @@ function countMessageCost(value: unknown): { textChars: number; images: number }
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
-    if (record.type === "text" && typeof record.text === "string") textChars += record.text.length;
+    if (record.type === "text" && typeof record.text === "string")
+      textChars += record.text.length;
     if (record.type === "image_url") images += 1;
   }
   return { textChars, images };
@@ -412,10 +451,16 @@ export function isHeavyAlibabaChatRequest(body: unknown): boolean {
       ? (request.extra_body as Record<string, unknown>)
       : undefined;
   const reasoningEffort =
-    typeof extra?.reasoning_effort === "string" ? extra.reasoning_effort.toLowerCase() : "";
+    typeof extra?.reasoning_effort === "string"
+      ? extra.reasoning_effort.toLowerCase()
+      : "";
   const thinkingBudget = finiteNumber(extra?.thinking_budget) ?? 0;
-  const highReasoning = reasoningEffort === "high" || reasoningEffort === "xhigh" || thinkingBudget >= 8_192;
-  const model = typeof request.model === "string" ? request.model.toLowerCase() : "";
+  const highReasoning =
+    reasoningEffort === "high" ||
+    reasoningEffort === "xhigh" ||
+    thinkingBudget >= 8_192;
+  const model =
+    typeof request.model === "string" ? request.model.toLowerCase() : "";
   const flagship = /(?:qwen3\.8-max|qwen3\.7-max|deepseek-v4-pro)/.test(model);
 
   return (
@@ -432,7 +477,9 @@ export class AlibabaTokenPlanQuotaGuardError extends Error {
 
   constructor(assessment: AlibabaTokenPlanQuotaAssessment) {
     const reset = assessment.resetAt ? ` Reset: ${assessment.resetAt}.` : "";
-    super(`Alibaba Token Plan quota guard blocked a high-cost request: ${assessment.reason}.${reset}`);
+    super(
+      `Alibaba Token Plan quota guard blocked a high-cost request: ${assessment.reason}.${reset}`,
+    );
     this.name = "AlibabaTokenPlanQuotaGuardError";
     this.remainingPercent = assessment.remainingPercent;
     this.resetAt = assessment.resetAt;
@@ -457,9 +504,13 @@ export function createAlibabaTokenPlanQuotaGuardedFetch(
       return innerFetch(input, init);
     }
 
-    const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? String(input)
+        : input.url;
     const isChatCompletion = /\/chat\/completions(?:\?|$)/.test(url);
-    if (!isChatCompletion || typeof init?.body !== "string") return innerFetch(input, init);
+    if (!isChatCompletion || typeof init?.body !== "string")
+      return innerFetch(input, init);
 
     let parsedBody: unknown;
     try {

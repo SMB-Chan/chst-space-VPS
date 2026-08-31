@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { readTokenPlanQuotaHint, readTokenPlanQuotaResponse } from "./model-selector";
+import {
+  readTokenPlanQuotaHint,
+  readTokenPlanQuotaResponse,
+} from "./model-selector";
 
 function completeHeaders(overrides: Record<string, string> = {}): Headers {
   return new Headers({
@@ -39,10 +42,22 @@ describe("Token Plan quota hint parsing", () => {
   });
 
   it.each([
-    ["weekly header missing", { "X-Chat-Space-Token-Plan-Weekly-Remaining": "" }],
-    ["five-hour header missing", { "X-Chat-Space-Token-Plan-Five-Hour-Remaining": "" }],
-    ["weekly header invalid", { "X-Chat-Space-Token-Plan-Weekly-Remaining": "unknown" }],
-    ["five-hour header out of range", { "X-Chat-Space-Token-Plan-Five-Hour-Remaining": "101" }],
+    [
+      "weekly header missing",
+      { "X-Chat-Space-Token-Plan-Weekly-Remaining": "" },
+    ],
+    [
+      "five-hour header missing",
+      { "X-Chat-Space-Token-Plan-Five-Hour-Remaining": "" },
+    ],
+    [
+      "weekly header invalid",
+      { "X-Chat-Space-Token-Plan-Weekly-Remaining": "unknown" },
+    ],
+    [
+      "five-hour header out of range",
+      { "X-Chat-Space-Token-Plan-Five-Hour-Remaining": "101" },
+    ],
   ])("clears the prior hint when %s", (_label, overrides) => {
     expect(readTokenPlanQuotaHint(completeHeaders(overrides))).toBeNull();
   });

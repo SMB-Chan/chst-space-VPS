@@ -157,13 +157,29 @@ describe("Token Plan browser-safe quota headers", () => {
       fiveHourRemainingPercent: 42.5,
       fiveHourResetAt: "2026-08-28T04:00:00.000Z",
     });
-    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyRemaining]).toBe("67.3");
-    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.fiveHourRemaining]).toBe("42.5");
-    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyReset]).toBe("2026-09-03T12:00:00.000Z");
-    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.fiveHourReset]).toBe("2026-08-28T04:00:00.000Z");
-    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingWindow]).toBe("5-hour");
-    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingRemaining]).toBe("42.5");
-    expect(Object.keys(headers).some((name) => /token|authorization|key/i.test(name.replace("Token-Plan", "")))).toBe(false);
+    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyRemaining]).toBe(
+      "67.3",
+    );
+    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.fiveHourRemaining]).toBe(
+      "42.5",
+    );
+    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyReset]).toBe(
+      "2026-09-03T12:00:00.000Z",
+    );
+    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.fiveHourReset]).toBe(
+      "2026-08-28T04:00:00.000Z",
+    );
+    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingWindow]).toBe(
+      "5-hour",
+    );
+    expect(headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingRemaining]).toBe(
+      "42.5",
+    );
+    expect(
+      Object.keys(headers).some((name) =>
+        /token|authorization|key/i.test(name.replace("Token-Plan", "")),
+      ),
+    ).toBe(false);
   });
 
   it("returns no telemetry headers when quota is unavailable", () => {

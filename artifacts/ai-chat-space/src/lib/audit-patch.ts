@@ -6,10 +6,15 @@ const MAX_REPLACEMENT_CHARS = 4000;
 const MAX_TOTAL_REPLACEMENT_CHARS = 8000;
 const MAX_FINAL_CHARS = 20_000;
 
-export function applyClientPatch(draft: string, operations: unknown): string | null {
-  if (!Array.isArray(operations) || operations.length > MAX_OPERATIONS) return null;
+export function applyClientPatch(
+  draft: string,
+  operations: unknown,
+): string | null {
+  if (!Array.isArray(operations) || operations.length > MAX_OPERATIONS)
+    return null;
 
-  const located: Array<ClientPatchOperation & { start: number; end: number }> = [];
+  const located: Array<ClientPatchOperation & { start: number; end: number }> =
+    [];
   let totalReplacementChars = 0;
   for (const raw of operations) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -22,7 +27,8 @@ export function applyClientPatch(draft: string, operations: unknown): string | n
       find.length === 0 ||
       find.length > MAX_FIND_CHARS ||
       replacement.length > MAX_REPLACEMENT_CHARS
-    ) return null;
+    )
+      return null;
 
     const start = draft.indexOf(find);
     if (start < 0 || draft.indexOf(find, start + 1) >= 0) return null;
@@ -35,10 +41,13 @@ export function applyClientPatch(draft: string, operations: unknown): string | n
   for (let index = 1; index < located.length; index += 1) {
     if (located[index - 1].end > located[index].start) return null;
   }
-  const finalLength = draft.length + located.reduce(
-    (length, operation) => length + operation.replacement.length - operation.find.length,
-    0,
-  );
+  const finalLength =
+    draft.length +
+    located.reduce(
+      (length, operation) =>
+        length + operation.replacement.length - operation.find.length,
+      0,
+    );
   if (finalLength > MAX_FINAL_CHARS) return null;
 
   let result = draft;

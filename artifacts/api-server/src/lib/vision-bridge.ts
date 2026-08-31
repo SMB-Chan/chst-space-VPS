@@ -1,5 +1,10 @@
 import type OpenAI from "openai";
-import { applyGenerationParams, dashscopeClient, getClientForModel, modelSupportsVision } from "./ai-clients";
+import {
+  applyGenerationParams,
+  dashscopeClient,
+  getClientForModel,
+  modelSupportsVision,
+} from "./ai-clients";
 import { logger } from "./logger";
 
 /**
@@ -17,7 +22,9 @@ function resolveBridgeModelId(): string | null {
     return modelSupportsVision(override) ? override : null;
   }
   // Prefer a fast, cheap vision model on whichever provider is configured.
-  return dashscopeClient ? DEFAULT_BRIDGE_MODEL_DASHSCOPE : DEFAULT_BRIDGE_MODEL_OPENAI;
+  return dashscopeClient
+    ? DEFAULT_BRIDGE_MODEL_DASHSCOPE
+    : DEFAULT_BRIDGE_MODEL_OPENAI;
 }
 
 export function isVisionBridgeAvailable(): boolean {
@@ -40,7 +47,9 @@ export async function describeImagesForTextModel(args: {
 }): Promise<string> {
   const modelId = resolveBridgeModelId();
   if (!modelId) {
-    throw new Error("No vision-capable model is configured for the vision bridge");
+    throw new Error(
+      "No vision-capable model is configured for the vision bridge",
+    );
   }
   const { client, provider } = getClientForModel(modelId);
 

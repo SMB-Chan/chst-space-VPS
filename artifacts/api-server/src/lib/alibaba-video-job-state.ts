@@ -16,7 +16,14 @@ const ALLOWED_TRANSITIONS: Record<
   AlibabaVideoTaskStatus,
   ReadonlySet<AlibabaVideoTaskStatus>
 > = {
-  PENDING: new Set(["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELED", "UNKNOWN"]),
+  PENDING: new Set([
+    "PENDING",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "CANCELED",
+    "UNKNOWN",
+  ]),
   RUNNING: new Set(["RUNNING", "SUCCEEDED", "FAILED", "CANCELED", "UNKNOWN"]),
   SUCCEEDED: new Set(["SUCCEEDED"]),
   FAILED: new Set(["FAILED"]),
@@ -24,7 +31,9 @@ const ALLOWED_TRANSITIONS: Record<
   UNKNOWN: new Set(["UNKNOWN"]),
 };
 
-export function isTerminalAlibabaVideoStatus(status: AlibabaVideoTaskStatus): boolean {
+export function isTerminalAlibabaVideoStatus(
+  status: AlibabaVideoTaskStatus,
+): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
@@ -33,7 +42,9 @@ export function assertAlibabaVideoStatusTransition(
   next: AlibabaVideoTaskStatus,
 ): AlibabaVideoTaskStatus {
   if (!ALLOWED_TRANSITIONS[current].has(next)) {
-    throw new Error(`Invalid Alibaba video status transition: ${current} -> ${next}`);
+    throw new Error(
+      `Invalid Alibaba video status transition: ${current} -> ${next}`,
+    );
   }
   return next;
 }
@@ -50,6 +61,8 @@ export function alibabaVideoProviderExpiresAt(submittedAt: Date): Date {
   return new Date(submittedAt.getTime() + ALIBABA_VIDEO_TASK_TTL_MS);
 }
 
-export function canCancelAlibabaVideoStatus(status: AlibabaVideoTaskStatus): boolean {
+export function canCancelAlibabaVideoStatus(
+  status: AlibabaVideoTaskStatus,
+): boolean {
   return status === "PENDING";
 }

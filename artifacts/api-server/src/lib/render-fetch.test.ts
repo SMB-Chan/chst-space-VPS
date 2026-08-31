@@ -58,7 +58,9 @@ describe("isSafeBrowserRequestUrl", () => {
 
   it("does not let a previous safe host verdict mask credentials", async () => {
     expect(await isSafeBrowserRequestUrl("https://8.8.8.8/public")).toBe(true);
-    expect(await isSafeBrowserRequestUrl("https://user:pass@8.8.8.8/private")).toBe(false);
+    expect(
+      await isSafeBrowserRequestUrl("https://user:pass@8.8.8.8/private"),
+    ).toBe(false);
   });
 });
 

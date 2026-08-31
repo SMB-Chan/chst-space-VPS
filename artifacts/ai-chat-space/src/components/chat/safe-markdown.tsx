@@ -26,7 +26,10 @@ class MarkdownErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown): void {
-    console.error("Markdown rendering failed; falling back to plain text:", error);
+    console.error(
+      "Markdown rendering failed; falling back to plain text:",
+      error,
+    );
   }
 
   render(): ReactNode {

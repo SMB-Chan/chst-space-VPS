@@ -21,7 +21,10 @@ const sanitizeSchema = {
 function safeHttpHref(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   try {
-    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const base =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost";
     const url = new URL(raw, base);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
     if (url.username || url.password) return undefined;
@@ -31,7 +34,13 @@ function safeHttpHref(raw: string | undefined): string | undefined {
   }
 }
 
-function CodeBlock({ language, children }: { language?: string; children: string }) {
+function CodeBlock({
+  language,
+  children,
+}: {
+  language?: string;
+  children: string;
+}) {
   return (
     <div className="rounded-xl overflow-hidden bg-background border border-border shadow-sm my-4 font-sans">
       {language ? (
@@ -48,7 +57,10 @@ function CodeBlock({ language, children }: { language?: string; children: string
 
 export function Markdown({ content, className }: MarkdownProps) {
   const remarkPlugins = useMemo(() => [remarkGfm], []);
-  const rehypePlugins = useMemo(() => [[rehypeSanitize, sanitizeSchema]] as const, []);
+  const rehypePlugins = useMemo(
+    () => [[rehypeSanitize, sanitizeSchema]] as const,
+    [],
+  );
 
   return (
     <div
@@ -83,7 +95,8 @@ export function Markdown({ content, className }: MarkdownProps) {
           img: ({ src, alt }) => {
             const safeHref = safeHttpHref(src);
             const label = alt?.trim() || "外部画像";
-            if (!safeHref) return <span className="text-muted-foreground">[{label}]</span>;
+            if (!safeHref)
+              return <span className="text-muted-foreground">[{label}]</span>;
             return (
               <a
                 href={safeHref}
@@ -97,19 +110,29 @@ export function Markdown({ content, className }: MarkdownProps) {
             );
           },
           h1: ({ children }) => (
-            <h2 className="text-2xl font-serif font-semibold mt-8 mb-3 text-primary">{children}</h2>
+            <h2 className="text-2xl font-serif font-semibold mt-8 mb-3 text-primary">
+              {children}
+            </h2>
           ),
           h2: ({ children }) => (
-            <h3 className="text-xl font-serif font-medium mt-6 mb-2 text-primary">{children}</h3>
+            <h3 className="text-xl font-serif font-medium mt-6 mb-2 text-primary">
+              {children}
+            </h3>
           ),
           h3: ({ children }) => (
-            <h4 className="text-lg font-serif font-medium mt-5 mb-2 text-primary">{children}</h4>
+            <h4 className="text-lg font-serif font-medium mt-5 mb-2 text-primary">
+              {children}
+            </h4>
           ),
           ul: ({ children }) => (
-            <ul className="list-disc list-outside ml-6 space-y-1 marker:text-primary/50">{children}</ul>
+            <ul className="list-disc list-outside ml-6 space-y-1 marker:text-primary/50">
+              {children}
+            </ul>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal list-outside ml-6 space-y-1 marker:text-primary/50">{children}</ol>
+            <ol className="list-decimal list-outside ml-6 space-y-1 marker:text-primary/50">
+              {children}
+            </ol>
           ),
           blockquote: ({ children }) => (
             <blockquote className="border-l-2 border-primary/40 pl-4 text-muted-foreground italic">
@@ -118,14 +141,20 @@ export function Markdown({ content, className }: MarkdownProps) {
           ),
           table: ({ children }) => (
             <div className="overflow-x-auto my-3">
-              <table className="w-full text-sm border-collapse border border-border">{children}</table>
+              <table className="w-full text-sm border-collapse border border-border">
+                {children}
+              </table>
             </div>
           ),
           th: ({ children }) => (
-            <th className="border border-border bg-muted/50 px-3 py-1.5 text-left font-medium">{children}</th>
+            <th className="border border-border bg-muted/50 px-3 py-1.5 text-left font-medium">
+              {children}
+            </th>
           ),
           td: ({ children }) => (
-            <td className="border border-border px-3 py-1.5 align-top">{children}</td>
+            <td className="border border-border px-3 py-1.5 align-top">
+              {children}
+            </td>
           ),
           hr: () => <hr className="border-border my-4" />,
           code: ({ className: codeClass, children }) => {

@@ -10,9 +10,14 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+export function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   const auth = getAuth(req);
-  const userId = (auth?.sessionClaims?.userId as string | undefined) || auth?.userId;
+  const userId =
+    (auth?.sessionClaims?.userId as string | undefined) || auth?.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

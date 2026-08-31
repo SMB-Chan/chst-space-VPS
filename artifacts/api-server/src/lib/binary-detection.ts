@@ -33,7 +33,9 @@ const ZIP_MAX_DIRECTORY_ENTRIES = 100_000;
 export function isLegacyOleFile(buffer: Buffer): boolean {
   return (
     buffer.length >= 8 &&
-    buffer.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))
+    buffer
+      .subarray(0, 8)
+      .equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))
   );
 }
 
@@ -42,7 +44,9 @@ function decodeZipEntryName(raw: Buffer, flags: number): string {
   // (e.g. Shift-JIS on old Japanese tools) are only approximated.
   const utf8 = (flags & 0x800) !== 0;
   try {
-    const decoder = new TextDecoder(utf8 ? "utf-8" : "windows-1252", { fatal: false });
+    const decoder = new TextDecoder(utf8 ? "utf-8" : "windows-1252", {
+      fatal: false,
+    });
     return decoder.decode(raw).replace(/[\u0000-\u001f]/g, "");
   } catch {
     return raw.toString("latin1").replace(/[\u0000-\u001f]/g, "");
@@ -75,7 +79,11 @@ export function readZipCentralDirectory(buffer: Buffer): ZipDirectoryInfo {
   const entryCount = buffer.readUInt16LE(eocdOffset + 10);
   const directorySize = buffer.readUInt32LE(eocdOffset + 12);
   const directoryOffset = buffer.readUInt32LE(eocdOffset + 16);
-  if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) {
+  if (
+    entryCount === 0xffff ||
+    directorySize === 0xffffffff ||
+    directoryOffset === 0xffffffff
+  ) {
     throw new ZipFormatError("ZIP64形式のアーカイブには対応していません。");
   }
   if (entryCount > ZIP_MAX_DIRECTORY_ENTRIES) {
@@ -89,7 +97,10 @@ export function readZipCentralDirectory(buffer: Buffer): ZipDirectoryInfo {
   let totalUncompressedBytes = 0;
   let offset = directoryOffset;
   for (let i = 0; i < entryCount; i++) {
-    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== ZIP_CENTRAL_ENTRY_SIGNATURE) {
+    if (
+      offset + 46 > buffer.length ||
+      buffer.readUInt32LE(offset) !== ZIP_CENTRAL_ENTRY_SIGNATURE
+    ) {
       throw new ZipFormatError("ZIPファイルの目録が壊れています。");
     }
     const flags = buffer.readUInt16LE(offset + 8);
@@ -103,7 +114,10 @@ export function readZipCentralDirectory(buffer: Buffer): ZipDirectoryInfo {
     if (offset + 46 + nameLength > buffer.length) {
       throw new ZipFormatError("ZIPファイルの目録が壊れています。");
     }
-    const name = decodeZipEntryName(buffer.subarray(offset + 46, offset + 46 + nameLength), flags);
+    const name = decodeZipEntryName(
+      buffer.subarray(offset + 46, offset + 46 + nameLength),
+      flags,
+    );
     entries.push({ name, uncompressedSize });
     totalUncompressedBytes += uncompressedSize;
     offset += 46 + nameLength + extraLength + commentLength;
@@ -113,7 +127,9 @@ export function readZipCentralDirectory(buffer: Buffer): ZipDirectoryInfo {
 }
 
 /** Office Open XML files are zips with well-known internal entry names. */
-export function classifyZipByEntryNames(names: readonly string[]): "docx" | "xlsx" | "pptx" | "zip" {
+export function classifyZipByEntryNames(
+  names: readonly string[],
+): "docx" | "xlsx" | "pptx" | "zip" {
   const set = new Set(names);
   if (set.has("word/document.xml")) return "docx";
   if (set.has("xl/workbook.xml")) return "xlsx";
@@ -133,8 +149,10 @@ function hasZipSignature(buffer: Buffer): boolean {
 
 function looksLikeAudio(buffer: Buffer): boolean {
   const length = buffer.length;
-  if (length >= 3 && buffer.subarray(0, 3).toString("latin1") === "ID3") return true; // mp3 with ID3 tag
-  if (length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return true; // MPEG/ADTS frame sync
+  if (length >= 3 && buffer.subarray(0, 3).toString("latin1") === "ID3")
+    return true; // mp3 with ID3 tag
+  if (length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)
+    return true; // MPEG/ADTS frame sync
   if (
     length >= 12 &&
     buffer.subarray(0, 4).toString("latin1") === "RIFF" &&
@@ -142,23 +160,37 @@ function looksLikeAudio(buffer: Buffer): boolean {
   ) {
     return true;
   }
-  if (length >= 4 && buffer.subarray(0, 4).toString("latin1") === "OggS") return true;
-  if (length >= 4 && buffer.subarray(0, 4).toString("latin1") === "fLaC") return true;
-  if (length >= 12 && buffer.subarray(4, 8).toString("latin1") === "ftyp") return true; // mp4/m4a container
-  if (length >= 4 && buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+  if (length >= 4 && buffer.subarray(0, 4).toString("latin1") === "OggS")
+    return true;
+  if (length >= 4 && buffer.subarray(0, 4).toString("latin1") === "fLaC")
+    return true;
+  if (length >= 12 && buffer.subarray(4, 8).toString("latin1") === "ftyp")
+    return true; // mp4/m4a container
+  if (
+    length >= 4 &&
+    buffer[0] === 0x1a &&
+    buffer[1] === 0x45 &&
+    buffer[2] === 0xdf &&
+    buffer[3] === 0xa3
+  ) {
     return true; // webm/matroska (EBML)
   }
   return false;
 }
 
 export function detectBinaryFamily(buffer: Buffer): BinaryFamily | null {
-  if (buffer.length >= 5 && buffer.subarray(0, 5).toString("latin1") === "%PDF-") {
+  if (
+    buffer.length >= 5 &&
+    buffer.subarray(0, 5).toString("latin1") === "%PDF-"
+  ) {
     return "pdf";
   }
   if (hasZipSignature(buffer)) {
     try {
       const directory = readZipCentralDirectory(buffer);
-      return classifyZipByEntryNames(directory.entries.map((entry) => entry.name));
+      return classifyZipByEntryNames(
+        directory.entries.map((entry) => entry.name),
+      );
     } catch (err) {
       if (err instanceof ZipFormatError) return null;
       throw err;

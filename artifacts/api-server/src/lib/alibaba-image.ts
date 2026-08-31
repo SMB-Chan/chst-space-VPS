@@ -12,7 +12,8 @@ import { logger } from "./logger";
 const MAX_PROMPT_CHARS = 16_000;
 const MAX_REFERENCE_IMAGES = 3;
 const MAX_REFERENCE_IMAGE_BYTES = 12 * 1024 * 1024;
-const MAX_REFERENCE_DATA_URL_CHARS = Math.ceil(MAX_REFERENCE_IMAGE_BYTES * 4 / 3) + 128;
+const MAX_REFERENCE_DATA_URL_CHARS =
+  Math.ceil((MAX_REFERENCE_IMAGE_BYTES * 4) / 3) + 128;
 const MAX_GENERATED_IMAGE_BYTES = 32 * 1024 * 1024;
 
 export interface AlibabaImageRequest {
@@ -65,7 +66,10 @@ export class AlibabaImageError extends Error {
   }
 }
 
-function normalizeImageModel(modelId: string | undefined, editing: boolean): string {
+function normalizeImageModel(
+  modelId: string | undefined,
+  editing: boolean,
+): string {
   const capability = editing ? "image.edit" : "image.generate";
   const candidate = modelId?.trim() || ALIBABA_CAPABILITY_DEFAULTS[capability];
   if (!modelHasAlibabaCapability(candidate, capability)) {
@@ -79,7 +83,10 @@ function normalizeImageModel(modelId: string | undefined, editing: boolean): str
 
 function validateReferenceImage(value: string): void {
   if (value.length > MAX_REFERENCE_DATA_URL_CHARS) {
-    throw new AlibabaImageError("Reference image is too large", "参照画像が大きすぎます。");
+    throw new AlibabaImageError(
+      "Reference image is too large",
+      "参照画像が大きすぎます。",
+    );
   }
 
   const dataMatch = value.match(
@@ -95,7 +102,10 @@ function validateReferenceImage(value: string): void {
     }
     const decoded = Buffer.from(encoded, "base64");
     if (decoded.length === 0 || decoded.length > MAX_REFERENCE_IMAGE_BYTES) {
-      throw new AlibabaImageError("Reference image is too large", "参照画像が大きすぎます。");
+      throw new AlibabaImageError(
+        "Reference image is too large",
+        "参照画像が大きすぎます。",
+      );
     }
     if (decoded.toString("base64") !== encoded) {
       throw new AlibabaImageError(
@@ -110,7 +120,10 @@ function validateReferenceImage(value: string): void {
   try {
     url = new URL(value);
   } catch {
-    throw new AlibabaImageError("Invalid reference image URL", "参照画像の形式に対応していません。");
+    throw new AlibabaImageError(
+      "Invalid reference image URL",
+      "参照画像の形式に対応していません。",
+    );
   }
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
   const ipHostname =
@@ -135,7 +148,11 @@ function validateReferenceImage(value: string): void {
 function validateSize(value: string | undefined): void {
   if (!value) return;
   const match = /^(\d{3,4})\*(\d{3,4})$/.exec(value);
-  if (!match) throw new AlibabaImageError("Invalid image size", "画像サイズの指定が不正です。");
+  if (!match)
+    throw new AlibabaImageError(
+      "Invalid image size",
+      "画像サイズの指定が不正です。",
+    );
   const width = Number(match[1]);
   const height = Number(match[2]);
   if (width < 512 || height < 512 || width > 4096 || height > 4096) {
@@ -170,14 +187,18 @@ function trustedGeneratedImageUrl(value: string): URL {
   return url;
 }
 
-async function readBoundedResponse(response: Response, maxBytes: number): Promise<Buffer> {
+async function readBoundedResponse(
+  response: Response,
+  maxBytes: number,
+): Promise<Buffer> {
   const declared = Number(response.headers?.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > maxBytes) {
     throw new AlibabaImageError("Generated image exceeds size limit");
   }
   if (!response.body) {
     const data = Buffer.from(await response.arrayBuffer());
-    if (data.length > maxBytes) throw new AlibabaImageError("Generated image exceeds size limit");
+    if (data.length > maxBytes)
+      throw new AlibabaImageError("Generated image exceeds size limit");
     return data;
   }
 
@@ -202,15 +223,23 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
   return Buffer.concat(chunks, total);
 }
 
-async function downloadGeneratedImage(urlString: string, signal?: AbortSignal): Promise<Buffer> {
+async function downloadGeneratedImage(
+  urlString: string,
+  signal?: AbortSignal,
+): Promise<Buffer> {
   const url = trustedGeneratedImageUrl(urlString);
   const response = await fetch(url, { signal, redirect: "error" });
   if (!response.ok) {
-    throw new AlibabaImageError(`Failed to download generated image: HTTP ${response.status}`);
+    throw new AlibabaImageError(
+      `Failed to download generated image: HTTP ${response.status}`,
+    );
   }
-  const contentType = response.headers?.get("content-type")?.toLowerCase() ?? "";
+  const contentType =
+    response.headers?.get("content-type")?.toLowerCase() ?? "";
   if (contentType && !contentType.startsWith("image/")) {
-    throw new AlibabaImageError(`Unexpected generated image content-type: ${contentType}`);
+    throw new AlibabaImageError(
+      `Unexpected generated image content-type: ${contentType}`,
+    );
   }
   return readBoundedResponse(response, MAX_GENERATED_IMAGE_BYTES);
 }
@@ -220,7 +249,10 @@ function extractImageUrls(payload: AlibabaImageApiResponse): string[] {
     payload.output?.choices
       ?.flatMap((choice) => choice.message?.content ?? [])
       .map((item) => item.image)
-      .filter((value): value is string => typeof value === "string" && value.length > 0) ?? [];
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
+      ) ?? [];
   if (multimodalUrls.length > 0) return multimodalUrls;
 
   const compatibleUrls = [
@@ -235,7 +267,8 @@ function extractImageUrls(payload: AlibabaImageApiResponse): string[] {
 
 function extractInlineImage(payload: AlibabaImageApiResponse): Buffer | null {
   for (const item of payload.data ?? []) {
-    if (typeof item.b64_json === "string") return Buffer.from(item.b64_json, "base64");
+    if (typeof item.b64_json === "string")
+      return Buffer.from(item.b64_json, "base64");
     if (typeof item.url === "string") {
       const buffer = dataUrlToBuffer(item.url);
       if (buffer) return buffer;
@@ -257,27 +290,45 @@ export async function generateAlibabaImage(
   }
 
   const prompt = request.prompt.trim();
-  if (!prompt) throw new AlibabaImageError("Image prompt is empty", "画像の内容を指定してください。");
+  if (!prompt)
+    throw new AlibabaImageError(
+      "Image prompt is empty",
+      "画像の内容を指定してください。",
+    );
   if (prompt.length > MAX_PROMPT_CHARS) {
-    throw new AlibabaImageError("Image prompt is too long", "画像生成の指示が長すぎます。");
+    throw new AlibabaImageError(
+      "Image prompt is too long",
+      "画像生成の指示が長すぎます。",
+    );
   }
 
   const referenceImages = request.referenceImages ?? [];
   if (referenceImages.length > MAX_REFERENCE_IMAGES) {
-    throw new AlibabaImageError("Too many reference images", "参照画像は3枚までです。");
+    throw new AlibabaImageError(
+      "Too many reference images",
+      "参照画像は3枚までです。",
+    );
   }
   referenceImages.forEach(validateReferenceImage);
   validateSize(request.size);
 
   const n = request.n ?? 1;
   if (!Number.isSafeInteger(n) || n < 1 || n > 6) {
-    throw new AlibabaImageError("Invalid output image count", "生成枚数は1〜6枚で指定してください。");
+    throw new AlibabaImageError(
+      "Invalid output image count",
+      "生成枚数は1〜6枚で指定してください。",
+    );
   }
   if (
     request.seed !== undefined &&
-    (!Number.isSafeInteger(request.seed) || request.seed < 0 || request.seed > 2_147_483_647)
+    (!Number.isSafeInteger(request.seed) ||
+      request.seed < 0 ||
+      request.seed > 2_147_483_647)
   ) {
-    throw new AlibabaImageError("Invalid image seed", "seed の指定が不正です。");
+    throw new AlibabaImageError(
+      "Invalid image seed",
+      "seed の指定が不正です。",
+    );
   }
 
   const editing = referenceImages.length > 0;
@@ -293,7 +344,9 @@ export async function generateAlibabaImage(
   };
   if (request.size) parameters.size = request.size;
   if (request.negativePrompt?.trim()) {
-    parameters.negative_prompt = request.negativePrompt.trim().slice(0, MAX_PROMPT_CHARS);
+    parameters.negative_prompt = request.negativePrompt
+      .trim()
+      .slice(0, MAX_PROMPT_CHARS);
   }
   if (request.seed !== undefined) parameters.seed = request.seed;
 
@@ -308,7 +361,9 @@ export async function generateAlibabaImage(
     headers: {
       Authorization: `Bearer ${specialist.apiKey}`,
       "Content-Type": "application/json",
-      ...(specialist.workspaceId ? { "X-DashScope-WorkSpace": specialist.workspaceId } : {}),
+      ...(specialist.workspaceId
+        ? { "X-DashScope-WorkSpace": specialist.workspaceId }
+        : {}),
     },
     body: JSON.stringify({
       model: modelId,
@@ -322,7 +377,9 @@ export async function generateAlibabaImage(
   try {
     payload = (await response.json()) as AlibabaImageApiResponse;
   } catch (error) {
-    throw new AlibabaImageError(`Alibaba image API returned invalid JSON: ${String(error)}`);
+    throw new AlibabaImageError(
+      `Alibaba image API returned invalid JSON: ${String(error)}`,
+    );
   }
   if (!response.ok || payload.code) {
     const providerMessage = payload.message || `HTTP ${response.status}`;
@@ -330,7 +387,9 @@ export async function generateAlibabaImage(
       { modelId, status: response.status, code: payload.code, providerMessage },
       "Alibaba image generation failed",
     );
-    throw new AlibabaImageError(`Alibaba image generation failed: ${providerMessage}`);
+    throw new AlibabaImageError(
+      `Alibaba image generation failed: ${providerMessage}`,
+    );
   }
 
   const inline = extractInlineImage(payload);
@@ -367,7 +426,12 @@ export async function generateAlibabaImage(
   }
 
   logger.info(
-    { modelId, requestId: payload.request_id, imageCount: generated.length, editing },
+    {
+      modelId,
+      requestId: payload.request_id,
+      imageCount: generated.length,
+      editing,
+    },
     "Alibaba image generation completed",
   );
   return generated.slice(0, n);

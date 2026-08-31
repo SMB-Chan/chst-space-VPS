@@ -12,7 +12,11 @@ import {
 } from "./search-providers";
 import type { SearchResult } from "./search-parse";
 
-const ENV_KEYS = ["TAVILY_API_KEY", "EXA_API_KEY", "BRAVE_SEARCH_API_KEY"] as const;
+const ENV_KEYS = [
+  "TAVILY_API_KEY",
+  "EXA_API_KEY",
+  "BRAVE_SEARCH_API_KEY",
+] as const;
 const savedEnv = new Map<string, string | undefined>();
 for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
 
@@ -53,7 +57,11 @@ describe("parseBraveResults", () => {
     const json = {
       web: {
         results: [
-          { title: "記事A", url: "https://example.com/a", description: "概要A" },
+          {
+            title: "記事A",
+            url: "https://example.com/a",
+            description: "概要A",
+          },
           { title: "記事B", url: "https://example.com/b" },
         ],
       },
@@ -79,7 +87,10 @@ describe("parseBraveResults", () => {
       web: {
         results: [
           { title: "JS", url: "javascript:alert(1)" },
-          { title: "Credentials", url: "https://user:pass@example.com/private" },
+          {
+            title: "Credentials",
+            url: "https://user:pass@example.com/private",
+          },
           { title: "OK", url: "https://example.com/ok#fragment" },
         ],
       },
@@ -93,7 +104,9 @@ describe("parseBraveResults", () => {
 describe("parseTavilyResults", () => {
   it("maps results with content as snippet", () => {
     const json = {
-      results: [{ title: "T", url: "https://example.com", content: "本文抜粋" }],
+      results: [
+        { title: "T", url: "https://example.com", content: "本文抜粋" },
+      ],
     };
     expect(parseTavilyResults(json)).toEqual([
       { title: "T", url: "https://example.com/", snippet: "本文抜粋" },
@@ -180,7 +193,9 @@ describe("conditional provider ensemble", () => {
       result("c.example", "5"),
     ];
     const primary = stubProvider("primary", async () => primaryResults);
-    const secondary = stubProvider("secondary", async () => [result("d.example", "6")]);
+    const secondary = stubProvider("secondary", async () => [
+      result("d.example", "6"),
+    ]);
 
     const results = await searchWithProviders("query", [primary, secondary]);
     expect(results).toEqual(primaryResults);
@@ -205,11 +220,19 @@ describe("conditional provider ensemble", () => {
       result("five.example", "t2"),
     ]);
 
-    const results = await searchWithProviders("query", [primary, second, third]);
+    const results = await searchWithProviders("query", [
+      primary,
+      second,
+      third,
+    ]);
     expect(second.search).toHaveBeenCalledOnce();
     expect(third.search).toHaveBeenCalledOnce();
-    expect(results.filter((item) => item.url === duplicate.url)).toHaveLength(1);
-    expect(new Set(results.map((item) => new URL(item.url).hostname)).size).toBeGreaterThanOrEqual(4);
+    expect(results.filter((item) => item.url === duplicate.url)).toHaveLength(
+      1,
+    );
+    expect(
+      new Set(results.map((item) => new URL(item.url).hostname)).size,
+    ).toBeGreaterThanOrEqual(4);
     expect(results.length).toBeGreaterThan(primary.search.mock.results.length);
   });
 

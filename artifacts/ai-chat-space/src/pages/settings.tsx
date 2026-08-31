@@ -11,7 +11,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ModelSelector, useAvailableModels } from "@/components/chat/model-selector";
+import {
+  ModelSelector,
+  useAvailableModels,
+} from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { loadSettings, pickAuditModel, saveSettings } from "@/lib/settings";
 import { Switch } from "@/components/ui/switch";
@@ -51,7 +54,9 @@ export function SettingsPage() {
       if (!res.ok && res.status !== 204) {
         throw new Error(`削除に失敗しました (HTTP ${res.status})`);
       }
-      await queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+      await queryClient.invalidateQueries({
+        queryKey: getListOpenaiConversationsQueryKey(),
+      });
       setWipeDone(true);
       setWipeOpen(false);
     } catch (err) {
@@ -65,8 +70,12 @@ export function SettingsPage() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-xl mx-auto px-5 py-10 space-y-10">
         <div>
-          <h1 className="text-2xl font-serif font-medium tracking-tight mb-1">設定</h1>
-          <p className="text-sm text-muted-foreground">既定のモデル、インストール、保存データの管理。</p>
+          <h1 className="text-2xl font-serif font-medium tracking-tight mb-1">
+            設定
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            既定のモデル、インストール、保存データの管理。
+          </p>
         </div>
 
         <section className="space-y-3">
@@ -81,13 +90,17 @@ export function SettingsPage() {
             />
             <ReasoningSelector
               value={settings.defaultReasoning}
-              onSelect={(level) => setSettings(saveSettings({ defaultReasoning: level }))}
+              onSelect={(level) =>
+                setSettings(saveSettings({ defaultReasoning: level }))
+              }
             />
           </div>
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-foreground">中立監査モード</h2>
+          <h2 className="text-sm font-medium text-foreground">
+            中立監査モード
+          </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             回答のあと、別モデルが会話履歴なしで本文を点検します。使用中のモデルがその指摘を読んで最終報告を書き直し、それを本文として出します。監査モデルは別の系統を指定してください。
           </p>
@@ -95,19 +108,27 @@ export function SettingsPage() {
             <span className="text-sm">監査を有効にする</span>
             <Switch
               checked={settings.auditEnabled}
-              onCheckedChange={(checked) => setSettings(saveSettings({ auditEnabled: checked }))}
+              onCheckedChange={(checked) =>
+                setSettings(saveSettings({ auditEnabled: checked }))
+              }
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">監査モデル</span>
             <ModelSelector
-              selectedModel={pickAuditModel(settings.defaultModel, models, settings.auditModelId)}
+              selectedModel={pickAuditModel(
+                settings.defaultModel,
+                models,
+                settings.auditModelId,
+              )}
               onSelect={(id) => setSettings(saveSettings({ auditModelId: id }))}
               disabled={!settings.auditEnabled}
             />
             <ReasoningSelector
               value={settings.auditReasoning}
-              onSelect={(level) => setSettings(saveSettings({ auditReasoning: level }))}
+              onSelect={(level) =>
+                setSettings(saveSettings({ auditReasoning: level }))
+              }
               disabled={!settings.auditEnabled}
             />
           </div>
@@ -117,7 +138,9 @@ export function SettingsPage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-foreground">アプリとして使う</h2>
+          <h2 className="text-sm font-medium text-foreground">
+            アプリとして使う
+          </h2>
           <p className="text-xs text-muted-foreground">
             ホーム画面に追加すると、ブラウザの枠なしで開けます。オフライン時も画面の骨格は残ります（会話の送信には接続が必要です）。
           </p>
@@ -130,7 +153,11 @@ export function SettingsPage() {
             <Button
               onClick={async () => {
                 const ok = await install();
-                setInstallHint(ok ? "インストールを開始しました。" : "キャンセルされました。");
+                setInstallHint(
+                  ok
+                    ? "インストールを開始しました。"
+                    : "キャンセルされました。",
+                );
               }}
               className="gap-2"
             >
@@ -141,15 +168,20 @@ export function SettingsPage() {
             <div className="flex items-start gap-2 text-sm text-muted-foreground">
               <Smartphone className="w-4 h-4 mt-0.5 shrink-0" />
               <span>
-                ブラウザの共有メニューや「ホーム画面に追加」からインストールできます。Chrome / Edge / Safari に対応しています。
+                ブラウザの共有メニューや「ホーム画面に追加」からインストールできます。Chrome
+                / Edge / Safari に対応しています。
               </span>
             </div>
           )}
-          {installHint && <p className="text-xs text-muted-foreground">{installHint}</p>}
+          {installHint && (
+            <p className="text-xs text-muted-foreground">{installHint}</p>
+          )}
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-foreground">プライベートセッション</h2>
+          <h2 className="text-sm font-medium text-foreground">
+            プライベートセッション
+          </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             サイドバーの「プライベート」から始める会話はサーバーに保存されません。タブを閉じると履歴は消えます。
             通常の会話はアカウントに紐づいて残ります。
@@ -161,11 +193,19 @@ export function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             このアカウントに保存されている会話とメッセージをすべて削除します。元に戻せません。既定モデルの設定は端末に残ります。
           </p>
-          <Button variant="destructive" className="gap-2" onClick={() => setWipeOpen(true)}>
+          <Button
+            variant="destructive"
+            className="gap-2"
+            onClick={() => setWipeOpen(true)}
+          >
             <Trash2 className="w-4 h-4" />
             すべての会話を削除
           </Button>
-          {wipeDone && <p className="text-xs text-muted-foreground">会話を削除しました。</p>}
+          {wipeDone && (
+            <p className="text-xs text-muted-foreground">
+              会話を削除しました。
+            </p>
+          )}
           {wipeError && <p className="text-xs text-destructive">{wipeError}</p>}
         </section>
       </div>
@@ -173,7 +213,9 @@ export function SettingsPage() {
       <AlertDialog open={wipeOpen} onOpenChange={setWipeOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>保存済みの会話をすべて削除しますか？</AlertDialogTitle>
+            <AlertDialogTitle>
+              保存済みの会話をすべて削除しますか？
+            </AlertDialogTitle>
             <AlertDialogDescription>
               このアカウントの履歴とメッセージが消えます。この操作は取り消せません。
             </AlertDialogDescription>

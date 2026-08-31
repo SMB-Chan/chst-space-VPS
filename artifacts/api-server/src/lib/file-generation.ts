@@ -1,5 +1,12 @@
 import { PDFDocument, rgb } from "pdf-lib";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
+  AlignmentType,
+} from "docx";
 import { embedFontForText } from "./pdf-fonts";
 import { writePptxPresentation } from "./pptx-writer";
 import { writeXlsxWorkbook } from "./xlsx-writer";
@@ -44,10 +51,7 @@ export interface ParsedFileData {
 }
 
 export type FileDataParseStatus =
-  | "parsed"
-  | "missing-file-data"
-  | "invalid-json"
-  | "invalid-shape";
+  "parsed" | "missing-file-data" | "invalid-json" | "invalid-shape";
 
 export interface FileDataParseResult {
   status: FileDataParseStatus;
@@ -72,8 +76,22 @@ const FORMAT_EXTENSIONS: Record<FileFormat, string> = {
 const FORMAT_KEYWORDS: Record<FileFormat, RegExp[]> = {
   pdf: [/pdf/i, /PDF/i, /レポート.*(pdf|PDF)/, /pdf.*レポート/],
   docx: [/word/i, /docx/i, /doc/i, /ドキュメント/, /文書/],
-  xlsx: [/excel/i, /xlsx/i, /xls/i, /スプレッドシート/, /表.*エクセル/, /エクセル/],
-  pptx: [/powerpoint/i, /pptx/i, /ppt/i, /スライド/, /プレゼン/, /パワーポイント/],
+  xlsx: [
+    /excel/i,
+    /xlsx/i,
+    /xls/i,
+    /スプレッドシート/,
+    /表.*エクセル/,
+    /エクセル/,
+  ],
+  pptx: [
+    /powerpoint/i,
+    /pptx/i,
+    /ppt/i,
+    /スライド/,
+    /プレゼン/,
+    /パワーポイント/,
+  ],
 };
 
 /**
@@ -95,7 +113,10 @@ export function detectFileFormat(
 
 export function generateFilename(format: FileFormat, title?: string): string {
   const safeTitle = title
-    ? title.replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 64)
+    ? title
+        .replace(/[\\/:*?"<>|]/g, "_")
+        .trim()
+        .slice(0, 64)
     : "chat-space-export";
   return `${safeTitle}.${FORMAT_EXTENSIONS[format]}`;
 }
@@ -107,14 +128,10 @@ export function generateFilename(format: FileFormat, title?: string): string {
  */
 export function buildFileGenerationPrompt(format: FileFormat): string {
   const formatInstructions: Record<FileFormat, string> = {
-    pdf:
-      '{"title": "レポートのタイトル", "content": "# 見出し\\n\\n本文。箇条書きの場合は\\n- 項目1\\n- 項目2\\nのように書く。"}',
-    docx:
-      '{"title": "ドキュメントのタイトル", "content": "# 見出し\\n\\n本文。箇条書きの場合は\\n- 項目1\\n- 項目2\\nのように書く。"}',
-    xlsx:
-      '{"title": "ワークブックのタイトル", "sheets": [{"name": "Sheet1", "headers": ["列A", "列B"], "rows": [["a1", "b1"], ["a2", "b2"]]}]}',
-    pptx:
-      '{"title": "プレゼンテーションのタイトル", "slides": [{"title": "スライドのタイトル", "bullets": ["ポイント1", "ポイント2"]}]}',
+    pdf: '{"title": "レポートのタイトル", "content": "# 見出し\\n\\n本文。箇条書きの場合は\\n- 項目1\\n- 項目2\\nのように書く。"}',
+    docx: '{"title": "ドキュメントのタイトル", "content": "# 見出し\\n\\n本文。箇条書きの場合は\\n- 項目1\\n- 項目2\\nのように書く。"}',
+    xlsx: '{"title": "ワークブックのタイトル", "sheets": [{"name": "Sheet1", "headers": ["列A", "列B"], "rows": [["a1", "b1"], ["a2", "b2"]]}]}',
+    pptx: '{"title": "プレゼンテーションのタイトル", "slides": [{"title": "スライドのタイトル", "bullets": ["ポイント1", "ポイント2"]}]}',
   };
 
   const formatNotes: Record<FileFormat, string> = {
@@ -181,16 +198,17 @@ export function buildFileGenerationUserMessage(
     );
   }
 
-  parts.push("", "Return only the <file_data> JSON required by the system message.");
+  parts.push(
+    "",
+    "Return only the <file_data> JSON required by the system message.",
+  );
   return parts.join("\n");
 }
 
 /**
  * Parse the <file_data> JSON block from LLM output.
  */
-function normalizeCell(
-  value: unknown,
-): string | number | boolean | null {
+function normalizeCell(value: unknown): string | number | boolean | null {
   return typeof value === "string" ||
     typeof value === "number" ||
     typeof value === "boolean" ||
@@ -199,9 +217,10 @@ function normalizeCell(
     : null;
 }
 
-function normalizeParsedFileData(
-  value: Record<string, unknown>,
-): { data: ParsedFileData; ignoredFields: string[] } {
+function normalizeParsedFileData(value: Record<string, unknown>): {
+  data: ParsedFileData;
+  ignoredFields: string[];
+} {
   const data: ParsedFileData = {};
   const ignoredFields: string[] = [];
 
@@ -218,7 +237,9 @@ function normalizeParsedFileData(
       data.sheets = value.sheets
         .filter(
           (sheet): sheet is Record<string, unknown> =>
-            typeof sheet === "object" && sheet !== null && !Array.isArray(sheet),
+            typeof sheet === "object" &&
+            sheet !== null &&
+            !Array.isArray(sheet),
         )
         .map((sheet) => ({
           name: typeof sheet.name === "string" ? sheet.name : "Sheet1",
@@ -240,7 +261,9 @@ function normalizeParsedFileData(
       data.slides = value.slides
         .filter(
           (slide): slide is Record<string, unknown> =>
-            typeof slide === "object" && slide !== null && !Array.isArray(slide),
+            typeof slide === "object" &&
+            slide !== null &&
+            !Array.isArray(slide),
         )
         .map((slide) => ({
           title: typeof slide.title === "string" ? slide.title : "Slide",
@@ -326,7 +349,10 @@ export async function renderFile(
   }
 }
 
-function mergeFileData(base: ParsedFileData, update: ParsedFileData): ParsedFileData {
+function mergeFileData(
+  base: ParsedFileData,
+  update: ParsedFileData,
+): ParsedFileData {
   return {
     title: update.title ?? base.title,
     content: update.content ?? base.content,
@@ -339,11 +365,18 @@ function normalizeContent(parsed: ParsedFileData, fallback: string): string {
   return (parsed.content ?? fallback).replace(/\r\n/g, "\n").trim();
 }
 
-async function renderPdf(parsed: ParsedFileData, title: string, format: FileFormat): Promise<GeneratedFile> {
+async function renderPdf(
+  parsed: ParsedFileData,
+  title: string,
+  format: FileFormat,
+): Promise<GeneratedFile> {
   const content = normalizeContent(parsed, title);
   const combinedText = `${title}\n${content}`;
   const pdfDoc = await PDFDocument.create();
-  const { regular: font, bold: boldFont } = await embedFontForText(pdfDoc, combinedText);
+  const { regular: font, bold: boldFont } = await embedFontForText(
+    pdfDoc,
+    combinedText,
+  );
   const pageWidth = 612;
   const pageHeight = 792;
   const margin = 50;
@@ -356,7 +389,10 @@ async function renderPdf(parsed: ParsedFileData, title: string, format: FileForm
 
   const isWhitespace = (char: string) => /\s/.test(char);
 
-  const drawText = (text: string, opts: { font?: typeof font; size?: number; indent?: number } = {}) => {
+  const drawText = (
+    text: string,
+    opts: { font?: typeof font; size?: number; indent?: number } = {},
+  ) => {
     const f = opts.font ?? font;
     const size = opts.size ?? 11;
     const indent = opts.indent ?? 0;
@@ -373,7 +409,13 @@ async function renderPdf(parsed: ParsedFileData, title: string, format: FileForm
           page = pdfDoc.addPage([pageWidth, pageHeight]);
           y = pageHeight - margin;
         }
-        page.drawText(line, { x: margin + indent, y, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+        page.drawText(line, {
+          x: margin + indent,
+          y,
+          size,
+          font: f,
+          color: rgb(0.1, 0.1, 0.1),
+        });
         y -= lineHeight * (size / 11);
         line = isWhitespace(char) ? "" : char;
       } else {
@@ -385,7 +427,13 @@ async function renderPdf(parsed: ParsedFileData, title: string, format: FileForm
         page = pdfDoc.addPage([pageWidth, pageHeight]);
         y = pageHeight - margin;
       }
-      page.drawText(line, { x: margin + indent, y, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+      page.drawText(line, {
+        x: margin + indent,
+        y,
+        size,
+        font: f,
+        color: rgb(0.1, 0.1, 0.1),
+      });
       y -= lineHeight * (size / 11);
     }
   };
@@ -483,7 +531,11 @@ function markdownToDocxParagraphs(content: string): Paragraph[] {
   return paragraphs;
 }
 
-async function renderDocx(parsed: ParsedFileData, title: string, format: FileFormat): Promise<GeneratedFile> {
+async function renderDocx(
+  parsed: ParsedFileData,
+  title: string,
+  format: FileFormat,
+): Promise<GeneratedFile> {
   const content = normalizeContent(parsed, title);
   const children: Paragraph[] = [
     new Paragraph({
@@ -529,7 +581,11 @@ function normalizeSheets(parsed: ParsedFileData, title: string): SheetData[] {
   ];
 }
 
-async function renderXlsx(parsed: ParsedFileData, title: string, format: FileFormat): Promise<GeneratedFile> {
+async function renderXlsx(
+  parsed: ParsedFileData,
+  title: string,
+  format: FileFormat,
+): Promise<GeneratedFile> {
   const buffer = writeXlsxWorkbook(normalizeSheets(parsed, title));
   return {
     buffer,
@@ -557,7 +613,11 @@ function normalizeSlides(parsed: ParsedFileData, title: string): SlideData[] {
   ];
 }
 
-async function renderPptx(parsed: ParsedFileData, title: string, format: FileFormat): Promise<GeneratedFile> {
+async function renderPptx(
+  parsed: ParsedFileData,
+  title: string,
+  format: FileFormat,
+): Promise<GeneratedFile> {
   const buffer = writePptxPresentation(normalizeSlides(parsed, title), title);
   return {
     buffer,

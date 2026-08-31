@@ -32,7 +32,9 @@ describe("transcribeAudio", () => {
   });
 
   it("falls back to whisper-1 when the preferred model is unavailable", async () => {
-    const unavailable = Object.assign(new Error("The model does not exist"), { status: 404 });
+    const unavailable = Object.assign(new Error("The model does not exist"), {
+      status: 404,
+    });
     createMock.mockRejectedValueOnce(unavailable);
     createMock.mockResolvedValueOnce("second model ok");
     const text = await transcribeAudio(audioArgs());
@@ -45,7 +47,9 @@ describe("transcribeAudio", () => {
   it("raises a user-facing error when every provider fails", async () => {
     const outage = Object.assign(new Error("quota exceeded"), { status: 429 });
     createMock.mockRejectedValue(outage);
-    await expect(transcribeAudio(audioArgs())).rejects.toThrow(TranscriptionError);
+    await expect(transcribeAudio(audioArgs())).rejects.toThrow(
+      TranscriptionError,
+    );
     // A non-model error must not cascade across sibling models.
     expect(createMock).toHaveBeenCalledTimes(1);
   });

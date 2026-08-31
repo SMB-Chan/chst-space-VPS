@@ -4,20 +4,35 @@ import { logger } from "./logger";
 import type { FileFormat } from "./file-generation";
 
 const DEFAULT_VISION_MODEL = "gpt-5.6-terra";
-const NO_ISSUE_MARKERS = ["NO_ISSUES", "問題なし", "問題はありません", "問題は見つかりません"];
+const NO_ISSUE_MARKERS = [
+  "NO_ISSUES",
+  "問題なし",
+  "問題はありません",
+  "問題は見つかりません",
+];
 
-export function getVisionClient(modelId?: string): { client: OpenAI; modelId: string } {
-  const resolvedModelId = modelId && modelSupportsVision(modelId) ? modelId : DEFAULT_VISION_MODEL;
+export function getVisionClient(modelId?: string): {
+  client: OpenAI;
+  modelId: string;
+} {
+  const resolvedModelId =
+    modelId && modelSupportsVision(modelId) ? modelId : DEFAULT_VISION_MODEL;
   const { client } = getClientForModel(resolvedModelId);
   return { client, modelId: resolvedModelId };
 }
 
-export function buildLayoutReviewPrompt(format: FileFormat, pageCount: number): string {
+export function buildLayoutReviewPrompt(
+  format: FileFormat,
+  pageCount: number,
+): string {
   const formatName =
-    format === "pdf" ? "PDF" :
-    format === "docx" ? "Word" :
-    format === "xlsx" ? "Excel" :
-    "PowerPoint";
+    format === "pdf"
+      ? "PDF"
+      : format === "docx"
+        ? "Word"
+        : format === "xlsx"
+          ? "Excel"
+          : "PowerPoint";
 
   return [
     `You are reviewing the generated ${formatName} document rendered as ${pageCount} preview image(s).`,

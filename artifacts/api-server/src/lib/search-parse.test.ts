@@ -31,7 +31,9 @@ describe("normalizeExternalHttpUrl", () => {
   });
 
   it("rejects credential-bearing and non-http URLs", () => {
-    expect(normalizeExternalHttpUrl("https://user:pass@example.com/private")).toBeNull();
+    expect(
+      normalizeExternalHttpUrl("https://user:pass@example.com/private"),
+    ).toBeNull();
     expect(normalizeExternalHttpUrl("javascript:alert(1)")).toBeNull();
     expect(normalizeExternalHttpUrl("file:///etc/passwd")).toBeNull();
   });
@@ -51,8 +53,12 @@ describe("extractUrls", () => {
 
 describe("parseSearchHtml", () => {
   it("deduplicates DuckDuckGo results after URL canonicalization", () => {
-    const first = encodeURIComponent("https://example.com/story?utm_source=ddg");
-    const second = encodeURIComponent("https://example.com/story?fbclid=abc#comments");
+    const first = encodeURIComponent(
+      "https://example.com/story?utm_source=ddg",
+    );
+    const second = encodeURIComponent(
+      "https://example.com/story?fbclid=abc#comments",
+    );
     const html = `
       <a class="result__a" href="/?uddg=${first}">Story one</a>
       <a class="result__snippet">First snippet</a>

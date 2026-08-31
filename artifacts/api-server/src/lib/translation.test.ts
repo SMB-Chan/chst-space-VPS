@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildTranslationSystemPrompt, parseTranslationMode } from "./translation";
+import {
+  buildTranslationSystemPrompt,
+  parseTranslationMode,
+} from "./translation";
 
 describe("parseTranslationMode", () => {
   it("accepts known modes", () => {

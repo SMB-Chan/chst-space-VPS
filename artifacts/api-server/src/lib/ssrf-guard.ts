@@ -57,7 +57,10 @@ export function isPrivateAddress(ip: string): boolean {
  * AbortSignal so a stalled resolver cannot hold the request beyond the
  * configured deadline.
  */
-export async function assertSafeUrl(rawUrl: string, signal?: AbortSignal): Promise<URL> {
+export async function assertSafeUrl(
+  rawUrl: string,
+  signal?: AbortSignal,
+): Promise<URL> {
   const url = new URL(rawUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Blocked protocol: ${url.protocol}`);
@@ -67,10 +70,16 @@ export async function assertSafeUrl(rawUrl: string, signal?: AbortSignal): Promi
   }
   const host = url.hostname;
   if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error(`Blocked private address: ${host}`);
+    if (isPrivateAddress(host))
+      throw new Error(`Blocked private address: ${host}`);
     return url;
   }
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
     throw new Error(`Blocked host: ${host}`);
   }
 
@@ -78,7 +87,8 @@ export async function assertSafeUrl(rawUrl: string, signal?: AbortSignal): Promi
   // interrupted as soon as the overall fetch deadline fires.
   const lookupPromise = lookup(host, { all: true }).then((addrs) => {
     for (const { address } of addrs) {
-      if (isPrivateAddress(address)) throw new Error(`Blocked host resolving to private address: ${host}`);
+      if (isPrivateAddress(address))
+        throw new Error(`Blocked host resolving to private address: ${host}`);
     }
     return url;
   });
@@ -90,7 +100,11 @@ export async function assertSafeUrl(rawUrl: string, signal?: AbortSignal): Promi
     if (signal.aborted) {
       reject(new Error("DNS lookup aborted"));
     } else {
-      signal.addEventListener("abort", () => reject(new Error("DNS lookup aborted")), { once: true });
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("DNS lookup aborted")),
+        { once: true },
+      );
     }
   });
 
@@ -114,7 +128,7 @@ export function createSafeDnsLookup(): LookupFunction {
           return callback(
             new Error(`Blocked private address for host ${hostname}`),
             address as never,
-            family as never
+            family as never,
           );
         }
       }

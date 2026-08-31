@@ -1162,58 +1162,58 @@ export function ChatPage() {
         <div className="max-w-4xl mx-auto space-y-2">
           <div className="relative">
             <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0 pb-1">
-            <ModelSelector
-              selectedModel={selectedModel}
-              onSelect={setSelectedModel}
-              disabled={isStreaming || createConversation.isPending}
-            />
-            {(models.find((m) => m.id === selectedModel)?.supportsReasoning ??
-              true) && (
-              <ReasoningSelector
-                value={reasoningLevel}
-                onSelect={setReasoningLevel}
+              <ModelSelector
+                selectedModel={selectedModel}
+                onSelect={setSelectedModel}
                 disabled={isStreaming || createConversation.isPending}
               />
-            )}
-            <TranslationModeSelector
-              value={translationMode}
-              onSelect={(mode) => {
-                setTranslationMode(mode);
-                saveSettings({ translationMode: mode });
-              }}
-              disabled={isStreaming || createConversation.isPending}
-            />
-            <button
-              type="button"
-              disabled={isStreaming || createConversation.isPending}
-              onClick={() => {
-                const next = !auditEnabled;
-                setAuditEnabled(next);
-                saveSettings({ auditEnabled: next });
-              }}
-              className={cn(
-                "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center",
-                auditEnabled
-                  ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
-                  : "text-muted-foreground border-border/50 hover:text-foreground",
-                (isStreaming || createConversation.isPending) && "opacity-50",
+              {(models.find((m) => m.id === selectedModel)?.supportsReasoning ??
+                true) && (
+                <ReasoningSelector
+                  value={reasoningLevel}
+                  onSelect={setReasoningLevel}
+                  disabled={isStreaming || createConversation.isPending}
+                />
               )}
-              title={
-                auditEnabled && auditModel
-                  ? `監査: ${auditModel}`
+              <TranslationModeSelector
+                value={translationMode}
+                onSelect={(mode) => {
+                  setTranslationMode(mode);
+                  saveSettings({ translationMode: mode });
+                }}
+                disabled={isStreaming || createConversation.isPending}
+              />
+              <button
+                type="button"
+                disabled={isStreaming || createConversation.isPending}
+                onClick={() => {
+                  const next = !auditEnabled;
+                  setAuditEnabled(next);
+                  saveSettings({ auditEnabled: next });
+                }}
+                className={cn(
+                  "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center",
+                  auditEnabled
+                    ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
+                    : "text-muted-foreground border-border/50 hover:text-foreground",
+                  (isStreaming || createConversation.isPending) && "opacity-50",
+                )}
+                title={
+                  auditEnabled && auditModel
+                    ? `監査: ${auditModel}`
+                    : auditEnabled
+                      ? "監査 ON（監査モデルが選択されていません）"
+                      : "監査モード"
+                }
+              >
+                <Scale className="w-3 h-3" />
+                監査
+                {auditEnabled && auditModel
+                  ? " ON"
                   : auditEnabled
-                    ? "監査 ON（監査モデルが選択されていません）"
-                    : "監査モード"
-              }
-            >
-              <Scale className="w-3 h-3" />
-              監査
-              {auditEnabled && auditModel
-                ? " ON"
-                : auditEnabled
-                  ? " ON(?)"
-                  : ""}
-            </button>
+                    ? " ON(?)"
+                    : ""}
+              </button>
             </div>
             <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-8 bg-gradient-to-l from-background to-transparent md:hidden" />
           </div>

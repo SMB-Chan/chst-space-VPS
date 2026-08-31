@@ -1,9 +1,29 @@
 import { parseReasoningLevel, type ReasoningLevel } from "./reasoning";
 
-export type TranslationModeSetting = "off" | "auto" | "ja-en" | "en-ja" | "auto-ko" | "ja-ko" | "ko-ja" | "auto-zh" | "ja-zh" | "zh-ja";
+export type TranslationModeSetting =
+  | "off"
+  | "auto"
+  | "ja-en"
+  | "en-ja"
+  | "auto-ko"
+  | "ja-ko"
+  | "ko-ja"
+  | "auto-zh"
+  | "ja-zh"
+  | "zh-ja";
 
 function parseTranslationModeSetting(raw: unknown): TranslationModeSetting {
-  return ["auto", "ja-en", "en-ja", "auto-ko", "ja-ko", "ko-ja", "auto-zh", "ja-zh", "zh-ja"].includes(raw as string)
+  return [
+    "auto",
+    "ja-en",
+    "en-ja",
+    "auto-ko",
+    "ja-ko",
+    "ko-ja",
+    "auto-zh",
+    "ja-zh",
+    "zh-ja",
+  ].includes(raw as string)
     ? (raw as TranslationModeSetting)
     : "off";
 }
@@ -55,11 +75,15 @@ export function loadSettings(): AppSettings {
 export function saveSettings(patch: Partial<AppSettings>): AppSettings {
   const next = { ...loadSettings(), ...patch };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  window.dispatchEvent(new CustomEvent("chat-space-settings", { detail: next }));
+  window.dispatchEvent(
+    new CustomEvent("chat-space-settings", { detail: next }),
+  );
   return next;
 }
 
-export function subscribeSettings(listener: (settings: AppSettings) => void): () => void {
+export function subscribeSettings(
+  listener: (settings: AppSettings) => void,
+): () => void {
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY) listener(loadSettings());
   };
@@ -80,11 +104,17 @@ export function pickAuditModel(
   models: { id: string; provider: string }[],
   preferred?: string,
 ): string {
-  if (preferred && preferred !== primaryId && models.some((m) => m.id === preferred)) {
+  if (
+    preferred &&
+    preferred !== primaryId &&
+    models.some((m) => m.id === preferred)
+  ) {
     return preferred;
   }
   const primary = models.find((m) => m.id === primaryId);
-  const otherProvider = models.find((m) => m.id !== primaryId && m.provider !== primary?.provider);
+  const otherProvider = models.find(
+    (m) => m.id !== primaryId && m.provider !== primary?.provider,
+  );
   if (otherProvider) return otherProvider.id;
   return models.find((m) => m.id !== primaryId)?.id ?? primaryId;
 }

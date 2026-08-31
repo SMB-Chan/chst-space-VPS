@@ -40,7 +40,9 @@ parentPort.on("message", async (request: WorkerRequest) => {
         break;
       default: {
         const exhaustive: never = request.family;
-        throw new Error(`Unsupported isolated attachment family: ${String(exhaustive)}`);
+        throw new Error(
+          `Unsupported isolated attachment family: ${String(exhaustive)}`,
+        );
       }
     }
     parentPort?.postMessage({ ok: true, text });

@@ -31,20 +31,29 @@ export function serializeAttachmentMessage(
   })}`;
 }
 
-export function parseAttachmentMessageForDisplay(
-  content: string,
-): { displayContent: string; attachments: AttachmentChip[] } {
+export function parseAttachmentMessageForDisplay(content: string): {
+  displayContent: string;
+  attachments: AttachmentChip[];
+} {
   if (content.startsWith(ATTACHMENTS_V1_PREFIX)) {
     try {
-      const parsed = JSON.parse(content.slice(ATTACHMENTS_V1_PREFIX.length)) as {
+      const parsed = JSON.parse(
+        content.slice(ATTACHMENTS_V1_PREFIX.length),
+      ) as {
         question?: unknown;
         attachments?: unknown;
       };
-      const displayContent = typeof parsed.question === "string" ? parsed.question : "";
+      const displayContent =
+        typeof parsed.question === "string" ? parsed.question : "";
       const raw = Array.isArray(parsed.attachments) ? parsed.attachments : [];
       const attachments = raw.flatMap((item): AttachmentChip[] => {
         if (!item || typeof item !== "object") return [];
-        const rec = item as { kind?: unknown; type?: unknown; name?: unknown; isBase64?: unknown };
+        const rec = item as {
+          kind?: unknown;
+          type?: unknown;
+          name?: unknown;
+          isBase64?: unknown;
+        };
         if (typeof rec.name !== "string") return [];
         // kind/type があればそれが正（バイナリ文書・音声は base64 でも "file"）。
         // どちらもない旧データだけ isBase64 で推定する。
@@ -71,7 +80,12 @@ export function parseAttachmentMessageForDisplay(
   if (fileMatch) {
     return {
       displayContent: fileMatch[4],
-      attachments: [{ kind: fileMatch[1] === "Image" ? "image" : "file", name: fileMatch[2] }],
+      attachments: [
+        {
+          kind: fileMatch[1] === "Image" ? "image" : "file",
+          name: fileMatch[2],
+        },
+      ],
     };
   }
 
@@ -85,9 +99,10 @@ export function parseAttachmentMessageForDisplay(
 export function compactAttachmentMessageForHistory(content: string): string {
   const parsed = parseAttachmentMessageForDisplay(content);
   if (parsed.attachments.length === 0) return parsed.displayContent;
-  const names = parsed.attachments.map((attachment) => attachment.name).join("、");
+  const names = parsed.attachments
+    .map((attachment) => attachment.name)
+    .join("、");
   return `${parsed.displayContent || "以前の添付についての質問"}
 
 （以前の添付 ${names} は、このターンでは再送されていません。）`;
 }
-

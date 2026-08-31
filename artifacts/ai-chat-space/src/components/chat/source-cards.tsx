@@ -47,7 +47,10 @@ export function SourceCards({ sources }: SourceCardsProps) {
             >
               {/* Deliberately use a local icon. Fetching favicons through a
                   third party would disclose every cited domain to that party. */}
-              <Globe2 className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+              <Globe2
+                className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60"
+                aria-hidden="true"
+              />
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2 break-words">
                   {(source.title || domain).slice(0, 180)}
@@ -56,7 +59,9 @@ export function SourceCards({ sources }: SourceCardsProps) {
                   {domain}
                 </div>
                 <div className="text-[10px] text-muted-foreground/60 leading-snug">
-                  公開日: {source.publishedAt ? formatDate(source.publishedAt) : "不明"} ・ 取得: {formatDate(source.fetchedAt)}
+                  公開日:{" "}
+                  {source.publishedAt ? formatDate(source.publishedAt) : "不明"}{" "}
+                  ・ 取得: {formatDate(source.fetchedAt)}
                 </div>
               </div>
               <ExternalLink className="w-3 h-3 shrink-0 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
@@ -71,11 +76,13 @@ export function SourceCards({ sources }: SourceCardsProps) {
 function formatDate(value?: string | null): string {
   if (!value) return "不明";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "不明" : date.toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return Number.isNaN(date.getTime())
+    ? "不明"
+    : date.toLocaleString("ja-JP", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 }

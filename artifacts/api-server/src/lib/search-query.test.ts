@@ -3,13 +3,23 @@ import { inferSearchQuery, parseSearchHtml } from "./search-parse";
 
 describe("inferSearchQuery", () => {
   it("searches freshness-sensitive Japanese questions", () => {
-    expect(inferSearchQuery("今日の東京の天気は？")).toMatchObject({ needed: true });
-    expect(inferSearchQuery("最新の円安ニュース")).toMatchObject({ needed: true });
+    expect(inferSearchQuery("今日の東京の天気は？")).toMatchObject({
+      needed: true,
+    });
+    expect(inferSearchQuery("最新の円安ニュース")).toMatchObject({
+      needed: true,
+    });
   });
 
   it("skips greetings and bare URLs", () => {
-    expect(inferSearchQuery("こんにちは")).toEqual({ needed: false, query: "" });
-    expect(inferSearchQuery("https://example.com/page")).toEqual({ needed: false, query: "" });
+    expect(inferSearchQuery("こんにちは")).toEqual({
+      needed: false,
+      query: "",
+    });
+    expect(inferSearchQuery("https://example.com/page")).toEqual({
+      needed: false,
+      query: "",
+    });
   });
 });
 

@@ -68,10 +68,14 @@ describe("Qwen Audio ASR transport", () => {
     expect(url.toString()).toBe(
       "https://workspace-123.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
     );
-    expect((init.headers as Record<string, string>)["X-DashScope-SSE"]).toBe("disable");
+    expect((init.headers as Record<string, string>)["X-DashScope-SSE"]).toBe(
+      "disable",
+    );
     const body = JSON.parse(String(init.body));
     expect(body.model).toBe("qwen-audio-3.0-asr-flash");
-    expect(body.input.messages[0].content[0].input_audio.data).toMatch(/^data:audio\/wav;base64,/);
+    expect(body.input.messages[0].content[0].input_audio.data).toMatch(
+      /^data:audio\/wav;base64,/,
+    );
     expect(body.parameters).toEqual({
       format: "wav",
       sample_rate: "16000",
@@ -81,11 +85,19 @@ describe("Qwen Audio ASR transport", () => {
 
   it("uses output.text when the nested sentence field is absent", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ output: { text: "fallback transcript" } }), { status: 200 }),
+      new Response(
+        JSON.stringify({ output: { text: "fallback transcript" } }),
+        { status: 200 },
+      ),
     );
     await expect(
       transcribeQwenAudio(
-        { buffer: Buffer.from("ID3not-real-but-format-is-mime"), filename: "memo.mp3", mime: "audio/mpeg", durationSeconds: 1 },
+        {
+          buffer: Buffer.from("ID3not-real-but-format-is-mime"),
+          filename: "memo.mp3",
+          mime: "audio/mpeg",
+          durationSeconds: 1,
+        },
         env,
       ),
     ).resolves.toBe("fallback transcript");
@@ -102,13 +114,18 @@ describe("Qwen Audio ASR transport", () => {
         },
         env,
       ),
-    ).rejects.toMatchObject({ publicMessage: "対応していない音声形式です。MP3、WAV、M4A、OGG、FLAC、WebMなどを使用してください。" });
+    ).rejects.toMatchObject({
+      publicMessage:
+        "対応していない音声形式です。MP3、WAV、M4A、OGG、FLAC、WebMなどを使用してください。",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("accepts a valid MP3 frame header with a non-reserved version and layer", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ output: { text: "mp3 transcript" } }), { status: 200 }),
+      new Response(JSON.stringify({ output: { text: "mp3 transcript" } }), {
+        status: 200,
+      }),
     );
     await expect(
       transcribeQwenAudio(
@@ -121,13 +138,17 @@ describe("Qwen Audio ASR transport", () => {
         env,
       ),
     ).resolves.toBe("mp3 transcript");
-    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0][1] as RequestInit).body),
+    );
     expect(body.parameters.format).toBe("mp3");
   });
 
   it("continues treating an AAC ADTS frame as AAC", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ output: { text: "aac transcript" } }), { status: 200 }),
+      new Response(JSON.stringify({ output: { text: "aac transcript" } }), {
+        status: 200,
+      }),
     );
     await expect(
       transcribeQwenAudio(
@@ -140,14 +161,21 @@ describe("Qwen Audio ASR transport", () => {
         env,
       ),
     ).resolves.toBe("aac transcript");
-    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0][1] as RequestInit).body),
+    );
     expect(body.parameters.format).toBe("aac");
   });
 
   it("rejects clips over five minutes and more than four language hints before network access", async () => {
     await expect(
       transcribeQwenAudio(
-        { buffer: wavFixture(), filename: "long.wav", mime: "audio/wav", durationSeconds: 301 },
+        {
+          buffer: wavFixture(),
+          filename: "long.wav",
+          mime: "audio/wav",
+          durationSeconds: 301,
+        },
         env,
       ),
     ).rejects.toMatchObject({ publicMessage: "音声は5分以内にしてください。" });
@@ -162,17 +190,26 @@ describe("Qwen Audio ASR transport", () => {
         },
         env,
       ),
-    ).rejects.toMatchObject({ publicMessage: "音声認識の言語ヒントは4件まで指定できます。" });
+    ).rejects.toMatchObject({
+      publicMessage: "音声認識の言語ヒントは4件まで指定できます。",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a detected format that conflicts with the declared MIME type", async () => {
     await expect(
       transcribeQwenAudio(
-        { buffer: wavFixture(), filename: "memo.mp3", mime: "audio/mpeg", durationSeconds: 1 },
+        {
+          buffer: wavFixture(),
+          filename: "memo.mp3",
+          mime: "audio/mpeg",
+          durationSeconds: 1,
+        },
         env,
       ),
-    ).rejects.toMatchObject({ publicMessage: "音声ファイルの実形式とMIMEタイプが一致しません。" });
+    ).rejects.toMatchObject({
+      publicMessage: "音声ファイルの実形式とMIMEタイプが一致しません。",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -187,7 +224,10 @@ describe("Qwen Audio ASR transport", () => {
         },
         env,
       ),
-    ).rejects.toMatchObject({ publicMessage: "音声データが大きすぎます。Base64変換後10MB以内にしてください。" });
+    ).rejects.toMatchObject({
+      publicMessage:
+        "音声データが大きすぎます。Base64変換後10MB以内にしてください。",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

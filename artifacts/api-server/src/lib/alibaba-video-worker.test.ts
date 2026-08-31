@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  AlibabaGeneratedVideo,
-  AlibabaVideoTask,
-} from "./alibaba-video";
+import type { AlibabaGeneratedVideo, AlibabaVideoTask } from "./alibaba-video";
 import {
   processAlibabaVideoJob,
   type AlibabaVideoWorkerDependencies,
@@ -11,7 +8,9 @@ import {
 
 const NOW = new Date("2026-08-28T00:00:00.000Z");
 
-function makeJob(overrides: Partial<ClaimedAlibabaVideoJob> = {}): ClaimedAlibabaVideoJob {
+function makeJob(
+  overrides: Partial<ClaimedAlibabaVideoJob> = {},
+): ClaimedAlibabaVideoJob {
   return {
     id: 7,
     userId: "user-1",
@@ -72,12 +71,15 @@ function makeDependencies(task: AlibabaVideoTask): {
 describe("Alibaba video worker", () => {
   it("reschedules pending provider tasks using the documented poll interval", async () => {
     const task: AlibabaVideoTask = { taskId: "task-1", status: "PENDING" };
-    const { dependencies, recordProgress, downloadResult } = makeDependencies(task);
+    const { dependencies, recordProgress, downloadResult } =
+      makeDependencies(task);
 
     await processAlibabaVideoJob(makeJob(), dependencies);
 
     expect(recordProgress).toHaveBeenCalledTimes(1);
-    expect(recordProgress.mock.calls[0]?.[2]).toEqual(new Date("2026-08-28T00:00:15.000Z"));
+    expect(recordProgress.mock.calls[0]?.[2]).toEqual(
+      new Date("2026-08-28T00:00:15.000Z"),
+    );
     expect(downloadResult).not.toHaveBeenCalled();
   });
 
@@ -88,7 +90,8 @@ describe("Alibaba video worker", () => {
       requestId: "req-1",
       videoUrl: "https://example.aliyuncs.com/result.mp4",
     };
-    const { dependencies, downloadResult, persistSuccess } = makeDependencies(task);
+    const { dependencies, downloadResult, persistSuccess } =
+      makeDependencies(task);
     const job = makeJob({ status: "RUNNING" });
 
     await processAlibabaVideoJob(job, dependencies);
@@ -100,8 +103,11 @@ describe("Alibaba video worker", () => {
 
   it("marks provider-expired jobs unknown without making a network call", async () => {
     const task: AlibabaVideoTask = { taskId: "task-1", status: "RUNNING" };
-    const { dependencies, fetchTask, recordTerminalFailure } = makeDependencies(task);
-    const job = makeJob({ providerExpiresAt: new Date("2026-08-27T23:59:59.000Z") });
+    const { dependencies, fetchTask, recordTerminalFailure } =
+      makeDependencies(task);
+    const job = makeJob({
+      providerExpiresAt: new Date("2026-08-27T23:59:59.000Z"),
+    });
 
     await processAlibabaVideoJob(job, dependencies);
 
@@ -116,7 +122,8 @@ describe("Alibaba video worker", () => {
 
   it("retries transient polling errors without converting the job to a terminal failure", async () => {
     const task: AlibabaVideoTask = { taskId: "task-1", status: "RUNNING" };
-    const { dependencies, fetchTask, recordRetry, recordTerminalFailure } = makeDependencies(task);
+    const { dependencies, fetchTask, recordRetry, recordTerminalFailure } =
+      makeDependencies(task);
     fetchTask.mockRejectedValueOnce(new Error("temporary provider outage"));
 
     await processAlibabaVideoJob(makeJob(), dependencies);
@@ -136,7 +143,8 @@ describe("Alibaba video worker", () => {
       code: "InvalidPrompt",
       message: "provider rejected prompt",
     };
-    const { dependencies, recordTerminalFailure, downloadResult } = makeDependencies(task);
+    const { dependencies, recordTerminalFailure, downloadResult } =
+      makeDependencies(task);
 
     await processAlibabaVideoJob(makeJob(), dependencies);
 

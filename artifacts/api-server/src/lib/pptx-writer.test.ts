@@ -1,10 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { constants, accessSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  constants,
+  accessSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PPTX_WRITER_LIMITS, writePptxPresentation } from "./pptx-writer";
+import {
+  DEFAULT_PPTX_WRITER_LIMITS,
+  writePptxPresentation,
+} from "./pptx-writer";
 
 interface ZipEntry {
   name: string;
@@ -44,7 +55,9 @@ function readZipEntries(buffer: Buffer): ZipEntry[] {
     const extraLength = buffer.readUInt16LE(offset + 30);
     const commentLength = buffer.readUInt16LE(offset + 32);
     const localOffset = buffer.readUInt32LE(offset + 42);
-    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString("utf8");
+    const name = buffer
+      .subarray(offset + 46, offset + 46 + nameLength)
+      .toString("utf8");
 
     expect(buffer.readUInt32LE(localOffset)).toBe(0x04034b50);
     expect(buffer.readUInt32LE(localOffset + 14)).toBe(expectedCrc);
@@ -52,8 +65,11 @@ function readZipEntries(buffer: Buffer): ZipEntry[] {
     expect(buffer.readUInt32LE(localOffset + 22)).toBe(expectedSize);
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
-    expect(buffer.subarray(localOffset + 30, localOffset + 30 + localNameLength).toString("utf8"))
-      .toBe(name);
+    expect(
+      buffer
+        .subarray(localOffset + 30, localOffset + 30 + localNameLength)
+        .toString("utf8"),
+    ).toBe(name);
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
     const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
     const content = inflateRawSync(compressed);
@@ -67,7 +83,9 @@ function readZipEntries(buffer: Buffer): ZipEntry[] {
 }
 
 function findOfficeCommand(): string | null {
-  const pathDirectories = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  const pathDirectories = (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter(Boolean);
   for (const command of ["libreoffice", "soffice"]) {
     for (const directory of pathDirectories) {
       const candidate = join(directory, command);
@@ -97,26 +115,32 @@ describe("bounded write-only PPTX writer", () => {
 
     const entries = readZipEntries(first);
     expect(entries).toHaveLength(15);
-    expect(new Set(entries.map((entry) => entry.name)).size).toBe(entries.length);
+    expect(new Set(entries.map((entry) => entry.name)).size).toBe(
+      entries.length,
+    );
     expect(entries.map((entry) => entry.localOffset)).toEqual(
       [...entries.map((entry) => entry.localOffset)].sort((a, b) => a - b),
     );
-    expect(entries.map((entry) => entry.name)).toEqual(expect.arrayContaining([
-      "[Content_Types].xml",
-      "ppt/presentation.xml",
-      "ppt/slideMasters/slideMaster1.xml",
-      "ppt/slideLayouts/slideLayout1.xml",
-      "ppt/theme/theme1.xml",
-      "ppt/slides/slide1.xml",
-      "ppt/slides/_rels/slide2.xml.rels",
-    ]));
+    expect(entries.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "[Content_Types].xml",
+        "ppt/presentation.xml",
+        "ppt/slideMasters/slideMaster1.xml",
+        "ppt/slideLayouts/slideLayout1.xml",
+        "ppt/theme/theme1.xml",
+        "ppt/slides/slide1.xml",
+        "ppt/slides/_rels/slide2.xml.rels",
+      ]),
+    );
 
-    const presentation = entries.find((entry) => entry.name === "ppt/presentation.xml")!
+    const presentation = entries
+      .find((entry) => entry.name === "ppt/presentation.xml")!
       .content.toString("utf8");
     expect(presentation).toContain('<p:sldId id="256" r:id="rId2"/>');
     expect(presentation).toContain('<p:sldId id="257" r:id="rId3"/>');
 
-    const slide = entries.find((entry) => entry.name === "ppt/slides/slide1.xml")!
+    const slide = entries
+      .find((entry) => entry.name === "ppt/slides/slide1.xml")!
       .content.toString("utf8");
     expect(slide).toContain("概要");
     expect(slide).toContain("日本語");
@@ -128,7 +152,8 @@ describe("bounded write-only PPTX writer", () => {
     const output = writePptxPresentation([
       { title: '</a:t><script id="x">', bullets: ["safe\u0000\ufffe text"] },
     ]);
-    const slide = readZipEntries(output).find((entry) => entry.name === "ppt/slides/slide1.xml")!
+    const slide = readZipEntries(output)
+      .find((entry) => entry.name === "ppt/slides/slide1.xml")!
       .content.toString("utf8");
     expect(slide).toContain("&lt;/a:t&gt;&lt;script id=&quot;x&quot;&gt;");
     expect(slide).not.toContain("<script");
@@ -138,74 +163,93 @@ describe("bounded write-only PPTX writer", () => {
 
   it("enforces slide, bullet, run, character, UTF-8, output, and ZIP32 limits", () => {
     expect(() => writePptxPresentation([])).toThrow(/at least one slide/);
-    expect(() => writePptxPresentation(
-      [{ title: "1", bullets: [] }, { title: "2", bullets: [] }],
-      "x",
-      { maxSlides: 1 },
-    )).toThrow(/slide limit/);
-    expect(() => writePptxPresentation(
-      [{ title: "x", bullets: ["1", "2"] }],
-      "x",
-      { maxBulletsPerSlide: 1 },
-    )).toThrow(/bullet limit/);
-    expect(() => writePptxPresentation(
-      [{ title: "x", bullets: ["y"] }],
-      "x",
-      { maxTextRuns: 1 },
-    )).toThrow(/text-run limit/);
-    expect(() => writePptxPresentation(
-      [{ title: "abcd", bullets: [] }],
-      "x",
-      { maxTextCharacters: 3 },
-    )).toThrow(/character limit/);
-    expect(() => writePptxPresentation(
-      [{ title: "日", bullets: [] }],
-      "x",
-      { maxTextBytes: 3 },
-    )).toThrow(/byte limit/);
-    expect(() => writePptxPresentation(
-      [{ title: "x", bullets: [] }],
-      "x",
-      { maxOutputBytes: 100 },
-    )).toThrow(/output exceeds/);
-    expect(() => writePptxPresentation(
-      [{ title: "x", bullets: [] }],
-      "x",
-      { maxSlides: Number.MAX_SAFE_INTEGER },
-    )).toThrow(/ZIP32 entry limit/);
-    expect(() => writePptxPresentation(
-      [{ title: "x", bullets: [] }],
-      "x",
-      { maxTextBytes: 0 },
-    )).toThrow(/positive safe integer/);
+    expect(() =>
+      writePptxPresentation(
+        [
+          { title: "1", bullets: [] },
+          { title: "2", bullets: [] },
+        ],
+        "x",
+        { maxSlides: 1 },
+      ),
+    ).toThrow(/slide limit/);
+    expect(() =>
+      writePptxPresentation([{ title: "x", bullets: ["1", "2"] }], "x", {
+        maxBulletsPerSlide: 1,
+      }),
+    ).toThrow(/bullet limit/);
+    expect(() =>
+      writePptxPresentation([{ title: "x", bullets: ["y"] }], "x", {
+        maxTextRuns: 1,
+      }),
+    ).toThrow(/text-run limit/);
+    expect(() =>
+      writePptxPresentation([{ title: "abcd", bullets: [] }], "x", {
+        maxTextCharacters: 3,
+      }),
+    ).toThrow(/character limit/);
+    expect(() =>
+      writePptxPresentation([{ title: "日", bullets: [] }], "x", {
+        maxTextBytes: 3,
+      }),
+    ).toThrow(/byte limit/);
+    expect(() =>
+      writePptxPresentation([{ title: "x", bullets: [] }], "x", {
+        maxOutputBytes: 100,
+      }),
+    ).toThrow(/output exceeds/);
+    expect(() =>
+      writePptxPresentation([{ title: "x", bullets: [] }], "x", {
+        maxSlides: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow(/ZIP32 entry limit/);
+    expect(() =>
+      writePptxPresentation([{ title: "x", bullets: [] }], "x", {
+        maxTextBytes: 0,
+      }),
+    ).toThrow(/positive safe integer/);
     expect(DEFAULT_PPTX_WRITER_LIMITS.maxOutputBytes).toBe(16 * 1024 * 1024);
   });
 
-  it.runIf(officeCommand !== null)("opens in LibreOffice and converts to PDF", () => {
-    const directory = mkdtempSync(join(tmpdir(), "bounded-pptx-"));
-    const profile = mkdtempSync(join(tmpdir(), "bounded-pptx-lo-"));
-    const input = join(directory, "presentation.pptx");
-    const outputDirectory = join(directory, "output");
-    mkdirSync(outputDirectory);
-    writeFileSync(input, writePptxPresentation([
-      { title: "日本語", bullets: ["開閉テスト", "literal =SUM(A1)"] },
-      { title: "Second", bullets: ["Two slides"] },
-    ], "互換性テスト"));
-    try {
-      execFileSync(officeCommand!, [
-        `-env:UserInstallation=file://${profile}`,
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        outputDirectory,
+  it.runIf(officeCommand !== null)(
+    "opens in LibreOffice and converts to PDF",
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), "bounded-pptx-"));
+      const profile = mkdtempSync(join(tmpdir(), "bounded-pptx-lo-"));
+      const input = join(directory, "presentation.pptx");
+      const outputDirectory = join(directory, "output");
+      mkdirSync(outputDirectory);
+      writeFileSync(
         input,
-      ], { stdio: "pipe", timeout: 30_000 });
-      const pdf = readFileSync(join(outputDirectory, "presentation.pdf"));
-      expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-      rmSync(profile, { recursive: true, force: true });
-    }
-  }, 30_000);
+        writePptxPresentation(
+          [
+            { title: "日本語", bullets: ["開閉テスト", "literal =SUM(A1)"] },
+            { title: "Second", bullets: ["Two slides"] },
+          ],
+          "互換性テスト",
+        ),
+      );
+      try {
+        execFileSync(
+          officeCommand!,
+          [
+            `-env:UserInstallation=file://${profile}`,
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            outputDirectory,
+            input,
+          ],
+          { stdio: "pipe", timeout: 30_000 },
+        );
+        const pdf = readFileSync(join(outputDirectory, "presentation.pdf"));
+        expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+        rmSync(profile, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });

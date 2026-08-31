@@ -24,7 +24,9 @@ const DEFAULT_GRACE_MS = 10_000;
 function normalizeGraceMs(value: number | undefined): number {
   if (value === undefined) return DEFAULT_GRACE_MS;
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error("Shutdown grace period must be a non-negative finite number");
+    throw new Error(
+      "Shutdown grace period must be a non-negative finite number",
+    );
   }
   return Math.floor(value);
 }
@@ -76,9 +78,11 @@ export function createGracefulShutdown(
   options: GracefulShutdownOptions,
 ): (signal: string) => Promise<void> {
   const graceMs = normalizeGraceMs(options.graceMs);
-  const setExitCode = options.setExitCode ?? ((code: number) => {
-    process.exitCode = code;
-  });
+  const setExitCode =
+    options.setExitCode ??
+    ((code: number) => {
+      process.exitCode = code;
+    });
   let shutdownPromise: Promise<void> | null = null;
 
   return (signal: string): Promise<void> => {
@@ -99,7 +103,10 @@ export function createGracefulShutdown(
         }
       } catch (error) {
         failed = true;
-        options.logger.error({ err: error, signal }, "Failed while draining HTTP server");
+        options.logger.error(
+          { err: error, signal },
+          "Failed while draining HTTP server",
+        );
         options.server.closeAllConnections?.();
       }
 

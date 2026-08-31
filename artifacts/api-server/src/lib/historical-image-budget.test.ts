@@ -16,7 +16,9 @@ function imageDataUrl(bytes: number): string {
   return `data:image/png;base64,${payload.toString("base64")}`;
 }
 
-function imageNames(content: ReturnType<typeof modelContentForHistorical>): string[] {
+function imageNames(
+  content: ReturnType<typeof modelContentForHistorical>,
+): string[] {
   if (!Array.isArray(content)) return [];
   return content
     .filter((part) => part.type === "image_url")
@@ -76,7 +78,12 @@ describe("historical image replay budget", () => {
 
   it("does not consume the image budget for non-vision models", () => {
     const parsed = parseUserMessageContent("説明して", [
-      { kind: "image", name: "a.png", content: imageDataUrl(12), isBase64: true },
+      {
+        kind: "image",
+        name: "a.png",
+        content: imageDataUrl(12),
+        isBase64: true,
+      },
     ]);
     const budget: HistoricalImageBudget = {
       remainingBytes: 12,

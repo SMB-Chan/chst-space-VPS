@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createGracefulShutdown, type ShutdownLogger } from "./graceful-shutdown";
+import {
+  createGracefulShutdown,
+  type ShutdownLogger,
+} from "./graceful-shutdown";
 
 function testLogger(): ShutdownLogger {
   return {
@@ -44,7 +47,9 @@ describe("createGracefulShutdown", () => {
   });
 
   it("forces remaining HTTP connections closed after the grace period", async () => {
-    const close = vi.fn((_callback: (error?: Error) => void) => undefined as never);
+    const close = vi.fn(
+      (_callback: (error?: Error) => void) => undefined as never,
+    );
     const closeAllConnections = vi.fn();
     const closeResource = vi.fn(async () => undefined);
 

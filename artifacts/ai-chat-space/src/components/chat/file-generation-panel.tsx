@@ -1,7 +1,8 @@
 import { FileText, Eye, RefreshCw, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type FileGenerationPhase = "generating-file" | "reviewing-layout" | "revising-layout";
+export type FileGenerationPhase =
+  "generating-file" | "reviewing-layout" | "revising-layout";
 
 interface Step {
   id: FileGenerationPhase;
@@ -15,7 +16,13 @@ const STEPS: Step[] = [
   { id: "revising-layout", label: "仕上げ中", icon: RefreshCw },
 ];
 
-function StepIcon({ step, state }: { step: Step; state: "pending" | "active" | "completed" }) {
+function StepIcon({
+  step,
+  state,
+}: {
+  step: Step;
+  state: "pending" | "active" | "completed";
+}) {
   const Icon = step.icon;
   return (
     <div
@@ -82,14 +89,26 @@ export function FileGenerationPanel({ phase }: { phase: FileGenerationPhase }) {
       {/* Step indicator */}
       <div className="relative flex items-start justify-between">
         {STEPS.map((step, index) => {
-          const state = index < activeIndex ? "completed" : index === activeIndex ? "active" : "pending";
+          const state =
+            index < activeIndex
+              ? "completed"
+              : index === activeIndex
+                ? "active"
+                : "pending";
           return (
-            <div key={step.id} className="flex flex-col items-center gap-2 z-10">
+            <div
+              key={step.id}
+              className="flex flex-col items-center gap-2 z-10"
+            >
               <StepIcon step={step} state={state} />
               <span
                 className={cn(
                   "text-[10px] font-medium transition-colors duration-300",
-                  state === "active" ? "text-primary" : state === "completed" ? "text-foreground" : "text-muted-foreground",
+                  state === "active"
+                    ? "text-primary"
+                    : state === "completed"
+                      ? "text-foreground"
+                      : "text-muted-foreground",
                 )}
               >
                 {step.label}
@@ -102,7 +121,8 @@ export function FileGenerationPanel({ phase }: { phase: FileGenerationPhase }) {
         <div
           className="absolute top-4 left-0 h-0.5 bg-primary -z-0 mx-4 transition-all duration-700"
           style={{
-            width: activeIndex === 0 ? "16%" : activeIndex === 1 ? "50%" : "84%",
+            width:
+              activeIndex === 0 ? "16%" : activeIndex === 1 ? "50%" : "84%",
           }}
         />
       </div>

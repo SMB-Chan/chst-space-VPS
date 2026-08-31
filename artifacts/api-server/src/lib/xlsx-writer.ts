@@ -18,15 +18,16 @@ export interface XlsxWriterLimits {
   maxOutputBytes: number;
 }
 
-export const DEFAULT_XLSX_WRITER_LIMITS: Readonly<XlsxWriterLimits> = Object.freeze({
-  maxSheets: 100,
-  maxRowsPerSheet: 10_000,
-  maxColumnsPerSheet: 256,
-  maxNonNullCells: 200_000,
-  maxCellCharacters: 32_767,
-  maxTextBytes: 16 * 1024 * 1024,
-  maxOutputBytes: 16 * 1024 * 1024,
-});
+export const DEFAULT_XLSX_WRITER_LIMITS: Readonly<XlsxWriterLimits> =
+  Object.freeze({
+    maxSheets: 100,
+    maxRowsPerSheet: 10_000,
+    maxColumnsPerSheet: 256,
+    maxNonNullCells: 200_000,
+    maxCellCharacters: 32_767,
+    maxTextBytes: 16 * 1024 * 1024,
+    maxOutputBytes: 16 * 1024 * 1024,
+  });
 
 const EXCEL_MAX_ROWS = 1_048_576;
 const EXCEL_MAX_COLUMNS = 16_384;
@@ -71,7 +72,10 @@ function resolveLimits(overrides: Partial<XlsxWriterLimits>): XlsxWriterLimits {
 }
 
 function stripInvalidXmlCharacters(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "");
+  return value.replace(
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g,
+    "",
+  );
 }
 
 function escapeXml(value: string): string {
@@ -95,7 +99,10 @@ function normalizeSheetNames(names: readonly string[]): string[] {
       .trim()
       .replace(/^'+|'+$/g, "");
     const fallback = `Sheet${index + 1}`;
-    const base = truncateSheetName(cleaned || fallback, EXCEL_MAX_SHEET_NAME_CHARACTERS);
+    const base = truncateSheetName(
+      cleaned || fallback,
+      EXCEL_MAX_SHEET_NAME_CHARACTERS,
+    );
     let candidate = base;
     let suffixNumber = 1;
     while (used.has(candidate.toLocaleLowerCase("en-US"))) {
@@ -115,12 +122,17 @@ function validateAndNormalizeSheets(
   sheets: readonly XlsxSheet[],
   limits: XlsxWriterLimits,
 ): NormalizedSheet[] {
-  if (sheets.length === 0) throw new Error("XLSX workbook must contain at least one sheet");
+  if (sheets.length === 0)
+    throw new Error("XLSX workbook must contain at least one sheet");
   if (sheets.length > limits.maxSheets) {
-    throw new Error(`XLSX workbook exceeds the ${limits.maxSheets}-sheet limit`);
+    throw new Error(
+      `XLSX workbook exceeds the ${limits.maxSheets}-sheet limit`,
+    );
   }
 
-  const normalizedNames = normalizeSheetNames(sheets.map((sheet) => sheet.name));
+  const normalizedNames = normalizeSheetNames(
+    sheets.map((sheet) => sheet.name),
+  );
   let nonNullCells = 0;
   let textBytes = 0;
 
@@ -132,7 +144,9 @@ function validateAndNormalizeSheets(
     }
     textBytes += Buffer.byteLength(value, "utf8");
     if (textBytes > limits.maxTextBytes) {
-      throw new Error(`XLSX text exceeds the ${limits.maxTextBytes}-byte limit`);
+      throw new Error(
+        `XLSX text exceeds the ${limits.maxTextBytes}-byte limit`,
+      );
     }
   };
 
@@ -146,7 +160,10 @@ function validateAndNormalizeSheets(
 
     const rows: XlsxCell[][] = [sheet.headers, ...sheet.rows];
     for (const row of rows) {
-      if (row.length > limits.maxColumnsPerSheet || row.length > EXCEL_MAX_COLUMNS) {
+      if (
+        row.length > limits.maxColumnsPerSheet ||
+        row.length > EXCEL_MAX_COLUMNS
+      ) {
         throw new Error(
           `XLSX sheet exceeds the ${limits.maxColumnsPerSheet}-column server limit`,
         );
@@ -168,7 +185,9 @@ function validateAndNormalizeSheets(
 
     textBytes += Buffer.byteLength(normalizedNames[sheetIndex], "utf8");
     if (textBytes > limits.maxTextBytes) {
-      throw new Error(`XLSX text exceeds the ${limits.maxTextBytes}-byte limit`);
+      throw new Error(
+        `XLSX text exceeds the ${limits.maxTextBytes}-byte limit`,
+      );
     }
 
     return {
@@ -238,8 +257,10 @@ function workbookXml(sheets: readonly NormalizedSheet[]): string {
 }
 
 function workbookRelationshipsXml(sheetCount: number): string {
-  const relationships = Array.from({ length: sheetCount }, (_, index) =>
-    `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+  const relationships = Array.from(
+    { length: sheetCount },
+    (_, index) =>
+      `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
   ).join("");
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
@@ -250,8 +271,10 @@ function workbookRelationshipsXml(sheetCount: number): string {
 }
 
 function contentTypesXml(sheetCount: number): string {
-  const sheets = Array.from({ length: sheetCount }, (_, index) =>
-    `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+  const sheets = Array.from(
+    { length: sheetCount },
+    (_, index) =>
+      `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
   ).join("");
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
@@ -297,7 +320,10 @@ function assertZip32Value(value: number, label: string): void {
   }
 }
 
-function createZip(entries: readonly ZipEntry[], maxOutputBytes: number): Buffer {
+function createZip(
+  entries: readonly ZipEntry[],
+  maxOutputBytes: number,
+): Buffer {
   if (entries.length === 0 || entries.length > ZIP32_MAX_ENTRIES) {
     throw new Error("XLSX ZIP entry count is outside the ZIP32 range");
   }

@@ -24,7 +24,9 @@ describe("settings store", () => {
 
   it("rejects an invalid translation mode", () => {
     saveSettings({ translationMode: "auto" });
-    const raw = JSON.parse(localStorage.getItem("chat-space.settings.v1") ?? "{}");
+    const raw = JSON.parse(
+      localStorage.getItem("chat-space.settings.v1") ?? "{}",
+    );
     raw.translationMode = "klingon";
     localStorage.setItem("chat-space.settings.v1", JSON.stringify(raw));
     expect(loadSettings().translationMode).toBe("off");

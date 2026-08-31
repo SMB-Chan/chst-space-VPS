@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "./conversation-title";
+import {
+  CONVERSATION_TITLE_MAX,
+  normalizeConversationTitle,
+} from "./conversation-title";
 
 describe("normalizeConversationTitle", () => {
   it("rejects blank titles", () => {
@@ -13,6 +16,8 @@ describe("normalizeConversationTitle", () => {
 
   it("caps length", () => {
     const long = "あ".repeat(CONVERSATION_TITLE_MAX + 10);
-    expect(normalizeConversationTitle(long)?.length).toBe(CONVERSATION_TITLE_MAX);
+    expect(normalizeConversationTitle(long)?.length).toBe(
+      CONVERSATION_TITLE_MAX,
+    );
   });
 });

@@ -22,7 +22,8 @@ export const TOKEN_PLAN_QUOTA_RESPONSE_HEADERS = {
   limitingRemaining: "X-Chat-Space-Token-Plan-Limiting-Remaining",
 } as const;
 
-export type AlibabaLargeTurnQuotaDecision = "allow" | "warn" | "block" | "unknown";
+export type AlibabaLargeTurnQuotaDecision =
+  "allow" | "warn" | "block" | "unknown";
 
 export interface AlibabaTokenPlanTurnEstimate {
   large: boolean;
@@ -56,7 +57,9 @@ interface TurnShape {
 function parsePercent(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : fallback;
+  return Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : fallback;
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -66,7 +69,10 @@ function nonEmptyString(value: unknown): string | undefined {
 function isTokenPlanChatModel(modelId: string | undefined): boolean {
   if (!modelId) return false;
   return ALIBABA_MODEL_CATALOG.some(
-    (model) => model.id === modelId && model.kind === "chat" && model.transport === "openai-chat",
+    (model) =>
+      model.id === modelId &&
+      model.kind === "chat" &&
+      model.transport === "openai-chat",
   );
 }
 
@@ -101,7 +107,8 @@ function attachmentStats(value: unknown): { count: number; images: number } {
     const record = item as Record<string, unknown>;
     const kind = nonEmptyString(record.kind);
     const name = nonEmptyString(record.name) ?? "";
-    if (kind === "image" || /\.(?:png|jpe?g|webp|gif)$/i.test(name)) images += 1;
+    if (kind === "image" || /\.(?:png|jpe?g|webp|gif)$/i.test(name))
+      images += 1;
   }
   return { count, images };
 }
@@ -112,16 +119,21 @@ function attachmentStats(value: unknown): { count: number; images: number } {
  * work starts. This deliberately estimates only Token Plan chat usage; regular
  * Model Studio specialist media billing is a separate budget domain.
  */
-export function estimateAlibabaTokenPlanTurn(input: TurnShape): AlibabaTokenPlanTurnEstimate {
+export function estimateAlibabaTokenPlanTurn(
+  input: TurnShape,
+): AlibabaTokenPlanTurnEstimate {
   const rootUsesTokenPlan = isTokenPlanChatModel(input.rootModelId);
   const auditUsesTokenPlan =
-    input.auditModelId !== input.rootModelId && isTokenPlanChatModel(input.auditModelId);
+    input.auditModelId !== input.rootModelId &&
+    isTokenPlanChatModel(input.auditModelId);
   const tokenPlanCalls = Number(rootUsesTokenPlan) + Number(auditUsesTokenPlan);
   const textChars = countText(input.content) + countHistoryText(input.history);
   const attachments = attachmentStats(input.attachments);
   const highReasoning = input.reasoningLevel === "high";
   const explicitFileGeneration =
-    rootUsesTokenPlan && typeof input.fileFormat === "string" && input.fileFormat.trim().length > 0;
+    rootUsesTokenPlan &&
+    typeof input.fileFormat === "string" &&
+    input.fileFormat.trim().length > 0;
 
   const reasons: string[] = [];
   if (rootUsesTokenPlan && textChars >= 20_000) reasons.push("long-context");
@@ -129,7 +141,8 @@ export function estimateAlibabaTokenPlanTurn(input: TurnShape): AlibabaTokenPlan
     reasons.push("high-reasoning-context");
   }
   if (rootUsesTokenPlan && attachments.images >= 2) reasons.push("multi-image");
-  if (rootUsesTokenPlan && attachments.count >= 3) reasons.push("multi-attachment");
+  if (rootUsesTokenPlan && attachments.count >= 3)
+    reasons.push("multi-attachment");
   if (explicitFileGeneration) reasons.push("file-generation");
   // Two separate Token Plan model calls in one turn (for example answer +
   // Alibaba audit model) merit a higher reserve even when each prompt is short.
@@ -199,14 +212,17 @@ export function tokenPlanQuotaHeaders(
       snapshot.fiveHourRemainingPercent.toFixed(1);
   }
   if (snapshot.weeklyResetAt) {
-    headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyReset] = snapshot.weeklyResetAt;
+    headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.weeklyReset] =
+      snapshot.weeklyResetAt;
   }
   if (snapshot.fiveHourResetAt) {
-    headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.fiveHourReset] = snapshot.fiveHourResetAt;
+    headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.fiveHourReset] =
+      snapshot.fiveHourResetAt;
   }
   const limiting = assessAlibabaTokenPlanQuota(snapshot, false);
   if (limiting.limitingWindow) {
-    headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingWindow] = limiting.limitingWindow;
+    headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingWindow] =
+      limiting.limitingWindow;
   }
   if (limiting.remainingPercent !== undefined) {
     headers[TOKEN_PLAN_QUOTA_RESPONSE_HEADERS.limitingRemaining] =
@@ -276,11 +292,16 @@ export async function tokenPlanQuotaStatusHeaders(
   }
   try {
     const snapshot = await getAlibabaTokenPlanUsage(process.env);
-    for (const [name, value] of Object.entries(tokenPlanQuotaHeaders(snapshot))) {
+    for (const [name, value] of Object.entries(
+      tokenPlanQuotaHeaders(snapshot),
+    )) {
       res.setHeader(name, value);
     }
   } catch (error) {
-    logger.warn({ err: error }, "Token Plan model-list quota telemetry failed open");
+    logger.warn(
+      { err: error },
+      "Token Plan model-list quota telemetry failed open",
+    );
   }
   next();
 }
@@ -328,7 +349,10 @@ export async function tokenPlanQuotaPreflightGuard(
     if (assessment.decision === "unknown") {
       if (isAlibabaTokenPlanQuotaFailOpen(process.env)) {
         logger.warn(
-          { reasons: estimate.reasons, tokenPlanCalls: estimate.tokenPlanCalls },
+          {
+            reasons: estimate.reasons,
+            tokenPlanCalls: estimate.tokenPlanCalls,
+          },
           "Large Token Plan turn is using the explicit fail-open override",
         );
         next();
@@ -352,7 +376,10 @@ export async function tokenPlanQuotaPreflightGuard(
       );
     }
     if (assessment.limitingWindow) {
-      res.setHeader("X-Chat-Space-Token-Plan-Window", assessment.limitingWindow);
+      res.setHeader(
+        "X-Chat-Space-Token-Plan-Window",
+        assessment.limitingWindow,
+      );
     }
 
     if (assessment.decision === "block") {

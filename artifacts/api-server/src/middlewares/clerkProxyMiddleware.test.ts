@@ -156,11 +156,7 @@ describe("Clerk proxy trust boundary", () => {
     vi.stubEnv("FRONTEND_URL", "");
 
     const next = vi.fn();
-    clerkProxyMiddleware()(
-      {} as Request,
-      {} as Response,
-      next as NextFunction,
-    );
+    clerkProxyMiddleware()({} as Request, {} as Response, next as NextFunction);
 
     expect(next).toHaveBeenCalledOnce();
   });

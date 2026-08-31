@@ -23,8 +23,14 @@ describePostgres("PostgresSharedAiUsageStore", () => {
   afterAll(async () => {
     if (!pool || testUsers.size === 0) return;
     const users = [...testUsers];
-    await pool.query("DELETE FROM ai_usage_leases WHERE user_id = ANY($1::text[])", [users]);
-    await pool.query("DELETE FROM ai_usage_windows WHERE user_id = ANY($1::text[])", [users]);
+    await pool.query(
+      "DELETE FROM ai_usage_leases WHERE user_id = ANY($1::text[])",
+      [users],
+    );
+    await pool.query(
+      "DELETE FROM ai_usage_windows WHERE user_id = ANY($1::text[])",
+      [users],
+    );
   });
 
   it("shares concurrency across independent store instances", async () => {
@@ -87,7 +93,10 @@ describePostgres("PostgresSharedAiUsageStore", () => {
       retryAfterSeconds: 59,
     });
 
-    const nextWindow = await secondStore.acquire({ ...input, nowMs: nowMs + 60_000 });
+    const nextWindow = await secondStore.acquire({
+      ...input,
+      nowMs: nowMs + 60_000,
+    });
     expect(nextWindow.allowed).toBe(true);
   });
 
@@ -160,7 +169,9 @@ describePostgres("PostgresSharedAiUsageStore", () => {
         { window_start_ms: String(currentWindowMs + 60_000), request_count: 1 },
       ]);
     } finally {
-      await pool.query("DELETE FROM ai_usage_windows WHERE user_id = $1", [userId]);
+      await pool.query("DELETE FROM ai_usage_windows WHERE user_id = $1", [
+        userId,
+      ]);
       await pool.query(
         "ALTER TABLE ai_usage_windows DROP CONSTRAINT ai_usage_windows_pkey",
       );
@@ -188,7 +199,10 @@ describePostgres("PostgresSharedAiUsageStore", () => {
     expect(first.allowed).toBe(true);
     expect((await secondStore.acquire(input)).allowed).toBe(false);
 
-    const recovered = await secondStore.acquire({ ...input, nowMs: nowMs + 1_001 });
+    const recovered = await secondStore.acquire({
+      ...input,
+      nowMs: nowMs + 1_001,
+    });
     expect(recovered.allowed).toBe(true);
     if (recovered.allowed && recovered.leaseId) {
       await secondStore.releaseLease({ userId, leaseId: recovered.leaseId });

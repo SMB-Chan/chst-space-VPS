@@ -41,7 +41,10 @@ const SECRET_LIKE_PATTERNS = [
  * is unusable — callers must treat that as "do not search".
  */
 export function sanitizeSearchQuery(raw: string): string {
-  const oneLine = raw.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  const oneLine = raw
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!oneLine || oneLine.length > MAX_SEARCH_QUERY_CHARS) return "";
   if (SECRET_LIKE_PATTERNS.some((pattern) => pattern.test(oneLine))) return "";
   return oneLine;
@@ -59,9 +62,12 @@ export function expandSearchQueries(baseQuery: string): string[] {
   const variants = new Set<string>();
   variants.add(normalized);
 
-  const hasLatest = /最新|latest|current|now|きょう|今日|現在/i.test(normalized);
+  const hasLatest = /最新|latest|current|now|きょう|今日|現在/i.test(
+    normalized,
+  );
   const hasNews = /ニュース|news|速報|headlines?/i.test(normalized);
-  const hasJapanese = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(normalized);
+  const hasJapanese =
+    /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(normalized);
 
   // Only add angle variants when the query does not already contain them.
   if (!hasLatest && !hasNews) {
@@ -124,7 +130,10 @@ function hostnameMatches(hostname: string, indicator: string): boolean {
   // "gov", "edu", "matome") are matched against complete hostname labels,
   // never against the path/query string or an arbitrary substring.
   if (normalizedIndicator.includes(".")) {
-    return normalizedHost === normalizedIndicator || normalizedHost.endsWith(`.${normalizedIndicator}`);
+    return (
+      normalizedHost === normalizedIndicator ||
+      normalizedHost.endsWith(`.${normalizedIndicator}`)
+    );
   }
   return normalizedHost.split(".").includes(normalizedIndicator);
 }
@@ -157,20 +166,29 @@ function recencyScore(text: string, now = new Date()): number {
   const combined = `${text}`;
   const currentYear = now.getUTCFullYear();
   const previousYear = currentYear - 1;
-  const years = Array.from(combined.matchAll(/\b(20\d{2})\b/g), (match) => Number(match[1]));
+  const years = Array.from(combined.matchAll(/\b(20\d{2})\b/g), (match) =>
+    Number(match[1]),
+  );
   if (years.includes(currentYear)) return 4;
   if (years.includes(previousYear)) return 2;
   // Japanese date patterns.  Without a year this is only a modest signal.
   if (/[0-9]{1,2}月[0-9]{1,2}日/.test(combined)) return 2;
   // Relative time words.
-  if (/今週|先週|今月|先月|最近|昨日|今日|きょう|this week|last week|today|yesterday/i.test(combined)) {
+  if (
+    /今週|先週|今月|先月|最近|昨日|今日|きょう|this week|last week|today|yesterday/i.test(
+      combined,
+    )
+  ) {
     return 2;
   }
   return 0;
 }
 
 /** Score a search result for relevance to the original query. */
-export function scoreSearchResult(result: SearchResult, originalQuery: string): number {
+export function scoreSearchResult(
+  result: SearchResult,
+  originalQuery: string,
+): number {
   const query = originalQuery.toLowerCase();
   const title = result.title.toLowerCase();
   const snippet = result.snippet.toLowerCase();
@@ -180,7 +198,8 @@ export function scoreSearchResult(result: SearchResult, originalQuery: string): 
 
   // Exact/partial title match is the strongest signal.
   if (title.includes(query)) score += 12;
-  else if (title.split(/\s+/).some((w) => query.includes(w) && w.length > 1)) score += 6;
+  else if (title.split(/\s+/).some((w) => query.includes(w) && w.length > 1))
+    score += 6;
 
   // Snippet match.
   if (snippet.includes(query)) score += 6;
@@ -382,7 +401,11 @@ export function isBotChallengePage(html: string): boolean {
 }
 
 /** Recursively collect long human-readable strings from parsed JSON. */
-function collectLongStrings(value: unknown, out: string[], depth: number): void {
+function collectLongStrings(
+  value: unknown,
+  out: string[],
+  depth: number,
+): void {
   if (depth > 12 || out.length >= 100) return;
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -394,7 +417,8 @@ function collectLongStrings(value: unknown, out: string[], depth: number): void 
     return;
   }
   if (value && typeof value === "object") {
-    for (const item of Object.values(value)) collectLongStrings(item, out, depth + 1);
+    for (const item of Object.values(value))
+      collectLongStrings(item, out, depth + 1);
   }
 }
 
@@ -417,7 +441,8 @@ function parseJsonScript(block: string): unknown | null {
 export function extractEmbeddedContent(html: string): string {
   const candidates: string[] = [];
 
-  const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  const ldRe =
+    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let ldMatch: RegExpExecArray | null;
   while ((ldMatch = ldRe.exec(html)) !== null) {
     const parsed = parseJsonScript(ldMatch[1].trim());

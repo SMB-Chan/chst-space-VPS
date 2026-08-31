@@ -58,13 +58,19 @@ export class AlibabaTtsError extends Error {
 
 type SocketFactory = (url: URL, headers: Record<string, string>) => WebSocket;
 
-function defaultSocketFactory(url: URL, headers: Record<string, string>): WebSocket {
+function defaultSocketFactory(
+  url: URL,
+  headers: Record<string, string>,
+): WebSocket {
   return new WebSocket(url, { headers });
 }
 
 function normalizeModel(modelId: string | undefined): string {
   const candidate = modelId?.trim() || ALIBABA_CAPABILITY_DEFAULTS["audio.tts"];
-  if (!modelHasAlibabaCapability(candidate, "audio.tts") || candidate !== "qwen-audio-3.0-tts-plus") {
+  if (
+    !modelHasAlibabaCapability(candidate, "audio.tts") ||
+    candidate !== "qwen-audio-3.0-tts-plus"
+  ) {
     throw new AlibabaTtsError(
       `Model ${candidate} is not allowed for this TTS transport`,
       "指定された音声合成モデルには対応していません。",
@@ -98,13 +104,23 @@ function validateRequest(request: AlibabaTtsRequest): {
   volume: number;
 } {
   const text = request.text.trim();
-  if (!text) throw new AlibabaTtsError("TTS text is empty", "読み上げるテキストを指定してください。");
+  if (!text)
+    throw new AlibabaTtsError(
+      "TTS text is empty",
+      "読み上げるテキストを指定してください。",
+    );
   if (text.length > MAX_TTS_TEXT_CHARS) {
-    throw new AlibabaTtsError("TTS text exceeds application limit", "音声合成するテキストが長すぎます。1万文字以内にしてください。");
+    throw new AlibabaTtsError(
+      "TTS text exceeds application limit",
+      "音声合成するテキストが長すぎます。1万文字以内にしてください。",
+    );
   }
   const instruction = request.instruction?.trim();
   if (instruction && instruction.length > MAX_TTS_INSTRUCTION_CHARS) {
-    throw new AlibabaTtsError("TTS instruction exceeds application limit", "音声スタイルの指示が長すぎます。");
+    throw new AlibabaTtsError(
+      "TTS instruction exceeds application limit",
+      "音声スタイルの指示が長すぎます。",
+    );
   }
   if (
     request.languageHint !== undefined &&
@@ -136,7 +152,9 @@ function jsonEvent(data: unknown): Record<string, unknown> | null {
   if (typeof data !== "string") return null;
   try {
     const value = JSON.parse(data) as unknown;
-    return value && typeof value === "object" ? value as Record<string, unknown> : null;
+    return value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -171,7 +189,9 @@ export async function synthesizeAlibabaSpeech(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${specialist.apiKey}`,
     "user-agent": "Chat-Space/Alibaba-TTS",
-    ...(specialist.workspaceId ? { "X-DashScope-WorkSpace": specialist.workspaceId } : {}),
+    ...(specialist.workspaceId
+      ? { "X-DashScope-WorkSpace": specialist.workspaceId }
+      : {}),
   };
 
   return new Promise<AlibabaGeneratedSpeech>((resolve, reject) => {
@@ -179,7 +199,9 @@ export async function synthesizeAlibabaSpeech(
     try {
       socket = socketFactory(url, headers);
     } catch (error) {
-      reject(new AlibabaTtsError(`Failed to create TTS WebSocket: ${String(error)}`));
+      reject(
+        new AlibabaTtsError(`Failed to create TTS WebSocket: ${String(error)}`),
+      );
       return;
     }
     socket.binaryType = "arraybuffer";
@@ -198,7 +220,10 @@ export async function synthesizeAlibabaSpeech(
     };
     const closeSocket = () => {
       try {
-        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        if (
+          socket.readyState === WebSocket.OPEN ||
+          socket.readyState === WebSocket.CONNECTING
+        ) {
           socket.close(1000, "done");
         }
       } catch {
@@ -210,7 +235,11 @@ export async function synthesizeAlibabaSpeech(
       settled = true;
       cleanup();
       closeSocket();
-      reject(error instanceof AlibabaTtsError ? error : new AlibabaTtsError(String(error)));
+      reject(
+        error instanceof AlibabaTtsError
+          ? error
+          : new AlibabaTtsError(String(error)),
+      );
     };
     const finish = () => {
       if (settled) return;
@@ -225,7 +254,12 @@ export async function synthesizeAlibabaSpeech(
       const buffer = Buffer.concat(chunks, totalBytes);
       const filename = `alibaba-${normalized.modelId}-${Date.now()}.mp3`;
       logger.info(
-        { modelId: normalized.modelId, voice: normalized.voice, bytes: buffer.length, requestId },
+        {
+          modelId: normalized.modelId,
+          voice: normalized.voice,
+          bytes: buffer.length,
+          requestId,
+        },
         "Alibaba speech synthesis completed",
       );
       resolve({
@@ -242,7 +276,9 @@ export async function synthesizeAlibabaSpeech(
       if (finishRequested && pendingMessages === 0) finish();
     };
     const onAbort = () => {
-      fail(request.signal?.reason ?? new AlibabaTtsError("TTS request aborted"));
+      fail(
+        request.signal?.reason ?? new AlibabaTtsError("TTS request aborted"),
+      );
     };
     request.signal?.addEventListener("abort", onAbort, { once: true });
     if (request.signal?.aborted) {
@@ -250,38 +286,49 @@ export async function synthesizeAlibabaSpeech(
       return;
     }
     timeout = setTimeout(() => {
-      fail(new AlibabaTtsError("Alibaba TTS request timed out", "音声合成がタイムアウトしました。"));
+      fail(
+        new AlibabaTtsError(
+          "Alibaba TTS request timed out",
+          "音声合成がタイムアウトしました。",
+        ),
+      );
     }, TTS_TIMEOUT_MS);
 
     socket.addEventListener("open", () => {
       if (settled) return;
-      socket.send(JSON.stringify({
-        header: {
-          action: "run-task",
-          task_id: taskId,
-          streaming: "duplex",
-        },
-        payload: {
-          task_group: "audio",
-          task: "tts",
-          function: "SpeechSynthesizer",
-          model: normalized.modelId,
-          parameters: {
-            text_type: "PlainText",
-            voice: normalized.voice,
-            format: "mp3",
-            sample_rate: DEFAULT_SAMPLE_RATE,
-            volume: normalized.volume,
-            rate: normalized.rate,
-            pitch: normalized.pitch,
-            enable_ssml: false,
-            enable_aigc_tag: true,
-            ...(normalized.languageHint ? { language_hints: [normalized.languageHint] } : {}),
-            ...(normalized.instruction ? { instruction: normalized.instruction } : {}),
+      socket.send(
+        JSON.stringify({
+          header: {
+            action: "run-task",
+            task_id: taskId,
+            streaming: "duplex",
           },
-          input: {},
-        },
-      }));
+          payload: {
+            task_group: "audio",
+            task: "tts",
+            function: "SpeechSynthesizer",
+            model: normalized.modelId,
+            parameters: {
+              text_type: "PlainText",
+              voice: normalized.voice,
+              format: "mp3",
+              sample_rate: DEFAULT_SAMPLE_RATE,
+              volume: normalized.volume,
+              rate: normalized.rate,
+              pitch: normalized.pitch,
+              enable_ssml: false,
+              enable_aigc_tag: true,
+              ...(normalized.languageHint
+                ? { language_hints: [normalized.languageHint] }
+                : {}),
+              ...(normalized.instruction
+                ? { instruction: normalized.instruction }
+                : {}),
+            },
+            input: {},
+          },
+        }),
+      );
     });
 
     socket.addEventListener("message", (event) => {
@@ -290,37 +337,57 @@ export async function synthesizeAlibabaSpeech(
         if (settled) return;
         const control = jsonEvent(event.data);
         if (control) {
-          const header = control.header && typeof control.header === "object"
-            ? control.header as Record<string, unknown>
-            : {};
-          const eventName = typeof header.event === "string" ? header.event : "";
-          const eventTaskId = typeof header.task_id === "string" ? header.task_id : "";
+          const header =
+            control.header && typeof control.header === "object"
+              ? (control.header as Record<string, unknown>)
+              : {};
+          const eventName =
+            typeof header.event === "string" ? header.event : "";
+          const eventTaskId =
+            typeof header.task_id === "string" ? header.task_id : "";
           if (eventTaskId && eventTaskId !== taskId) {
-            fail(new AlibabaTtsError("TTS server returned a mismatched task id"));
+            fail(
+              new AlibabaTtsError("TTS server returned a mismatched task id"),
+            );
             return;
           }
-          if (typeof header.request_id === "string") requestId = header.request_id;
-          const attributes = header.attributes && typeof header.attributes === "object"
-            ? header.attributes as Record<string, unknown>
-            : undefined;
+          if (typeof header.request_id === "string")
+            requestId = header.request_id;
+          const attributes =
+            header.attributes && typeof header.attributes === "object"
+              ? (header.attributes as Record<string, unknown>)
+              : undefined;
           if (attributes && typeof attributes.request_uuid === "string") {
             requestId = attributes.request_uuid;
           }
           if (eventName === "task-started") {
-            socket.send(JSON.stringify({
-              header: { action: "continue-task", task_id: taskId, streaming: "duplex" },
-              payload: { input: { text: normalized.text } },
-            }));
-            socket.send(JSON.stringify({
-              header: { action: "finish-task", task_id: taskId, streaming: "duplex" },
-              payload: { input: {} },
-            }));
+            socket.send(
+              JSON.stringify({
+                header: {
+                  action: "continue-task",
+                  task_id: taskId,
+                  streaming: "duplex",
+                },
+                payload: { input: { text: normalized.text } },
+              }),
+            );
+            socket.send(
+              JSON.stringify({
+                header: {
+                  action: "finish-task",
+                  task_id: taskId,
+                  streaming: "duplex",
+                },
+                payload: { input: {} },
+              }),
+            );
             return;
           }
           if (eventName === "task-failed") {
-            const detail = typeof header.error_message === "string"
-              ? header.error_message.slice(0, 500)
-              : "provider task failed";
+            const detail =
+              typeof header.error_message === "string"
+                ? header.error_message.slice(0, 500)
+                : "provider task failed";
             fail(new AlibabaTtsError(`Alibaba TTS task failed: ${detail}`));
             return;
           }
@@ -335,7 +402,12 @@ export async function synthesizeAlibabaSpeech(
         if (!chunk || chunk.length === 0) return;
         totalBytes += chunk.length;
         if (totalBytes > MAX_TTS_AUDIO_BYTES) {
-          fail(new AlibabaTtsError("Generated speech exceeds size limit", "生成された音声が大きすぎます。"));
+          fail(
+            new AlibabaTtsError(
+              "Generated speech exceeds size limit",
+              "生成された音声が大きすぎます。",
+            ),
+          );
           return;
         }
         chunks.push(chunk);
@@ -348,15 +420,20 @@ export async function synthesizeAlibabaSpeech(
     });
 
     socket.addEventListener("error", (event) => {
-      const detail = "message" in event && typeof event.message === "string"
-        ? event.message
-        : "WebSocket error";
+      const detail =
+        "message" in event && typeof event.message === "string"
+          ? event.message
+          : "WebSocket error";
       fail(new AlibabaTtsError(`Alibaba TTS WebSocket error: ${detail}`));
     });
 
     socket.addEventListener("close", () => {
       if (!settled && !taskFinished) {
-        fail(new AlibabaTtsError("Alibaba TTS WebSocket closed before task completion"));
+        fail(
+          new AlibabaTtsError(
+            "Alibaba TTS WebSocket closed before task completion",
+          ),
+        );
       }
     });
   });

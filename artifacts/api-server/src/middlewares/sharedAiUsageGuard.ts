@@ -27,7 +27,9 @@ export type SharedAiUsageAcquireResult =
     };
 
 export interface SharedAiUsageStore {
-  acquire(input: SharedAiUsageAcquireInput): Promise<SharedAiUsageAcquireResult>;
+  acquire(
+    input: SharedAiUsageAcquireInput,
+  ): Promise<SharedAiUsageAcquireResult>;
   renewLease(input: {
     userId: string;
     leaseId: string;
@@ -76,7 +78,10 @@ export function resetSharedAiUsageMetricsForTests(): void {
   }
 }
 
-function normalizeNonNegative(value: number | undefined, fallback: number): number {
+function normalizeNonNegative(
+  value: number | undefined,
+  fallback: number,
+): number {
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error("AI usage limits must be non-negative integers");
@@ -84,7 +89,11 @@ function normalizeNonNegative(value: number | undefined, fallback: number): numb
   return value;
 }
 
-function normalizePositive(value: number | undefined, fallback: number, label: string): number {
+function normalizePositive(
+  value: number | undefined,
+  fallback: number,
+  label: string,
+): number {
   const normalized = value === undefined ? fallback : value;
   if (!Number.isSafeInteger(normalized) || normalized <= 0) {
     throw new Error(`${label} must be a positive integer`);
@@ -116,7 +125,9 @@ function retryAfterSeconds(targetMs: number, nowMs: number): number {
  * processes observe the same quota and concurrency state.
  */
 export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
-  async acquire(input: SharedAiUsageAcquireInput): Promise<SharedAiUsageAcquireResult> {
+  async acquire(
+    input: SharedAiUsageAcquireInput,
+  ): Promise<SharedAiUsageAcquireResult> {
     if (input.maxRequests === 0 && input.maxConcurrent === 0) {
       return { allowed: true };
     }
@@ -128,10 +139,9 @@ export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
 
     try {
       await client.query("BEGIN");
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
-        [lockKey],
-      );
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", [
+        lockKey,
+      ]);
 
       if (input.maxConcurrent > 0) {
         await client.query(
@@ -162,7 +172,8 @@ export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
       }
 
       if (input.maxRequests > 0) {
-        const windowStartMs = Math.floor(input.nowMs / input.windowMs) * input.windowMs;
+        const windowStartMs =
+          Math.floor(input.nowMs / input.windowMs) * input.windowMs;
         const windowEndMs = windowStartMs + input.windowMs;
         const current = await client.query<{
           window_start_ms: string;
@@ -260,7 +271,10 @@ export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async releaseLease(input: { userId: string; leaseId: string }): Promise<void> {
+  async releaseLease(input: {
+    userId: string;
+    leaseId: string;
+  }): Promise<void> {
     const { pool } = await import("@workspace/db");
     await pool.query(
       "DELETE FROM ai_usage_leases WHERE lease_id = $1 AND user_id = $2",
@@ -277,9 +291,19 @@ export class PostgresSharedAiUsageStore implements SharedAiUsageStore {
 export function createSharedAiUsageGuard(
   options: SharedAiUsageGuardOptions = {},
 ): RequestHandler {
-  const windowMs = normalizePositive(options.windowMs, DEFAULT_WINDOW_MS, "AI usage window");
-  const maxRequests = normalizeNonNegative(options.maxRequests, DEFAULT_MAX_REQUESTS);
-  const maxConcurrent = normalizeNonNegative(options.maxConcurrent, DEFAULT_MAX_CONCURRENT);
+  const windowMs = normalizePositive(
+    options.windowMs,
+    DEFAULT_WINDOW_MS,
+    "AI usage window",
+  );
+  const maxRequests = normalizeNonNegative(
+    options.maxRequests,
+    DEFAULT_MAX_REQUESTS,
+  );
+  const maxConcurrent = normalizeNonNegative(
+    options.maxConcurrent,
+    DEFAULT_MAX_CONCURRENT,
+  );
   const leaseTtlMs = normalizePositive(
     options.leaseTtlMs,
     DEFAULT_LEASE_TTL_MS,
@@ -289,7 +313,11 @@ export function createSharedAiUsageGuard(
   const store = options.store ?? new PostgresSharedAiUsageStore();
   const renewLeases = options.renewLeases ?? true;
 
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     const userId = req.userId;
     if (!userId) {
       res.status(401).json({ error: "Unauthorized" });
@@ -311,7 +339,8 @@ export function createSharedAiUsageGuard(
       logger.error({ err: error }, "Shared AI usage limiter backend failed");
       res.setHeader("Retry-After", "1");
       res.status(503).json({
-        error: "AI利用制御サービスに接続できません。少し待ってから再試行してください。",
+        error:
+          "AI利用制御サービスに接続できません。少し待ってから再試行してください。",
       });
       return;
     }
@@ -349,7 +378,10 @@ export function createSharedAiUsageGuard(
     };
 
     if (leaseId && renewLeases) {
-      const heartbeatMs = Math.max(250, Math.min(30_000, Math.floor(leaseTtlMs / 3)));
+      const heartbeatMs = Math.max(
+        250,
+        Math.min(30_000, Math.floor(leaseTtlMs / 3)),
+      );
       heartbeat = setInterval(() => {
         if (released) return;
         void store
@@ -362,7 +394,10 @@ export function createSharedAiUsageGuard(
           })
           .catch((error) => {
             metrics.renewFailures += 1;
-            logger.warn({ err: error }, "Failed to renew shared AI usage lease");
+            logger.warn(
+              { err: error },
+              "Failed to renew shared AI usage lease",
+            );
           });
       }, heartbeatMs);
       heartbeat.unref?.();
@@ -376,6 +411,9 @@ export function createSharedAiUsageGuard(
 
 export const sharedAiUsageGuard = createSharedAiUsageGuard({
   maxRequests: envNonNegative("AI_REQUESTS_PER_MINUTE", DEFAULT_MAX_REQUESTS),
-  maxConcurrent: envNonNegative("AI_MAX_CONCURRENT_REQUESTS", DEFAULT_MAX_CONCURRENT),
+  maxConcurrent: envNonNegative(
+    "AI_MAX_CONCURRENT_REQUESTS",
+    DEFAULT_MAX_CONCURRENT,
+  ),
   leaseTtlMs: envPositive("AI_CONCURRENCY_LEASE_TTL_MS", DEFAULT_LEASE_TTL_MS),
 });

@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 const MAX_EXTERNAL_TEXT_LENGTH = 2_000;
 const ALLOWED_EXTERNAL_COMMANDS = new Set(["libreoffice", "pdftocairo"]);
 
-function sanitizeDiagnosticText(value: unknown, maxLength: number): string | undefined {
+function sanitizeDiagnosticText(
+  value: unknown,
+  maxLength: number,
+): string | undefined {
   if (typeof value !== "string" || !value) return undefined;
 
   return value
@@ -31,11 +34,7 @@ function safeIdentifier(value: unknown): string | undefined {
     : undefined;
 }
 
-function fingerprintError(
-  error: unknown,
-  name: string,
-  code?: string,
-): string {
+function fingerprintError(error: unknown, name: string, code?: string): string {
   const message = error instanceof Error ? error.message : String(error);
   return createHash("sha256")
     .update(`${name}\0${code ?? ""}\0${message}`)

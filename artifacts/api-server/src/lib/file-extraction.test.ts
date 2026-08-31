@@ -14,7 +14,11 @@ import {
   resolveBinaryAttachments,
   runIsolatedBinaryExtraction,
 } from "./file-extraction";
-import { modelContentFor, parseUserMessageContent, type BinaryAttachment } from "./message-content";
+import {
+  modelContentFor,
+  parseUserMessageContent,
+  type BinaryAttachment,
+} from "./message-content";
 
 // Audio transcription hits a paid network API; replace it with a stub.
 vi.mock("./audio-transcription", () => ({
@@ -32,7 +36,9 @@ async function makePdf(text: string): Promise<Buffer> {
 
 async function makeDocx(text: string): Promise<Buffer> {
   const doc = new Document({
-    sections: [{ children: [new Paragraph({ children: [new TextRun(text)] })] }],
+    sections: [
+      { children: [new Paragraph({ children: [new TextRun(text)] })] },
+    ],
   });
   return Packer.toBuffer(doc);
 }
@@ -61,7 +67,8 @@ function makeXlsx(rows: (string | number)[][], sheetName = "Sheet1"): Buffer {
       const cells = row
         .map((cell, colIndex) => {
           const ref = `${String.fromCharCode(65 + colIndex)}${rowIndex + 1}`;
-          if (typeof cell === "number") return `<c r="${ref}"><v>${cell}</v></c>`;
+          if (typeof cell === "number")
+            return `<c r="${ref}"><v>${cell}</v></c>`;
           return `<c r="${ref}" t="s"><v>${sharedIndexOf(cell)}</v></c>`;
         })
         .join("");
@@ -97,7 +104,11 @@ function makeXlsx(rows: (string | number)[][], sheetName = "Sheet1"): Buffer {
     "xl/sharedStrings.xml":
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${shared.length}" uniqueCount="${shared.length}">` +
-      shared.map((value) => `<si><t xml:space="preserve">${escapeXml(value)}</t></si>`).join("") +
+      shared
+        .map(
+          (value) => `<si><t xml:space="preserve">${escapeXml(value)}</t></si>`,
+        )
+        .join("") +
       `</sst>`,
     "xl/worksheets/sheet1.xml":
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -114,11 +125,15 @@ function zipBuffer(entries: Record<string, string | Uint8Array>): Buffer {
   return Buffer.from(zipSync(data));
 }
 
-function lieAboutZipEntrySize(buffer: Buffer, uncompressedSize: number): Buffer {
+function lieAboutZipEntrySize(
+  buffer: Buffer,
+  uncompressedSize: number,
+): Buffer {
   const forged = Buffer.from(buffer);
   const signature = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
   const centralDirectoryOffset = forged.indexOf(signature);
-  if (centralDirectoryOffset < 0) throw new Error("Central directory not found");
+  if (centralDirectoryOffset < 0)
+    throw new Error("Central directory not found");
   forged.writeUInt32LE(uncompressedSize, centralDirectoryOffset + 24);
   return forged;
 }
@@ -166,9 +181,9 @@ describe("extractPdfText", () => {
   });
 
   it("rejects corrupted PDFs with a user-facing message", async () => {
-    await expect(extractPdfText(Buffer.from("%PDF-1.7\ngarbage"))).rejects.toThrow(
-      FileExtractionError,
-    );
+    await expect(
+      extractPdfText(Buffer.from("%PDF-1.7\ngarbage")),
+    ).rejects.toThrow(FileExtractionError);
   });
 });
 
@@ -190,7 +205,7 @@ describe("extractXlsxText", () => {
     const text = extractXlsxText(buffer);
     expect(text).toContain("[シート: Sheet1]");
     expect(text).toContain("Name,Qty");
-    expect(text).toContain("\"Mi,kan\",5");
+    expect(text).toContain('"Mi,kan",5');
   });
 
   it("caps very tall sheets and notes the truncation", () => {
@@ -284,7 +299,9 @@ describe("extractZipText", () => {
   }, 30_000);
 
   it("stops on real expanded bytes when the central directory lies", () => {
-    const honest = zipBuffer({ "payload.txt": "x".repeat(4 * 1024 * 1024 + 1) });
+    const honest = zipBuffer({
+      "payload.txt": "x".repeat(4 * 1024 * 1024 + 1),
+    });
     const forged = lieAboutZipEntrySize(honest, 1);
     expect(() => extractZipText(forged)).not.toThrow();
     expect(extractZipText(forged)).toContain("展開サイズ上限");
@@ -305,7 +322,11 @@ describe("Office ZIP preflight", () => {
 describe("extractBinaryText", () => {
   it("routes audio to the transcription stub", async () => {
     const text = await extractBinaryText(
-      binaryAttachment("memo.mp3", Buffer.concat([Buffer.from("ID3"), Buffer.alloc(16)]), "audio"),
+      binaryAttachment(
+        "memo.mp3",
+        Buffer.concat([Buffer.from("ID3"), Buffer.alloc(16)]),
+        "audio",
+      ),
     );
     expect(text).toContain("[音声の文字起こし結果]");
     expect(text).toContain("mocked transcript");
@@ -320,9 +341,24 @@ describe("resolveBinaryAttachments", () => {
       Buffer.alloc(16, 1),
     ]);
     const parsed = parseUserMessageContent("分析して", [
-      { kind: "file", name: "report.pdf", content: `data:application/pdf;base64,${pdf.toString("base64")}`, isBase64: true },
-      { kind: "image", name: "chart.png", content: `data:image/png;base64,${png.toString("base64")}`, isBase64: true },
-      { kind: "file", name: "memo.txt", content: "plain memo", isBase64: false },
+      {
+        kind: "file",
+        name: "report.pdf",
+        content: `data:application/pdf;base64,${pdf.toString("base64")}`,
+        isBase64: true,
+      },
+      {
+        kind: "image",
+        name: "chart.png",
+        content: `data:image/png;base64,${png.toString("base64")}`,
+        isBase64: true,
+      },
+      {
+        kind: "file",
+        name: "memo.txt",
+        content: "plain memo",
+        isBase64: false,
+      },
     ]);
     expect(parsed.hasBinaries).toBe(true);
 
@@ -352,7 +388,9 @@ describe("resolveBinaryAttachments", () => {
       },
     ]);
     expect(corrupted.hasBinaries).toBe(true);
-    await expect(resolveBinaryAttachments(corrupted)).rejects.toThrow(FileExtractionError);
+    await expect(resolveBinaryAttachments(corrupted)).rejects.toThrow(
+      FileExtractionError,
+    );
     await expect(resolveBinaryAttachments(parsed)).resolves.toBe(parsed);
   });
 
@@ -362,13 +400,24 @@ describe("resolveBinaryAttachments", () => {
     vi.mocked(transcribeAudio).mockImplementationOnce(
       ({ signal }) =>
         new Promise<string>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
         }),
     );
     const parsed = parseUserMessageContent("文字起こし", [
-      { kind: "file", name: "memo.mp3", content: audioDataUrl(), isBase64: true },
+      {
+        kind: "file",
+        name: "memo.mp3",
+        content: audioDataUrl(),
+        isBase64: true,
+      },
     ]);
-    const extraction = resolveBinaryAttachments(parsed, undefined, controller.signal);
+    const extraction = resolveBinaryAttachments(
+      parsed,
+      undefined,
+      controller.signal,
+    );
     controller.abort(new Error("Client disconnected"));
     await expect(extraction).rejects.toThrow("Client disconnected");
     expect(transcribeAudio).toHaveBeenCalledOnce();
@@ -381,14 +430,26 @@ describe("resolveBinaryAttachments", () => {
       controller.abort(new Error("Client disconnected"));
       return "first transcript";
     });
-    vi.mocked(transcribeAudio).mockImplementationOnce(async () => "must not run");
-    const parsed = parseUserMessageContent("文字起こし", [
-      { kind: "file", name: "first.mp3", content: audioDataUrl(), isBase64: true },
-      { kind: "file", name: "second.mp3", content: audioDataUrl(), isBase64: true },
-    ]);
-    await expect(resolveBinaryAttachments(parsed, undefined, controller.signal)).rejects.toThrow(
-      "Client disconnected",
+    vi.mocked(transcribeAudio).mockImplementationOnce(
+      async () => "must not run",
     );
+    const parsed = parseUserMessageContent("文字起こし", [
+      {
+        kind: "file",
+        name: "first.mp3",
+        content: audioDataUrl(),
+        isBase64: true,
+      },
+      {
+        kind: "file",
+        name: "second.mp3",
+        content: audioDataUrl(),
+        isBase64: true,
+      },
+    ]);
+    await expect(
+      resolveBinaryAttachments(parsed, undefined, controller.signal),
+    ).rejects.toThrow("Client disconnected");
     expect(transcribeAudio).toHaveBeenCalledOnce();
   });
 });
@@ -398,10 +459,16 @@ describe("isolated extraction cancellation", () => {
     const workerUrl = new URL(
       "data:text/javascript,import%20%7B%20parentPort%20%7D%20from%20%22node%3Aworker_threads%22%3B%20parentPort.on(%22message%22%2C%20()%20%3D%3E%20%7B%20while%20(true)%20%7B%7D%20%7D)%3B",
     );
-    const attachment = binaryAttachment("stuck.pdf", Buffer.from("%PDF-1.7"), "pdf");
+    const attachment = binaryAttachment(
+      "stuck.pdf",
+      Buffer.from("%PDF-1.7"),
+      "pdf",
+    );
     const signal = AbortSignal.timeout(30);
     const started = Date.now();
-    await expect(runIsolatedBinaryExtraction(attachment, signal, workerUrl)).rejects.toBeDefined();
+    await expect(
+      runIsolatedBinaryExtraction(attachment, signal, workerUrl),
+    ).rejects.toBeDefined();
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

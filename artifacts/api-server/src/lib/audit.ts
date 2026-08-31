@@ -30,7 +30,9 @@ export function buildAuditUserMessage(args: {
   const attachments = (args.attachmentText ?? "").trim().slice(0, 8000);
   return (
     `<question_data>\n${question}\n</question_data>\n\n` +
-    (attachments ? `<attachment_data>\n${attachments}\n</attachment_data>\n\n` : "") +
+    (attachments
+      ? `<attachment_data>\n${attachments}\n</attachment_data>\n\n`
+      : "") +
     `<answer_data>\n${answer}\n</answer_data>\n\n` +
     `<source_data>\n${sources}\n</source_data>`
   );

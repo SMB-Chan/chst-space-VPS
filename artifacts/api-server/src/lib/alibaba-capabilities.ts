@@ -196,7 +196,9 @@ export const ALIBABA_CAPABILITY_DEFAULTS = {
   "video.t2v": "happyhorse-1.1-t2v",
   "video.i2v": "happyhorse-1.1-i2v",
   "video.r2v": "happyhorse-1.1-r2v",
-} as const satisfies Partial<Record<AlibabaCapability, AlibabaModelId | "paraformer-v2">>;
+} as const satisfies Partial<
+  Record<AlibabaCapability, AlibabaModelId | "paraformer-v2">
+>;
 
 export function getAlibabaModel(modelId: string): AlibabaModelSpec | undefined {
   return ALIBABA_MODEL_CATALOG.find((model) => model.id === modelId);

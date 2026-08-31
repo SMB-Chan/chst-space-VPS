@@ -6,18 +6,20 @@
  * requiring CNAME DNS configuration.
  */
 
-import type { IncomingHttpHeaders } from 'http';
-import type { RequestHandler } from 'express';
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import type { IncomingHttpHeaders } from "http";
+import type { RequestHandler } from "express";
+import { createProxyMiddleware } from "http-proxy-middleware";
 
-const CLERK_FAPI = 'https://frontend-api.clerk.dev';
-export const CLERK_PROXY_PATH = '/api/__clerk';
+const CLERK_FAPI = "https://frontend-api.clerk.dev";
+export const CLERK_PROXY_PATH = "/api/__clerk";
 /** Dynamic Clerk Frontend API responses should be tiny JSON documents. */
 const MAX_BUFFERED_PROXY_BYTES = 5 * 1024 * 1024;
 
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+function firstHeaderValue(
+  value: string | string[] | undefined,
+): string | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
-  return raw?.split(',')[0]?.trim() || undefined;
+  return raw?.split(",")[0]?.trim() || undefined;
 }
 
 function normalizeHostname(value: string | undefined): string | undefined {
@@ -25,8 +27,9 @@ function normalizeHostname(value: string | undefined): string | undefined {
   if (!raw) return undefined;
   try {
     const parsed = new URL(`http://${raw}`);
-    if (parsed.username || parsed.password || !parsed.hostname) return undefined;
-    return parsed.hostname.toLowerCase().replace(/\.$/, '');
+    if (parsed.username || parsed.password || !parsed.hostname)
+      return undefined;
+    return parsed.hostname.toLowerCase().replace(/\.$/, "");
   } catch {
     return undefined;
   }
@@ -45,7 +48,7 @@ export function getConfiguredClerkProxyUrl(
   try {
     const parsed = new URL(raw);
     if (
-      parsed.protocol !== 'https:' ||
+      parsed.protocol !== "https:" ||
       parsed.username ||
       parsed.password ||
       parsed.search ||
@@ -54,7 +57,7 @@ export function getConfiguredClerkProxyUrl(
       return undefined;
     }
 
-    const pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
     if (pathname !== CLERK_PROXY_PATH) return undefined;
     return `${parsed.origin}${CLERK_PROXY_PATH}`;
   } catch {
@@ -70,7 +73,7 @@ function addHostname(hosts: Set<string>, candidate: string | undefined): void {
 function addOriginHostname(hosts: Set<string>, candidate: string): void {
   try {
     const parsed = new URL(candidate.trim());
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
     addHostname(hosts, parsed.host);
   } catch {
     // Invalid entries fail closed rather than widening the host allowlist.
@@ -87,15 +90,15 @@ export function getConfiguredClerkHosts(
 ): Set<string> {
   const hosts = new Set<string>();
 
-  for (const raw of (env.CLERK_ALLOWED_HOSTS ?? '').split(',')) {
+  for (const raw of (env.CLERK_ALLOWED_HOSTS ?? "").split(",")) {
     addHostname(hosts, raw.trim());
   }
-  for (const raw of (env.REPLIT_DOMAINS ?? '').split(',')) {
+  for (const raw of (env.REPLIT_DOMAINS ?? "").split(",")) {
     addHostname(hosts, raw.trim());
   }
   addHostname(hosts, env.REPLIT_DEV_DOMAIN);
 
-  for (const raw of (env.FRONTEND_URL ?? '').split(',')) {
+  for (const raw of (env.FRONTEND_URL ?? "").split(",")) {
     if (raw.trim()) addOriginHostname(hosts, raw);
   }
 
@@ -116,7 +119,7 @@ export function getAllowedClerkHost(
   if (allowedHosts.size === 0) return undefined;
 
   const candidates = [
-    firstHeaderValue(req.headers['x-forwarded-host']),
+    firstHeaderValue(req.headers["x-forwarded-host"]),
     firstHeaderValue(req.headers.host),
   ];
   for (const candidate of candidates) {
@@ -141,7 +144,7 @@ export function getClerkProxyUrlForRequest(
 }
 
 export function clerkProxyMiddleware(): RequestHandler {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== "production") {
     return (_req, _res, next) => next();
   }
 
@@ -159,7 +162,7 @@ export function clerkProxyMiddleware(): RequestHandler {
     changeOrigin: true,
     selfHandleResponse: true,
     pathRewrite: (path: string) =>
-      path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ''),
+      path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ""),
     on: {
       proxyReq: (proxyReq, req) => {
         const proxyUrl = getClerkProxyUrlForRequest(req, allowedHosts);
@@ -170,16 +173,16 @@ export function clerkProxyMiddleware(): RequestHandler {
           return;
         }
 
-        proxyReq.setHeader('Clerk-Proxy-Url', proxyUrl);
-        proxyReq.setHeader('Clerk-Secret-Key', secretKey);
+        proxyReq.setHeader("Clerk-Proxy-Url", proxyUrl);
+        proxyReq.setHeader("Clerk-Secret-Key", secretKey);
 
         // Keep the existing Replit client-IP behavior until issue #46's edge
         // header contract is proven. Do not guess left/right proxy hops here.
         const clientIp =
-          firstHeaderValue(req.headers['x-forwarded-for']) ||
+          firstHeaderValue(req.headers["x-forwarded-for"]) ||
           req.socket?.remoteAddress ||
-          '';
-        if (clientIp) proxyReq.setHeader('X-Forwarded-For', clientIp);
+          "";
+        if (clientIp) proxyReq.setHeader("X-Forwarded-For", clientIp);
       },
       // Dynamic Frontend API responses without Content-Length must be buffered
       // so the deployment edge receives an explicit length instead of chunked
@@ -187,21 +190,21 @@ export function clerkProxyMiddleware(): RequestHandler {
       // from becoming an unbounded allocation in this process.
       proxyRes: (proxyRes, req, res) => {
         const headers = { ...proxyRes.headers };
-        delete headers['transfer-encoding'];
-        delete headers['connection'];
-        delete headers['keep-alive'];
+        delete headers["transfer-encoding"];
+        delete headers["connection"];
+        delete headers["keep-alive"];
 
         const status = proxyRes.statusCode ?? 502;
-        if (status < 200 || status === 204) delete headers['content-length'];
+        if (status < 200 || status === 204) delete headers["content-length"];
 
         const bodyless =
-          req.method === 'HEAD' ||
+          req.method === "HEAD" ||
           status < 200 ||
           status === 204 ||
           status === 304;
-        if (headers['content-length'] !== undefined || bodyless) {
+        if (headers["content-length"] !== undefined || bodyless) {
           res.writeHead(status, headers);
-          proxyRes.on('error', () => res.destroy());
+          proxyRes.on("error", () => res.destroy());
           proxyRes.pipe(res);
           return;
         }
@@ -215,12 +218,15 @@ export function clerkProxyMiddleware(): RequestHandler {
           aborted = true;
           proxyRes.destroy();
           if (!res.headersSent) {
-            res.writeHead(502, { 'content-length': '0', 'cache-control': 'no-store' });
+            res.writeHead(502, {
+              "content-length": "0",
+              "cache-control": "no-store",
+            });
           }
           res.end();
         };
 
-        proxyRes.on('data', (chunk: Buffer) => {
+        proxyRes.on("data", (chunk: Buffer) => {
           if (aborted) return;
           totalBytes += chunk.length;
           if (totalBytes > MAX_BUFFERED_PROXY_BYTES) {
@@ -229,17 +235,20 @@ export function clerkProxyMiddleware(): RequestHandler {
           }
           chunks.push(chunk);
         });
-        proxyRes.on('end', () => {
+        proxyRes.on("end", () => {
           if (aborted) return;
           const body = Buffer.concat(chunks, totalBytes);
-          headers['content-length'] = String(body.length);
+          headers["content-length"] = String(body.length);
           res.writeHead(status, headers);
           res.end(body);
         });
-        proxyRes.on('error', () => {
+        proxyRes.on("error", () => {
           if (aborted) return;
           if (!res.headersSent) {
-            res.writeHead(502, { 'content-length': '0', 'cache-control': 'no-store' });
+            res.writeHead(502, {
+              "content-length": "0",
+              "cache-control": "no-store",
+            });
           }
           res.end();
         });

@@ -70,12 +70,17 @@ export function stripHtml(html: string): string {
 
 const STRONG_SEARCH_RE =
   /最新|きょう|今日|昨日|明日|ニュース|天気|気温|株価|為替|円安|円高|選挙|速報|発売|リリース|試合結果|スコア|開場|いまの|今の|現在の|202[5-9]年|\b(today|tonight|latest|breaking|news|weather|price|who won|current|released?)\b/i;
-const SMALLTALK_RE = /^(こんにちは|おはよう|こんばんは|ありがとう|よろしく|hello|hi|hey)[\s!！。．]*$/i;
+const SMALLTALK_RE =
+  /^(こんにちは|おはよう|こんばんは|ありがとう|よろしく|hello|hi|hey)[\s!！。．]*$/i;
 
 /** Cheap, model-free search decision so a slow judge LLM cannot skip the web. */
-export function inferSearchQuery(text: string): { needed: boolean; query: string } {
+export function inferSearchQuery(text: string): {
+  needed: boolean;
+  query: string;
+} {
   const trimmed = text.replace(/\s+/g, " ").trim();
-  if (!trimmed || SMALLTALK_RE.test(trimmed)) return { needed: false, query: "" };
+  if (!trimmed || SMALLTALK_RE.test(trimmed))
+    return { needed: false, query: "" };
   if (/^https?:\/\/\S+$/i.test(trimmed)) return { needed: false, query: "" };
   const query = trimmed.slice(0, 80);
   return { needed: STRONG_SEARCH_RE.test(trimmed), query };
@@ -97,7 +102,11 @@ export function parseSearchHtml(html: string): SearchResult[] {
     const url = normalizeExternalHttpUrl(candidate);
     if (!url || seen.has(url)) return;
     seen.add(url);
-    results.push({ title: stripHtml(title) || url, url, snippet: stripHtml(snippet) });
+    results.push({
+      title: stripHtml(title) || url,
+      url,
+      snippet: stripHtml(snippet),
+    });
   };
 
   const classicRe =

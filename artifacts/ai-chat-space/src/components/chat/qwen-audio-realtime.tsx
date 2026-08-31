@@ -34,9 +34,10 @@ type RealtimeMessage = {
   error?: unknown;
 };
 
-type WebkitWindow = Window & typeof globalThis & {
-  webkitAudioContext?: typeof AudioContext;
-};
+type WebkitWindow = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
 
 function websocketUrl(ticket: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -59,14 +60,23 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function downsampleToPcm16(input: Float32Array, sampleRate: number): Uint8Array {
-  const outputLength = Math.max(1, Math.round(input.length * INPUT_AUDIO_RATE / sampleRate));
+function downsampleToPcm16(
+  input: Float32Array,
+  sampleRate: number,
+): Uint8Array {
+  const outputLength = Math.max(
+    1,
+    Math.round((input.length * INPUT_AUDIO_RATE) / sampleRate),
+  );
   const output = new Uint8Array(outputLength * 2);
   const ratio = sampleRate / INPUT_AUDIO_RATE;
 
   for (let index = 0; index < outputLength; index += 1) {
     const start = Math.floor(index * ratio);
-    const end = Math.min(input.length, Math.max(start + 1, Math.floor((index + 1) * ratio)));
+    const end = Math.min(
+      input.length,
+      Math.max(start + 1, Math.floor((index + 1) * ratio)),
+    );
     let sum = 0;
     for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) {
       sum += input[sourceIndex];
@@ -87,11 +97,16 @@ function decodePcm16(
 ): AudioBuffer | null {
   try {
     const binary = atob(encoded);
-    const buffer = context.createBuffer(1, Math.floor(binary.length / 2), OUTPUT_AUDIO_RATE);
+    const buffer = context.createBuffer(
+      1,
+      Math.floor(binary.length / 2),
+      OUTPUT_AUDIO_RATE,
+    );
     const channel = buffer.getChannelData(0);
     for (let index = 0; index < channel.length; index += 1) {
       const offset = index * 2;
-      let value = binary.charCodeAt(offset) | (binary.charCodeAt(offset + 1) << 8);
+      let value =
+        binary.charCodeAt(offset) | (binary.charCodeAt(offset + 1) << 8);
       if (value & 0x8000) value -= 0x10000;
       channel[index] = value / 0x8000;
     }
@@ -257,14 +272,14 @@ export function QwenAudioRealtime({
     if (!response.ok) {
       let message = "音声セッションを開始できませんでした。";
       try {
-        const body = await response.json() as { error?: unknown };
+        const body = (await response.json()) as { error?: unknown };
         if (typeof body.error === "string") message = body.error;
       } catch {
         // Keep the safe generic message for non-JSON proxy errors.
       }
       throw new Error(message);
     }
-    const body = await response.json() as { token?: unknown };
+    const body = (await response.json()) as { token?: unknown };
     if (typeof body.token !== "string" || body.token.length < 20) {
       throw new Error("音声セッションの認証情報を取得できませんでした。");
     }
@@ -273,137 +288,164 @@ export function QwenAudioRealtime({
 
   const scheduleReconnect = useCallback(() => {
     if (!activeRef.current) return;
-    reconnectTimerRef.current = window.setTimeout(() => {
-      reconnectTimerRef.current = null;
-      void requestSessionTicket()
-        .then((nextTicket) => {
-          sessionTicketRef.current = nextTicket;
-          connectSocketRef.current?.(nextTicket);
-        })
-        .catch((cause) => {
-          if (!activeRef.current) return;
-          if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
-            activeRef.current = false;
-            stopMicrophone();
-            setHasSession(false);
-            setError(cause instanceof Error ? cause.message : "音声接続を再開できませんでした。");
-            setState("error");
-            return;
-          }
-          reconnectAttemptRef.current += 1;
-          scheduleReconnectRef.current?.();
-        });
-    }, 650 * Math.max(1, reconnectAttemptRef.current));
+    reconnectTimerRef.current = window.setTimeout(
+      () => {
+        reconnectTimerRef.current = null;
+        void requestSessionTicket()
+          .then((nextTicket) => {
+            sessionTicketRef.current = nextTicket;
+            connectSocketRef.current?.(nextTicket);
+          })
+          .catch((cause) => {
+            if (!activeRef.current) return;
+            if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
+              activeRef.current = false;
+              stopMicrophone();
+              setHasSession(false);
+              setError(
+                cause instanceof Error
+                  ? cause.message
+                  : "音声接続を再開できませんでした。",
+              );
+              setState("error");
+              return;
+            }
+            reconnectAttemptRef.current += 1;
+            scheduleReconnectRef.current?.();
+          });
+      },
+      650 * Math.max(1, reconnectAttemptRef.current),
+    );
   }, [requestSessionTicket, stopMicrophone]);
   scheduleReconnectRef.current = scheduleReconnect;
 
-  const connectSocket = useCallback((ticket: string) => {
-    if (!activeRef.current) return;
-    const socket = new WebSocket(websocketUrl(ticket));
-    socketRef.current = socket;
+  const connectSocket = useCallback(
+    (ticket: string) => {
+      if (!activeRef.current) return;
+      const socket = new WebSocket(websocketUrl(ticket));
+      socketRef.current = socket;
 
-    socket.onopen = () => {
-      reconnectAttemptRef.current = 0;
-    };
+      socket.onopen = () => {
+        reconnectAttemptRef.current = 0;
+      };
 
-    socket.onmessage = (event) => {
-      let message: RealtimeMessage;
-      try {
-        message = JSON.parse(String(event.data)) as RealtimeMessage;
-      } catch {
-        return;
-      }
+      socket.onmessage = (event) => {
+        let message: RealtimeMessage;
+        try {
+          message = JSON.parse(String(event.data)) as RealtimeMessage;
+        } catch {
+          return;
+        }
 
-      switch (message.type) {
-        case "session.ready":
-          setState("idle");
-          setHasSession(true);
-          break;
-        case "input.started":
-          setState("listening");
-          break;
-        case "input.stopped":
-          setState("generating");
-          break;
-        case "response.started":
-          setState("generating");
-          break;
-        case "response.transcript.delta": {
-          break;
-        }
-        case "input.transcript.final": {
-          const transcript = stringValue(message.transcript, message.text);
-          if (transcript) {
-            inputTranscriptRef.current = transcript;
-            transcriptRef.current = transcript;
-          }
-          break;
-        }
-        case "response.audio.delta": {
-          const audio = stringValue(message.delta, message.audio);
-          if (audio) playAudio(audio);
-          break;
-        }
-        case "response.done": {
-          responseDoneRef.current = true;
-          const finalText = stringValue(message.transcript, message.text) || inputTranscriptRef.current;
-          finishTranscript(finalText ?? undefined);
-          if (!playbackEndRef.current || !contextRef.current || contextRef.current.currentTime >= playbackEndRef.current - 0.03) {
+        switch (message.type) {
+          case "session.ready":
             setState("idle");
+            setHasSession(true);
+            break;
+          case "input.started":
+            setState("listening");
+            break;
+          case "input.stopped":
+            setState("generating");
+            break;
+          case "response.started":
+            setState("generating");
+            break;
+          case "response.transcript.delta": {
+            break;
           }
-          break;
+          case "input.transcript.final": {
+            const transcript = stringValue(message.transcript, message.text);
+            if (transcript) {
+              inputTranscriptRef.current = transcript;
+              transcriptRef.current = transcript;
+            }
+            break;
+          }
+          case "response.audio.delta": {
+            const audio = stringValue(message.delta, message.audio);
+            if (audio) playAudio(audio);
+            break;
+          }
+          case "response.done": {
+            responseDoneRef.current = true;
+            const finalText =
+              stringValue(message.transcript, message.text) ||
+              inputTranscriptRef.current;
+            finishTranscript(finalText ?? undefined);
+            if (
+              !playbackEndRef.current ||
+              !contextRef.current ||
+              contextRef.current.currentTime >= playbackEndRef.current - 0.03
+            ) {
+              setState("idle");
+            }
+            break;
+          }
+          case "session.finished":
+            responseDoneRef.current = true;
+            finishTranscript(
+              stringValue(message.transcript, message.text) ?? undefined,
+            );
+            activeRef.current = false;
+            intentionalCloseRef.current = true;
+            socket.close();
+            socketRef.current = null;
+            stopMicrophone();
+            setHasSession(false);
+            setState("idle");
+            break;
+          case "error": {
+            const serverError =
+              stringValue(message.error, message.message) ??
+              "音声セッションでエラーが発生しました。";
+            activeRef.current = false;
+            intentionalCloseRef.current = true;
+            socket.close();
+            socketRef.current = null;
+            stopMicrophone();
+            setError(serverError);
+            setState("error");
+            break;
+          }
+          default:
+            break;
         }
-        case "session.finished":
-          responseDoneRef.current = true;
-          finishTranscript(stringValue(message.transcript, message.text) ?? undefined);
+      };
+
+      socket.onerror = () => {
+        if (activeRef.current) setState("reconnecting");
+      };
+
+      socket.onclose = () => {
+        if (socketRef.current === socket) socketRef.current = null;
+        if (intentionalCloseRef.current || !activeRef.current) return;
+        if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
           activeRef.current = false;
-          intentionalCloseRef.current = true;
-          socket.close();
-          socketRef.current = null;
           stopMicrophone();
           setHasSession(false);
-          setState("idle");
-          break;
-        case "error": {
-          const serverError = stringValue(message.error, message.message) ?? "音声セッションでエラーが発生しました。";
-          activeRef.current = false;
-          intentionalCloseRef.current = true;
-          socket.close();
-          socketRef.current = null;
-          stopMicrophone();
-          setError(serverError);
+          setError("音声接続を再開できませんでした。もう一度お試しください。");
           setState("error");
-          break;
+          return;
         }
-        default:
-          break;
-      }
-    };
-
-    socket.onerror = () => {
-      if (activeRef.current) setState("reconnecting");
-    };
-
-    socket.onclose = () => {
-      if (socketRef.current === socket) socketRef.current = null;
-      if (intentionalCloseRef.current || !activeRef.current) return;
-      if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
-        activeRef.current = false;
-        stopMicrophone();
-        setHasSession(false);
-        setError("音声接続を再開できませんでした。もう一度お試しください。");
-        setState("error");
-        return;
-      }
-      reconnectAttemptRef.current += 1;
-      setState("reconnecting");
-      scheduleReconnectRef.current?.();
-    };
-  }, [finishTranscript, playAudio, stopMicrophone]);
+        reconnectAttemptRef.current += 1;
+        setState("reconnecting");
+        scheduleReconnectRef.current?.();
+      };
+    },
+    [finishTranscript, playAudio, stopMicrophone],
+  );
   connectSocketRef.current = connectSocket;
 
   const start = useCallback(async () => {
-    if (disabled || !selectedModel || activeRef.current || state === "connecting" || state === "reconnecting") return;
+    if (
+      disabled ||
+      !selectedModel ||
+      activeRef.current ||
+      state === "connecting" ||
+      state === "reconnecting"
+    )
+      return;
     clearTimers();
     setError(null);
     setState("connecting");
@@ -428,16 +470,26 @@ export function QwenAudioRealtime({
     } catch (cause) {
       activeRef.current = false;
       setHasSession(false);
-      const message = cause instanceof DOMException && cause.name === "NotAllowedError"
-        ? "マイクの使用が許可されませんでした。ブラウザのサイト設定を確認してください。"
-        : cause instanceof Error
-          ? cause.message
-          : "マイクを開始できませんでした。";
+      const message =
+        cause instanceof DOMException && cause.name === "NotAllowedError"
+          ? "マイクの使用が許可されませんでした。ブラウザのサイト設定を確認してください。"
+          : cause instanceof Error
+            ? cause.message
+            : "マイクを開始できませんでした。";
       setError(message);
       setState("error");
       stopMicrophone();
     }
-  }, [clearTimers, connectSocket, disabled, prepareMicrophone, requestSessionTicket, selectedModel, state, stopMicrophone]);
+  }, [
+    clearTimers,
+    connectSocket,
+    disabled,
+    prepareMicrophone,
+    requestSessionTicket,
+    selectedModel,
+    state,
+    stopMicrophone,
+  ]);
 
   const endCapture = useCallback(() => {
     if (!capturingRef.current) return;
@@ -453,7 +505,14 @@ export function QwenAudioRealtime({
     const socket = socketRef.current;
     const context = contextRef.current;
     const stream = streamRef.current;
-    if (!activeRef.current || state !== "idle" || !socket || socket.readyState !== WebSocket.OPEN || !context || !stream) {
+    if (
+      !activeRef.current ||
+      state !== "idle" ||
+      !socket ||
+      socket.readyState !== WebSocket.OPEN ||
+      !context ||
+      !stream
+    ) {
       return;
     }
 
@@ -475,7 +534,9 @@ export function QwenAudioRealtime({
       if (!capturingRef.current || socket.readyState !== WebSocket.OPEN) return;
       const channel = event.inputBuffer.getChannelData(0);
       const pcm = downsampleToPcm16(channel, event.inputBuffer.sampleRate);
-      socket.send(JSON.stringify({ type: "audio.append", audio: toBase64(pcm) }));
+      socket.send(
+        JSON.stringify({ type: "audio.append", audio: toBase64(pcm) }),
+      );
     };
     inputSourceRef.current = source;
     processorRef.current = processor;
@@ -559,14 +620,26 @@ export function QwenAudioRealtime({
   const label = stateLabel(state, hasSession);
 
   return (
-    <div className="flex items-center gap-1.5 shrink-0" aria-label="Qwen Audio Realtime">
-      <span className="max-w-[9rem] truncate text-[11px] text-muted-foreground" role="status" aria-live="polite">
+    <div
+      className="flex items-center gap-1.5 shrink-0"
+      aria-label="Qwen Audio Realtime"
+    >
+      <span
+        className="max-w-[9rem] truncate text-[11px] text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
         {label}
       </span>
       {error ? (
-        <div className="flex max-w-[15rem] items-center gap-1.5 text-[11px] text-destructive" role="alert">
+        <div
+          className="flex max-w-[15rem] items-center gap-1.5 text-[11px] text-destructive"
+          role="alert"
+        >
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate" title={error}>{error}</span>
+          <span className="truncate" title={error}>
+            {error}
+          </span>
         </div>
       ) : null}
 
@@ -574,7 +647,12 @@ export function QwenAudioRealtime({
         <button
           type="button"
           onClick={() => void start()}
-          disabled={disabled || !selectedModel || state === "connecting" || state === "reconnecting"}
+          disabled={
+            disabled ||
+            !selectedModel ||
+            state === "connecting" ||
+            state === "reconnecting"
+          }
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
             "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10",
@@ -615,7 +693,12 @@ export function QwenAudioRealtime({
             aria-label="押している間だけ話す"
             aria-pressed={state === "listening"}
           >
-            <Mic className={cn("h-3.5 w-3.5", state === "listening" && "animate-pulse")} />
+            <Mic
+              className={cn(
+                "h-3.5 w-3.5",
+                state === "listening" && "animate-pulse",
+              )}
+            />
             {state === "listening" ? "話しています" : "押して話す"}
           </button>
           <button
@@ -626,7 +709,11 @@ export function QwenAudioRealtime({
             aria-label="音声入力を停止"
             title={label}
           >
-            {state === "stopping" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
+            {state === "stopping" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Square className="h-3 w-3 fill-current" />
+            )}
           </button>
         </>
       )}

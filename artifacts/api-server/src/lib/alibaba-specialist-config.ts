@@ -45,7 +45,8 @@ function assertTrustedAlibabaHost(url: URL): void {
     host === "dashscope.aliyuncs.com" ||
     host.endsWith(".ap-southeast-1.maas.aliyuncs.com") ||
     host.endsWith(".cn-beijing.maas.aliyuncs.com");
-  if (!trusted) throw new Error("Alibaba specialist endpoint host is not trusted");
+  if (!trusted)
+    throw new Error("Alibaba specialist endpoint host is not trusted");
 }
 
 function defaultSpecialistHttpBase(env: NodeJS.ProcessEnv): string {
@@ -65,13 +66,17 @@ export function resolveAlibabaSpecialistHttpUrl(
 ): URL {
   const configured = env.ALIBABA_SPECIALIST_HTTP_BASE_URL?.trim();
   const base = new URL(configured || defaultSpecialistHttpBase(env));
-  if (base.protocol !== "https:") throw new Error("Alibaba specialist HTTP endpoint must use HTTPS");
+  if (base.protocol !== "https:")
+    throw new Error("Alibaba specialist HTTP endpoint must use HTTPS");
   assertTrustedAlibabaHost(base);
 
-  const normalizedBase = base.pathname.endsWith("/") ? base : new URL(`${base.toString().replace(/\/+$/, "")}/`);
+  const normalizedBase = base.pathname.endsWith("/")
+    ? base
+    : new URL(`${base.toString().replace(/\/+$/, "")}/`);
   const normalizedPath = servicePath.replace(/^\/+/, "");
   const resolved = new URL(normalizedPath, normalizedBase);
-  if (resolved.origin !== base.origin) throw new Error("Alibaba specialist endpoint escaped configured origin");
+  if (resolved.origin !== base.origin)
+    throw new Error("Alibaba specialist endpoint escaped configured origin");
   assertTrustedAlibabaHost(resolved);
   return resolved;
 }
@@ -81,17 +86,22 @@ export function resolveAlibabaTtsWebSocketUrl(
 ): URL {
   const explicit = env.ALIBABA_SPECIALIST_TTS_WS_URL?.trim();
   const workspaceId = env.ALIBABA_SPECIALIST_WORKSPACE_ID?.trim();
-  const raw = explicit || (workspaceId && WORKSPACE_ID_PATTERN.test(workspaceId)
-    ? `wss://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/inference`
-    : "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference");
+  const raw =
+    explicit ||
+    (workspaceId && WORKSPACE_ID_PATTERN.test(workspaceId)
+      ? `wss://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/inference`
+      : "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference");
   const url = new URL(raw);
-  if (url.protocol !== "wss:") throw new Error("Alibaba TTS endpoint must use WSS");
+  if (url.protocol !== "wss:")
+    throw new Error("Alibaba TTS endpoint must use WSS");
   assertTrustedAlibabaHost(url);
   if (url.pathname !== "/api-ws/v1/inference") {
     throw new Error("Alibaba TTS endpoint path is not allowed");
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new Error("Alibaba TTS endpoint must not contain credentials, query, or fragment");
+    throw new Error(
+      "Alibaba TTS endpoint must not contain credentials, query, or fragment",
+    );
   }
   return url;
 }
@@ -103,20 +113,30 @@ export function resolveAlibabaRealtimeWebSocketUrl(
 ): URL {
   const explicit = env.ALIBABA_SPECIALIST_REALTIME_WS_URL?.trim();
   const workspaceId = env.ALIBABA_SPECIALIST_WORKSPACE_ID?.trim();
-  const raw = explicit || (workspaceId && WORKSPACE_ID_PATTERN.test(workspaceId)
-    ? `wss://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/realtime?model=${ALIBABA_REALTIME_MODEL_ID}`
-    : `wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=${ALIBABA_REALTIME_MODEL_ID}`);
+  const raw =
+    explicit ||
+    (workspaceId && WORKSPACE_ID_PATTERN.test(workspaceId)
+      ? `wss://${workspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/realtime?model=${ALIBABA_REALTIME_MODEL_ID}`
+      : `wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=${ALIBABA_REALTIME_MODEL_ID}`);
   const url = new URL(raw);
-  if (url.protocol !== "wss:") throw new Error("Alibaba realtime endpoint must use WSS");
+  if (url.protocol !== "wss:")
+    throw new Error("Alibaba realtime endpoint must use WSS");
   assertTrustedAlibabaHost(url);
   if (url.pathname !== "/api-ws/v1/realtime") {
     throw new Error("Alibaba realtime endpoint path is not allowed");
   }
   if (url.username || url.password || url.hash) {
-    throw new Error("Alibaba realtime endpoint must not contain credentials or fragment");
+    throw new Error(
+      "Alibaba realtime endpoint must not contain credentials or fragment",
+    );
   }
-  if (url.searchParams.get("model") !== ALIBABA_REALTIME_MODEL_ID || [...url.searchParams.keys()].length !== 1) {
-    throw new Error("Alibaba realtime endpoint must select the supported realtime model");
+  if (
+    url.searchParams.get("model") !== ALIBABA_REALTIME_MODEL_ID ||
+    [...url.searchParams.keys()].length !== 1
+  ) {
+    throw new Error(
+      "Alibaba realtime endpoint must select the supported realtime model",
+    );
   }
   return url;
 }

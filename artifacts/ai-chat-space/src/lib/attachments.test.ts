@@ -9,7 +9,11 @@ import {
 describe("attachment message storage format", () => {
   it("round-trips multiple attachment chips without exposing their contents", () => {
     const stored = serializeAttachmentMessage("比較して", [
-      { name: "diagram.png", content: "data:image/png;base64,AAAA", isBase64: true },
+      {
+        name: "diagram.png",
+        content: "data:image/png;base64,AAAA",
+        isBase64: true,
+      },
       { name: "notes.md", content: "# Notes", isBase64: false },
     ]);
 
@@ -32,8 +36,18 @@ describe("attachment message storage format", () => {
 
   it("keeps binary documents/audio as file chips even though they are base64", () => {
     const stored = serializeAttachmentMessage("要約して", [
-      { name: "report.pdf", content: "data:application/pdf;base64,AAAA", isBase64: true, kind: "file" },
-      { name: "memo.mp3", content: "data:audio/mpeg;base64,AAAA", isBase64: true, kind: "file" },
+      {
+        name: "report.pdf",
+        content: "data:application/pdf;base64,AAAA",
+        isBase64: true,
+        kind: "file",
+      },
+      {
+        name: "memo.mp3",
+        content: "data:audio/mpeg;base64,AAAA",
+        isBase64: true,
+        kind: "file",
+      },
     ]);
     expect(parseAttachmentMessageForDisplay(stored)).toEqual({
       displayContent: "要約して",
@@ -46,7 +60,11 @@ describe("attachment message storage format", () => {
 
   it("compacts private history without resending attachment payloads", () => {
     const stored = serializeAttachmentMessage("比較して", [
-      { name: "diagram.png", content: "data:image/png;base64,SECRET", isBase64: true },
+      {
+        name: "diagram.png",
+        content: "data:image/png;base64,SECRET",
+        isBase64: true,
+      },
       { name: "notes.md", content: "secret text", isBase64: false },
     ]);
     const compact = compactAttachmentMessageForHistory(stored);
@@ -58,9 +76,10 @@ describe("attachment message storage format", () => {
   });
 
   it("does not render malformed envelope data as chat text", () => {
-    expect(parseAttachmentMessageForDisplay(`${ATTACHMENTS_V1_PREFIX}{broken`).displayContent).toBe(
-      "添付メッセージを表示できませんでした。",
-    );
+    expect(
+      parseAttachmentMessageForDisplay(`${ATTACHMENTS_V1_PREFIX}{broken`)
+        .displayContent,
+    ).toBe("添付メッセージを表示できませんでした。");
   });
 
   it("keeps the legacy single-attachment display format readable", () => {

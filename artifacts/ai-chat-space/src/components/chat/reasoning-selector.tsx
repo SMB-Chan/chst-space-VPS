@@ -16,8 +16,13 @@ interface ReasoningSelectorProps {
   disabled?: boolean;
 }
 
-export function ReasoningSelector({ value, onSelect, disabled }: ReasoningSelectorProps) {
-  const current = REASONING_LEVELS.find((l) => l.id === value) ?? REASONING_LEVELS[2];
+export function ReasoningSelector({
+  value,
+  onSelect,
+  disabled,
+}: ReasoningSelectorProps) {
+  const current =
+    REASONING_LEVELS.find((l) => l.id === value) ?? REASONING_LEVELS[2];
 
   return (
     <DropdownMenu>
@@ -30,7 +35,8 @@ export function ReasoningSelector({ value, onSelect, disabled }: ReasoningSelect
             "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium transition-all",
             "border border-border/50 text-muted-foreground hover:text-foreground hover:border-border",
             "hover:bg-muted/40",
-            value !== "off" && "text-violet-400/90 border-violet-500/30 hover:text-violet-300 hover:border-violet-500/50",
+            value !== "off" &&
+              "text-violet-400/90 border-violet-500/30 hover:text-violet-300 hover:border-violet-500/50",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >

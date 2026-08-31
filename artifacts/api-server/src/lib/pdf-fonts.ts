@@ -41,7 +41,9 @@ export class CjkFontUnavailableError extends Error {
   readonly code = "CJK_FONT_UNAVAILABLE";
 
   constructor() {
-    super("Japanese PDF content requires a usable CJK font, but none was found");
+    super(
+      "Japanese PDF content requires a usable CJK font, but none was found",
+    );
     this.name = "CjkFontUnavailableError";
   }
 }
@@ -56,11 +58,10 @@ function isStandaloneFontFile(fontPath: string): boolean {
 
 function discoverFontconfigCandidates(): string[] {
   try {
-    const output = execFileSync(
-      "fc-list",
-      ["-f", "%{file}\n", ":lang=ja"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
+    const output = execFileSync("fc-list", ["-f", "%{file}\n", ":lang=ja"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
     return output
       .split("\n")
       .map((line) => line.trim())

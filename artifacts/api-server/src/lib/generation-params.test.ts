@@ -24,7 +24,9 @@ describe("isUnsupportedGenerationParam", () => {
   it("detects OpenAI unsupported-parameter errors", () => {
     expect(
       isUnsupportedGenerationParam(
-        Object.assign(new Error("Unsupported parameter: 'reasoning_effort'"), { status: 400 }),
+        Object.assign(new Error("Unsupported parameter: 'reasoning_effort'"), {
+          status: 400,
+        }),
       ),
     ).toBe(true);
   });

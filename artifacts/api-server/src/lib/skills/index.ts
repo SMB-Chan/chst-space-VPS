@@ -11,11 +11,16 @@ export function matchSkills(text: string): ChatSkill[] {
   return CHAT_SKILLS.filter((skill) => skill.trigger.test(sample));
 }
 
-export function composeSkillSearchQuery(userText: string, skills: ChatSkill[]): string | undefined {
+export function composeSkillSearchQuery(
+  userText: string,
+  skills: ChatSkill[],
+): string | undefined {
   const forced = skills.filter((s) => s.forceSearch);
   if (forced.length === 0) return undefined;
   const base = userText.replace(/\s+/g, " ").trim().slice(0, 80);
   if (!base) return undefined;
-  const hints = forced.map((s) => s.searchHint).filter((h): h is string => Boolean(h));
+  const hints = forced
+    .map((s) => s.searchHint)
+    .filter((h): h is string => Boolean(h));
   return [base, ...hints].join(" ").trim();
 }

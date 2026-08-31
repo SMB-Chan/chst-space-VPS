@@ -29,7 +29,9 @@ describe("Markdown", () => {
 
   it("does not execute raw HTML", () => {
     const html = renderToStaticMarkup(
-      <Markdown content={'<img src=x onerror="alert(1)"><script>alert(1)</script>hello'} />,
+      <Markdown
+        content={'<img src=x onerror="alert(1)"><script>alert(1)</script>hello'}
+      />,
     );
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onerror");
@@ -38,15 +40,19 @@ describe("Markdown", () => {
 
   it("renders remote Markdown images as opt-in links instead of img requests", () => {
     const html = renderToStaticMarkup(
-      <Markdown content={'![tracking pixel](https://tracker.example/pixel.gif?x=1)'} />,
+      <Markdown
+        content={"![tracking pixel](https://tracker.example/pixel.gif?x=1)"}
+      />,
     );
     expect(html).not.toContain("<img");
     expect(html).toContain("tracking pixelを開く");
-    expect(html).toContain("referrerPolicy=\"no-referrer\"");
+    expect(html).toContain('referrerPolicy="no-referrer"');
   });
 
   it("does not make non-http links clickable", () => {
-    const html = renderToStaticMarkup(<Markdown content={'[bad](javascript:alert(1))'} />);
+    const html = renderToStaticMarkup(
+      <Markdown content={"[bad](javascript:alert(1))"} />,
+    );
     expect(html).not.toContain("javascript:");
   });
 });

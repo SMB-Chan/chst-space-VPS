@@ -20,7 +20,9 @@ function optionalOperationalMetrics(): Record<string, unknown> {
   return shouldIncludeOperationalHealthMetrics() ? operationalMetrics() : {};
 }
 
-async function healthResponse(res: Parameters<Parameters<IRouter["get"]>[1]>[1]): Promise<void> {
+async function healthResponse(
+  res: Parameters<Parameters<IRouter["get"]>[1]>[1],
+): Promise<void> {
   if (!startupReadiness.isReady()) {
     res.status(503).json({
       status: "starting",

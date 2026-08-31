@@ -2,10 +2,7 @@ import { EventEmitter } from "node:events";
 import type OpenAI from "openai";
 import type { Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createResponseCancellation,
-  streamChatReply,
-} from "./chat-stream";
+import { createResponseCancellation, streamChatReply } from "./chat-stream";
 
 class MockResponse extends EventEmitter {
   headersSent = false;
@@ -44,7 +41,9 @@ async function* answerStream(): AsyncGenerator<{
 describe("response cancellation", () => {
   it("aborts the shared signal when the response closes before streaming starts", () => {
     const response = new MockResponse();
-    const cancellation = createResponseCancellation(response as unknown as Response);
+    const cancellation = createResponseCancellation(
+      response as unknown as Response,
+    );
 
     response.emit("close");
 
@@ -55,7 +54,9 @@ describe("response cancellation", () => {
 
   it("does not invoke completion persistence after a client disconnects", async () => {
     const response = new MockResponse();
-    const cancellation = createResponseCancellation(response as unknown as Response);
+    const cancellation = createResponseCancellation(
+      response as unknown as Response,
+    );
     const onComplete = vi.fn(async () => undefined);
     const client = {
       chat: {

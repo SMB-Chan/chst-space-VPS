@@ -30,7 +30,9 @@ const TRANSLATION_MODES: readonly TranslationMode[] = [
   "zh-ja",
 ];
 
-export function parseTranslationMode(raw: unknown): TranslationMode | undefined {
+export function parseTranslationMode(
+  raw: unknown,
+): TranslationMode | undefined {
   return TRANSLATION_MODES.includes(raw as TranslationMode)
     ? (raw as TranslationMode)
     : undefined;

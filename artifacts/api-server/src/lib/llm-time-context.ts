@@ -23,7 +23,10 @@ const JST_CONTEXT_PREFIX = "現在日時:";
 
 function dateTimeParts(date: Date): Record<string, string> {
   return Object.fromEntries(
-    DATE_TIME_FORMATTER.formatToParts(date).map(({ type, value }) => [type, value]),
+    DATE_TIME_FORMATTER.formatToParts(date).map(({ type, value }) => [
+      type,
+      value,
+    ]),
   );
 }
 
@@ -91,7 +94,10 @@ export function injectLlmTimeContextIntoBody(
   date: Date = new Date(),
 ): string {
   try {
-    const parsed = JSON.parse(body) as { messages?: unknown } & Record<string, unknown>;
+    const parsed = JSON.parse(body) as { messages?: unknown } & Record<
+      string,
+      unknown
+    >;
     if (!Array.isArray(parsed.messages)) return body;
     parsed.messages = normalizeMessages(parsed.messages, date);
     return JSON.stringify(parsed);
@@ -124,7 +130,10 @@ export function createLlmTimeContextFetch(
   baseFetch: typeof fetch = globalThis.fetch,
   now: () => Date = () => new Date(),
 ): typeof fetch {
-  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  return ((
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     if (!isChatCompletionsRequest(input) || typeof init?.body !== "string") {
       return baseFetch(input, init);
     }

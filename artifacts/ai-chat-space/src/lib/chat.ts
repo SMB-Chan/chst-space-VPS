@@ -22,22 +22,28 @@ export function conversationTitle(text: string): string {
     : normalized;
 }
 
-export function timeGreeting(now = new Date()): { title: string; subtitle: string } {
+export function timeGreeting(now = new Date()): {
+  title: string;
+  subtitle: string;
+} {
   const hour = now.getHours();
   if (hour >= 5 && hour < 11) {
     return {
       title: "おはようございます。",
-      subtitle: "今日は何から始めますか？ドキュメントを添付するか、そのまま入力してください。",
+      subtitle:
+        "今日は何から始めますか？ドキュメントを添付するか、そのまま入力してください。",
     };
   }
   if (hour >= 11 && hour < 18) {
     return {
       title: "こんにちは。",
-      subtitle: "何を進めましょうか？ドキュメントを添付するか、そのまま入力してください。",
+      subtitle:
+        "何を進めましょうか？ドキュメントを添付するか、そのまま入力してください。",
     };
   }
   return {
     title: "こんばんは。",
-    subtitle: "今夜は何を進めますか？ドキュメントを添付するか、そのまま入力してください。",
+    subtitle:
+      "今夜は何を進めますか？ドキュメントを添付するか、そのまま入力してください。",
   };
 }

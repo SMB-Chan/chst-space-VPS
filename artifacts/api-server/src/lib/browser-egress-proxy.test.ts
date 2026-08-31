@@ -1,5 +1,12 @@
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
-import { createServer as createTcpServer, connect as netConnect, type LookupFunction } from "node:net";
+import {
+  createServer as createHttpServer,
+  request as httpRequest,
+} from "node:http";
+import {
+  createServer as createTcpServer,
+  connect as netConnect,
+  type LookupFunction,
+} from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertAllowedBrowserProxyTarget,
@@ -13,7 +20,10 @@ afterEach(async () => {
   await Promise.all(openProxies.splice(0).map((proxy) => proxy.close()));
 });
 
-function proxyHttpRequest(proxyUrl: string, targetUrl: string): Promise<{ status: number; body: string }> {
+function proxyHttpRequest(
+  proxyUrl: string,
+  targetUrl: string,
+): Promise<{ status: number; body: string }> {
   const proxy = new URL(proxyUrl);
   return new Promise((resolve, reject) => {
     const req = httpRequest(
@@ -37,15 +47,24 @@ function proxyHttpRequest(proxyUrl: string, targetUrl: string): Promise<{ status
   });
 }
 
-function proxyConnect(proxyUrl: string, authority: string, payload?: string): Promise<string> {
+function proxyConnect(
+  proxyUrl: string,
+  authority: string,
+  payload?: string,
+): Promise<string> {
   const proxy = new URL(proxyUrl);
   return new Promise((resolve, reject) => {
-    const socket = netConnect({ host: proxy.hostname, port: Number(proxy.port) });
+    const socket = netConnect({
+      host: proxy.hostname,
+      port: Number(proxy.port),
+    });
     let received = "";
     let payloadSent = false;
     socket.setEncoding("utf8");
     socket.on("connect", () => {
-      socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n\r\n`);
+      socket.write(
+        `CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n\r\n`,
+      );
     });
     socket.on("data", (chunk) => {
       received += chunk;
@@ -75,7 +94,12 @@ function respondLookup(
   options: Parameters<LookupFunction>[1],
   address: string,
 ): void {
-  if (typeof options === "object" && options !== null && "all" in options && options.all) {
+  if (
+    typeof options === "object" &&
+    options !== null &&
+    "all" in options &&
+    options.all
+  ) {
     callback(null, [{ address, family: 4 }] as never, undefined as never);
     return;
   }
@@ -121,7 +145,10 @@ describe("browser egress proxy target policy", () => {
   it("blocks private literal HTTP targets before any upstream connection", async () => {
     const proxy = await startBrowserEgressProxy();
     openProxies.push(proxy);
-    const response = await proxyHttpRequest(proxy.server, "http://127.0.0.1:6553/private");
+    const response = await proxyHttpRequest(
+      proxy.server,
+      "http://127.0.0.1:6553/private",
+    );
     expect(response.status).toBe(403);
   });
 
@@ -134,16 +161,23 @@ describe("browser egress proxy target policy", () => {
 
   it("treats a private result from the actual HTTP connect lookup as blocked", async () => {
     const seen = vi.fn();
-    const proxy = await startBrowserEgressProxy({ lookup: blockedLookup(seen) });
+    const proxy = await startBrowserEgressProxy({
+      lookup: blockedLookup(seen),
+    });
     openProxies.push(proxy);
-    const response = await proxyHttpRequest(proxy.server, "http://rebind.example/resource");
+    const response = await proxyHttpRequest(
+      proxy.server,
+      "http://rebind.example/resource",
+    );
     expect(response.status).toBe(403);
     expect(seen).toHaveBeenCalledWith("rebind.example");
   });
 
   it("treats a private result from the actual CONNECT lookup as blocked", async () => {
     const seen = vi.fn();
-    const proxy = await startBrowserEgressProxy({ lookup: blockedLookup(seen) });
+    const proxy = await startBrowserEgressProxy({
+      lookup: blockedLookup(seen),
+    });
     openProxies.push(proxy);
     const response = await proxyConnect(proxy.server, "rebind.example:443");
     expect(response).toContain("403 Forbidden");
@@ -152,9 +186,12 @@ describe("browser egress proxy target policy", () => {
 
   it("uses the injected connect lookup for HTTP forwarding", async () => {
     const upstream = createHttpServer((_req, res) => res.end("through-proxy"));
-    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      upstream.listen(0, "127.0.0.1", resolve),
+    );
     const address = upstream.address();
-    if (!address || typeof address === "string") throw new Error("HTTP test server did not bind");
+    if (!address || typeof address === "string")
+      throw new Error("HTTP test server did not bind");
 
     const seen = vi.fn();
     const proxy = await startBrowserEgressProxy({ lookup: localLookup(seen) });
@@ -173,9 +210,12 @@ describe("browser egress proxy target policy", () => {
 
   it("uses the injected connect lookup for CONNECT tunnels", async () => {
     const upstream = createTcpServer((socket) => socket.pipe(socket));
-    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      upstream.listen(0, "127.0.0.1", resolve),
+    );
     const address = upstream.address();
-    if (!address || typeof address === "string") throw new Error("TCP test server did not bind");
+    if (!address || typeof address === "string")
+      throw new Error("TCP test server did not bind");
 
     const seen = vi.fn();
     const proxy = await startBrowserEgressProxy({ lookup: localLookup(seen) });

@@ -49,7 +49,9 @@ describe("hasActionableFeedback", () => {
   });
 
   it("returns true for actionable feedback", () => {
-    expect(hasActionableFeedback("1. Increase font size\n2. Add margins")).toBe(true);
+    expect(hasActionableFeedback("1. Increase font size\n2. Add margins")).toBe(
+      true,
+    );
   });
 
   it("returns false for empty feedback", () => {
@@ -63,7 +65,9 @@ describe("reviewLayout", () => {
     const mockCreate = vi.fn().mockResolvedValue({
       choices: [{ message: { content: "NO_ISSUES" } }],
     });
-    const mockClient = { chat: { completions: { create: mockCreate } } } as unknown as import("openai").default;
+    const mockClient = {
+      chat: { completions: { create: mockCreate } },
+    } as unknown as import("openai").default;
 
     const images = [Buffer.from("fake-png")];
     const result = await reviewLayout({
@@ -86,7 +90,9 @@ describe("reviewLayout", () => {
 
   it("propagates API errors so the caller can log the request context", async () => {
     const mockCreate = vi.fn().mockRejectedValue(new Error("API down"));
-    const mockClient = { chat: { completions: { create: mockCreate } } } as unknown as import("openai").default;
+    const mockClient = {
+      chat: { completions: { create: mockCreate } },
+    } as unknown as import("openai").default;
 
     await expect(
       reviewLayout({

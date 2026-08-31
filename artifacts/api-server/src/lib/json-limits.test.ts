@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import express from "express";
 import http from "node:http";
-import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./json-limits";
+import {
+  DEFAULT_JSON_LIMIT,
+  LARGE_JSON_LIMIT,
+  LARGE_JSON_PATHS,
+} from "./json-limits";
 
 function listen(app: express.Express): Promise<http.Server> {
   return new Promise((resolve) => {
@@ -9,7 +13,11 @@ function listen(app: express.Express): Promise<http.Server> {
   });
 }
 
-function post(port: number, path: string, bytes: number): Promise<{ status: number; body: string }> {
+function post(
+  port: number,
+  path: string,
+  bytes: number,
+): Promise<{ status: number; body: string }> {
   const payload = JSON.stringify({ content: "x".repeat(bytes) });
   return new Promise((resolve, reject) => {
     const req = http.request(
@@ -43,14 +51,25 @@ describe("JSON body limits", () => {
     app.use([...LARGE_JSON_PATHS], express.json({ limit: LARGE_JSON_LIMIT }));
     app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
     const echo: express.RequestHandler = (req, res) => {
-      res.json({ n: typeof req.body?.content === "string" ? req.body.content.length : 0 });
+      res.json({
+        n: typeof req.body?.content === "string" ? req.body.content.length : 0,
+      });
     };
     app.post("/api/openai/conversations/:id/messages", echo);
     app.post("/api/openai/ephemeral/messages", echo);
     app.post("/api/openai/conversations", echo);
-    app.use((err: Error & { status?: number; type?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-      res.status(err.status ?? 500).json({ error: err.message, type: err.type });
-    });
+    app.use(
+      (
+        err: Error & { status?: number; type?: string },
+        _req: express.Request,
+        res: express.Response,
+        _next: express.NextFunction,
+      ) => {
+        res
+          .status(err.status ?? 500)
+          .json({ error: err.message, type: err.type });
+      },
+    );
 
     const server = await listen(app);
     const address = server.address();
@@ -61,8 +80,16 @@ describe("JSON body limits", () => {
     const { port } = address;
     try {
       const large = 300_000;
-      const conv = await post(port, "/api/openai/conversations/16/messages", large);
-      const ephemeral = await post(port, "/api/openai/ephemeral/messages", large);
+      const conv = await post(
+        port,
+        "/api/openai/conversations/16/messages",
+        large,
+      );
+      const ephemeral = await post(
+        port,
+        "/api/openai/ephemeral/messages",
+        large,
+      );
       const other = await post(port, "/api/openai/conversations", large);
       expect(conv.status).toBe(200);
       expect(ephemeral.status).toBe(200);

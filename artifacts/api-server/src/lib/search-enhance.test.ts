@@ -27,7 +27,9 @@ describe("sanitizeSearchQuery", () => {
   });
 
   it("collapses newlines and extra whitespace into one line", () => {
-    expect(sanitizeSearchQuery("Node.js\n最新版\r\n リリース")).toBe("Node.js 最新版 リリース");
+    expect(sanitizeSearchQuery("Node.js\n最新版\r\n リリース")).toBe(
+      "Node.js 最新版 リリース",
+    );
   });
 
   it("rejects empty and overlong queries", () => {
@@ -36,7 +38,9 @@ describe("sanitizeSearchQuery", () => {
   });
 
   it("rejects secret-like content that must not leak to search APIs", () => {
-    expect(sanitizeSearchQuery("login with sk-abcdefghijklmnop1234567890")).toBe("");
+    expect(
+      sanitizeSearchQuery("login with sk-abcdefghijklmnop1234567890"),
+    ).toBe("");
     expect(sanitizeSearchQuery("-----BEGIN PRIVATE KEY----- abc")).toBe("");
     expect(sanitizeSearchQuery("token: Bearer abcdef0123456789abcd")).toBe("");
     expect(sanitizeSearchQuery("api_key=abcdef12345")).toBe("");
@@ -69,30 +73,60 @@ describe("expandSearchQueries", () => {
 
 describe("scoreSearchResult", () => {
   it("ranks exact title matches highest", () => {
-    const exact = { title: "東京の天気", url: "https://example.com", snippet: "概要" };
-    const partial = { title: "大阪の天気", url: "https://example.com", snippet: "概要" };
+    const exact = {
+      title: "東京の天気",
+      url: "https://example.com",
+      snippet: "概要",
+    };
+    const partial = {
+      title: "大阪の天気",
+      url: "https://example.com",
+      snippet: "概要",
+    };
     const exactScore = scoreSearchResult(exact, "東京の天気");
     const partialScore = scoreSearchResult(partial, "東京の天気");
     expect(exactScore).toBeGreaterThan(partialScore);
   });
 
   it("boosts authority domains", () => {
-    const auth = { title: "Title", url: "https://www.nhk.or.jp/news/", snippet: "" };
+    const auth = {
+      title: "Title",
+      url: "https://www.nhk.or.jp/news/",
+      snippet: "",
+    };
     const plain = { title: "Title", url: "https://example.com", snippet: "" };
-    expect(scoreSearchResult(auth, "ニュース")).toBeGreaterThan(scoreSearchResult(plain, "ニュース"));
+    expect(scoreSearchResult(auth, "ニュース")).toBeGreaterThan(
+      scoreSearchResult(plain, "ニュース"),
+    );
   });
 
   it("penalizes low-quality domains", () => {
-    const low = { title: "Title", url: "https://matome.example.com", snippet: "" };
+    const low = {
+      title: "Title",
+      url: "https://matome.example.com",
+      snippet: "",
+    };
     const plain = { title: "Title", url: "https://example.com", snippet: "" };
-    expect(scoreSearchResult(low, "ニュース")).toBeLessThan(scoreSearchResult(plain, "ニュース"));
+    expect(scoreSearchResult(low, "ニュース")).toBeLessThan(
+      scoreSearchResult(plain, "ニュース"),
+    );
   });
 
   it("boosts current-year recency signals", () => {
     const currentYear = new Date().getUTCFullYear();
-    const recent = { title: `${currentYear}年の予測`, url: "https://example.com", snippet: "" };
-    const old = { title: "2018年の予測", url: "https://example.com", snippet: "" };
-    expect(scoreSearchResult(recent, "予測")).toBeGreaterThan(scoreSearchResult(old, "予測"));
+    const recent = {
+      title: `${currentYear}年の予測`,
+      url: "https://example.com",
+      snippet: "",
+    };
+    const old = {
+      title: "2018年の予測",
+      url: "https://example.com",
+      snippet: "",
+    };
+    expect(scoreSearchResult(recent, "予測")).toBeGreaterThan(
+      scoreSearchResult(old, "予測"),
+    );
   });
 
   it("does not grant authority points for trusted text in a path or query", () => {
@@ -101,14 +135,30 @@ describe("scoreSearchResult", () => {
       url: "https://example.com/reuters.com/story?source=nhk.or.jp",
       snippet: "",
     };
-    const plain = { title: "Title", url: "https://example.com/story", snippet: "" };
-    expect(scoreSearchResult(spoofed, "ニュース")).toBe(scoreSearchResult(plain, "ニュース"));
+    const plain = {
+      title: "Title",
+      url: "https://example.com/story",
+      snippet: "",
+    };
+    expect(scoreSearchResult(spoofed, "ニュース")).toBe(
+      scoreSearchResult(plain, "ニュース"),
+    );
   });
 
   it("recognizes trusted subdomains by hostname suffix", () => {
-    const auth = { title: "Title", url: "https://news.example.nhk.or.jp/story", snippet: "" };
-    const plain = { title: "Title", url: "https://example.com/story", snippet: "" };
-    expect(scoreSearchResult(auth, "ニュース")).toBeGreaterThan(scoreSearchResult(plain, "ニュース"));
+    const auth = {
+      title: "Title",
+      url: "https://news.example.nhk.or.jp/story",
+      snippet: "",
+    };
+    const plain = {
+      title: "Title",
+      url: "https://example.com/story",
+      snippet: "",
+    };
+    expect(scoreSearchResult(auth, "ニュース")).toBeGreaterThan(
+      scoreSearchResult(plain, "ニュース"),
+    );
   });
 });
 
@@ -116,8 +166,16 @@ describe("mergeSearchResults", () => {
   it("deduplicates by URL and sorts by score", () => {
     const results = [
       { title: "A", url: "https://example.com/a", snippet: "first" },
-      { title: "A2", url: "https://example.com/a#section", snippet: "duplicate" },
-      { title: "B", url: "https://example.com/b", snippet: "exact match 東京の天気" },
+      {
+        title: "A2",
+        url: "https://example.com/a#section",
+        snippet: "duplicate",
+      },
+      {
+        title: "B",
+        url: "https://example.com/b",
+        snippet: "exact match 東京の天気",
+      },
     ];
     const merged = mergeSearchResults(results, "東京の天気");
     expect(merged).toHaveLength(2);
@@ -133,7 +191,9 @@ describe("mergeSearchResults", () => {
       { title: "C", url: "https://c.example/1", snippet: "", score: 60 },
     ];
 
-    expect(selectDiverseScoredResults(ranked, 4).map((item) => item.url)).toEqual([
+    expect(
+      selectDiverseScoredResults(ranked, 4).map((item) => item.url),
+    ).toEqual([
       "https://a.example/1",
       "https://a.example/2",
       "https://b.example/1",
@@ -214,7 +274,9 @@ describe("extractMainContent", () => {
 
 describe("extractArticleContent", () => {
   it("extracts article text and title via Readability", () => {
-    const body = "これは記事の本文です。Readability が抽出すべき内容。".repeat(10);
+    const body = "これは記事の本文です。Readability が抽出すべき内容。".repeat(
+      10,
+    );
     const html = `
       <html>
         <head><title>記事タイトル | サイト名</title></head>
@@ -234,7 +296,7 @@ describe("extractArticleContent", () => {
   it("returns null for pages with no identifiable article", () => {
     expect(
       extractArticleContent(
-        "<html><body><div id=\"root\"></div></body></html>",
+        '<html><body><div id="root"></div></body></html>',
         "https://example.com/",
       ),
     ).toBeNull();
@@ -301,7 +363,9 @@ describe("extractEmbeddedContent", () => {
   });
 
   it("returns empty string when no structured data is present", () => {
-    expect(extractEmbeddedContent("<html><body><p>short</p></body></html>")).toBe("");
+    expect(
+      extractEmbeddedContent("<html><body><p>short</p></body></html>"),
+    ).toBe("");
   });
 
   it("ignores malformed JSON blocks without throwing", () => {

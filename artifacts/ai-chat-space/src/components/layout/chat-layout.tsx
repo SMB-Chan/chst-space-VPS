@@ -53,12 +53,19 @@ interface ChatLayoutProps {
 export function ChatLayout({ children }: ChatLayoutProps) {
   const isMobile = useIsMobile();
   // On mobile, sidebar starts closed. On desktop, starts open.
-  const [sidebarOpen, setSidebarOpen] = useState<boolean | undefined>(undefined);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean | undefined>(
+    undefined,
+  );
   const [location, setLocation] = useLocation();
   const params = useParams();
   const queryClient = useQueryClient();
 
-  const { data: conversations, isLoading, isError, refetch } = useListOpenaiConversations();
+  const {
+    data: conversations,
+    isLoading,
+    isError,
+    refetch,
+  } = useListOpenaiConversations();
   const deleteConversation = useDeleteOpenaiConversation();
   const updateConversation = useUpdateOpenaiConversation();
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
@@ -103,7 +110,9 @@ export function ChatLayout({ children }: ChatLayoutProps) {
       { id, data: { title } },
       {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+          queryClient.invalidateQueries({
+            queryKey: getListOpenaiConversationsQueryKey(),
+          });
         },
       },
     );
@@ -117,10 +126,12 @@ export function ChatLayout({ children }: ChatLayoutProps) {
       { id },
       {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
+          queryClient.invalidateQueries({
+            queryKey: getListOpenaiConversationsQueryKey(),
+          });
           if (activeId === id) setLocation("/chat");
         },
-      }
+      },
     );
   }, [pendingDeleteId, activeId, deleteConversation, queryClient, setLocation]);
 
@@ -145,7 +156,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           // Mobile: fixed overlay
           isMobile && "fixed inset-y-0 left-0 z-30 w-72",
           isMobile && !open && "-translate-x-full",
-          isMobile && open && "translate-x-0 shadow-2xl"
+          isMobile && open && "translate-x-0 shadow-2xl",
         )}
       >
         <div className="flex h-14 items-center justify-between px-4 border-b border-sidebar-border flex-shrink-0">
@@ -179,7 +190,8 @@ export function ChatLayout({ children }: ChatLayoutProps) {
             }}
             className={cn(
               "w-full justify-start gap-2 h-10 text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
-              location === "/private" && "bg-violet-500/15 text-violet-200 hover:bg-violet-500/20",
+              location === "/private" &&
+                "bg-violet-500/15 text-violet-200 hover:bg-violet-500/20",
             )}
             variant="ghost"
           >
@@ -234,27 +246,36 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                     />
                   </div>
                 ) : (
-                <Link
-                  href={`/conversations/${conv.id}`}
-                  onClick={() => isMobile && setSidebarOpen(false)}
-                  className={cn(
-                    "flex flex-col gap-1 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
-                    activeId === conv.id
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                  )}
-                >
-                  <div className="font-medium truncate pr-6">{conv.title || "無題"}</div>
-                  <div className="text-xs opacity-60">
-                    {formatDistanceToNow(new Date(conv.createdAt), { addSuffix: true, locale: ja })}
-                  </div>
-                </Link>
+                  <Link
+                    href={`/conversations/${conv.id}`}
+                    onClick={() => isMobile && setSidebarOpen(false)}
+                    className={cn(
+                      "flex flex-col gap-1 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
+                      activeId === conv.id
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                    )}
+                  >
+                    <div className="font-medium truncate pr-6">
+                      {conv.title || "無題"}
+                    </div>
+                    <div className="text-xs opacity-60">
+                      {formatDistanceToNow(new Date(conv.createdAt), {
+                        addSuffix: true,
+                        locale: ja,
+                      })}
+                    </div>
+                  </Link>
                 )}
 
-                <div className={cn(
-                  "absolute right-2 top-2.5 transition-opacity",
-                  isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-                )}>
+                <div
+                  className={cn(
+                    "absolute right-2 top-2.5 transition-opacity",
+                    isMobile
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                  )}
+                >
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button

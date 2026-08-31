@@ -10,9 +10,7 @@ describe("OpenAPI-generated request schemas", () => {
     expect(
       SendOpenaiMessageBody.safeParse({
         content: "",
-        attachments: [
-          { kind: "file", name: "notes.md", content: "# memo" },
-        ],
+        attachments: [{ kind: "file", name: "notes.md", content: "# memo" }],
         fileFormat: "pdf",
       }).success,
     ).toBe(true);
@@ -26,13 +24,22 @@ describe("OpenAPI-generated request schemas", () => {
       }).success,
     ).toBe(false);
     expect(
-      SendOpenaiMessageBody.safeParse({ content: "question", fileFormat: "zip" }).success,
+      SendOpenaiMessageBody.safeParse({
+        content: "question",
+        fileFormat: "zip",
+      }).success,
     ).toBe(false);
   });
 
   it("enforces rename and message-delete bounds", () => {
-    expect(UpdateOpenaiConversationBody.safeParse({ title: "x".repeat(81) }).success).toBe(false);
-    expect(DeleteOpenaiMessagesBody.safeParse({ ids: [1, 2] }).success).toBe(true);
-    expect(DeleteOpenaiMessagesBody.safeParse({ ids: [0] }).success).toBe(false);
+    expect(
+      UpdateOpenaiConversationBody.safeParse({ title: "x".repeat(81) }).success,
+    ).toBe(false);
+    expect(DeleteOpenaiMessagesBody.safeParse({ ids: [1, 2] }).success).toBe(
+      true,
+    );
+    expect(DeleteOpenaiMessagesBody.safeParse({ ids: [0] }).success).toBe(
+      false,
+    );
   });
 });

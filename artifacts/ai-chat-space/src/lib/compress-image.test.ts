@@ -1,17 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { compressedFileName, formatBytes, shouldCompressImage } from "./compress-image";
+import {
+  compressedFileName,
+  formatBytes,
+  shouldCompressImage,
+} from "./compress-image";
 
 describe("shouldCompressImage", () => {
   it("skips small images, gifs, and svg", () => {
-    expect(shouldCompressImage({ type: "image/jpeg", size: 100_000 })).toBe(false);
-    expect(shouldCompressImage({ type: "image/gif", size: 2_000_000 })).toBe(false);
-    expect(shouldCompressImage({ type: "image/svg+xml", size: 2_000_000 })).toBe(false);
-    expect(shouldCompressImage({ type: "text/plain", size: 2_000_000 })).toBe(false);
+    expect(shouldCompressImage({ type: "image/jpeg", size: 100_000 })).toBe(
+      false,
+    );
+    expect(shouldCompressImage({ type: "image/gif", size: 2_000_000 })).toBe(
+      false,
+    );
+    expect(
+      shouldCompressImage({ type: "image/svg+xml", size: 2_000_000 }),
+    ).toBe(false);
+    expect(shouldCompressImage({ type: "text/plain", size: 2_000_000 })).toBe(
+      false,
+    );
   });
 
   it("compresses large raster images", () => {
-    expect(shouldCompressImage({ type: "image/png", size: 2_000_000 })).toBe(true);
-    expect(shouldCompressImage({ type: "image/jpeg", size: 900_000 })).toBe(true);
+    expect(shouldCompressImage({ type: "image/png", size: 2_000_000 })).toBe(
+      true,
+    );
+    expect(shouldCompressImage({ type: "image/jpeg", size: 900_000 })).toBe(
+      true,
+    );
   });
 });
 

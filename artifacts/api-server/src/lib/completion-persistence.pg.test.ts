@@ -1,16 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  ensureAssetsSchema,
-  ensureMessageSchema,
-} from "./ensure-schema";
+import { ensureAssetsSchema, ensureMessageSchema } from "./ensure-schema";
 
 const describePostgres = process.env.DATABASE_URL ? describe : describe.skip;
 
 const testUsers = new Set<string>();
 let pool: (typeof import("@workspace/db"))["pool"];
-let persistChatCompletion: typeof import("./completion-persistence")["persistChatCompletion"];
-let deleteOwnedMessagesAndAssets: typeof import("./completion-persistence")["deleteOwnedMessagesAndAssets"];
+let persistChatCompletion: (typeof import("./completion-persistence"))["persistChatCompletion"];
+let deleteOwnedMessagesAndAssets: (typeof import("./completion-persistence"))["deleteOwnedMessagesAndAssets"];
 
 function userId(label: string): string {
   const id = `completion-persistence-test:${label}:${randomUUID()}`;
@@ -18,7 +15,10 @@ function userId(label: string): string {
   return id;
 }
 
-async function createConversation(user: string, label: string): Promise<number> {
+async function createConversation(
+  user: string,
+  label: string,
+): Promise<number> {
   const result = await pool.query<{ id: number }>(
     "INSERT INTO conversations (title, user_id) VALUES ($1, $2) RETURNING id",
     [`Integration ${label}`, user],
@@ -49,7 +49,10 @@ function textArtifact(filename: string, bytes: number) {
   };
 }
 
-async function tableCount(table: "messages" | "assets" | "artifacts", conversationId: number) {
+async function tableCount(
+  table: "messages" | "assets" | "artifacts",
+  conversationId: number,
+) {
   const result = await pool.query<{ count: number }>(
     `SELECT COUNT(*)::int AS count FROM ${table} WHERE conversation_id = $1`,
     [conversationId],
@@ -62,16 +65,16 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     ({ pool } = await import("@workspace/db"));
     await ensureMessageSchema((sql) => pool.query(sql));
     await ensureAssetsSchema((sql) => pool.query(sql));
-    ({ persistChatCompletion, deleteOwnedMessagesAndAssets } = await import(
-      "./completion-persistence"
-    ));
+    ({ persistChatCompletion, deleteOwnedMessagesAndAssets } =
+      await import("./completion-persistence"));
   });
 
   afterAll(async () => {
     if (!pool || testUsers.size === 0) return;
-    await pool.query("DELETE FROM conversations WHERE user_id = ANY($1::text[])", [
-      [...testUsers],
-    ]);
+    await pool.query(
+      "DELETE FROM conversations WHERE user_id = ANY($1::text[])",
+      [[...testUsers]],
+    );
   });
 
   it("serializes concurrent quota decisions for one user across conversations", async () => {
@@ -99,7 +102,9 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     ]);
 
     expect(first.assets.length + second.assets.length).toBe(1);
-    expect([first.quotaExceeded, second.quotaExceeded].filter(Boolean)).toHaveLength(1);
+    expect(
+      [first.quotaExceeded, second.quotaExceeded].filter(Boolean),
+    ).toHaveLength(1);
 
     const assetRows = await pool.query<{ count: number }>(
       `SELECT COUNT(*)::int AS count
@@ -172,11 +177,15 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     const assistantId = assistant.rows[0]?.id;
     if (!assistantId) throw new Error("Assistant message was not persisted");
 
-    expect(await deleteOwnedMessagesAndAssets(otherUser, [assistantId])).toEqual([]);
+    expect(
+      await deleteOwnedMessagesAndAssets(otherUser, [assistantId]),
+    ).toEqual([]);
     expect(await tableCount("assets", conversationId)).toBe(1);
     expect(await tableCount("artifacts", conversationId)).toBe(1);
 
-    expect(await deleteOwnedMessagesAndAssets(owner, [assistantId])).toEqual([assistantId]);
+    expect(await deleteOwnedMessagesAndAssets(owner, [assistantId])).toEqual([
+      assistantId,
+    ]);
     expect(await tableCount("assets", conversationId)).toBe(0);
     expect(await tableCount("artifacts", conversationId)).toBe(0);
     const remainingAssistant = await pool.query<{ count: number }>(
@@ -255,6 +264,8 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
       "SELECT mime_type, size FROM assets WHERE conversation_id = $1",
       [conversationId],
     );
-    expect(row.rows).toEqual([{ mime_type: "audio/mpeg", size: buffer.length }]);
+    expect(row.rows).toEqual([
+      { mime_type: "audio/mpeg", size: buffer.length },
+    ]);
   });
 });

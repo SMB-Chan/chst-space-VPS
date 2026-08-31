@@ -14,14 +14,15 @@ export interface PptxWriterLimits {
   maxOutputBytes: number;
 }
 
-export const DEFAULT_PPTX_WRITER_LIMITS: Readonly<PptxWriterLimits> = Object.freeze({
-  maxSlides: 100,
-  maxBulletsPerSlide: 200,
-  maxTextRuns: 10_000,
-  maxTextCharacters: 32_767,
-  maxTextBytes: 8 * 1024 * 1024,
-  maxOutputBytes: 16 * 1024 * 1024,
-});
+export const DEFAULT_PPTX_WRITER_LIMITS: Readonly<PptxWriterLimits> =
+  Object.freeze({
+    maxSlides: 100,
+    maxBulletsPerSlide: 200,
+    maxTextRuns: 10_000,
+    maxTextCharacters: 32_767,
+    maxTextBytes: 8 * 1024 * 1024,
+    maxOutputBytes: 16 * 1024 * 1024,
+  });
 
 const ZIP32_MAX_ENTRIES = 65_535;
 const ZIP32_MAX_VALUE = 0xffff_ffff;
@@ -53,7 +54,10 @@ function resolveLimits(overrides: Partial<PptxWriterLimits>): PptxWriterLimits {
 }
 
 function stripInvalidXmlCharacters(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "");
+  return value.replace(
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g,
+    "",
+  );
 }
 
 function escapeXml(value: string): string {
@@ -74,13 +78,18 @@ function validateSlides(
   title: string,
   limits: PptxWriterLimits,
 ): PptxSlide[] {
-  if (slides.length === 0) throw new Error("PPTX presentation must contain at least one slide");
+  if (slides.length === 0)
+    throw new Error("PPTX presentation must contain at least one slide");
   if (slides.length > limits.maxSlides) {
-    throw new Error(`PPTX presentation exceeds the ${limits.maxSlides}-slide limit`);
+    throw new Error(
+      `PPTX presentation exceeds the ${limits.maxSlides}-slide limit`,
+    );
   }
 
   if (title.length > limits.maxTextCharacters) {
-    throw new Error(`PPTX text exceeds the ${limits.maxTextCharacters}-character limit`);
+    throw new Error(
+      `PPTX text exceeds the ${limits.maxTextCharacters}-character limit`,
+    );
   }
   let textRuns = 1;
   let textBytes = Buffer.byteLength(title, "utf8");
@@ -89,15 +98,21 @@ function validateSlides(
   }
   const countText = (value: string): string => {
     if (value.length > limits.maxTextCharacters) {
-      throw new Error(`PPTX text exceeds the ${limits.maxTextCharacters}-character limit`);
+      throw new Error(
+        `PPTX text exceeds the ${limits.maxTextCharacters}-character limit`,
+      );
     }
     textRuns += 1;
     if (textRuns > limits.maxTextRuns) {
-      throw new Error(`PPTX presentation exceeds the ${limits.maxTextRuns}-text-run limit`);
+      throw new Error(
+        `PPTX presentation exceeds the ${limits.maxTextRuns}-text-run limit`,
+      );
     }
     textBytes += Buffer.byteLength(value, "utf8");
     if (textBytes > limits.maxTextBytes) {
-      throw new Error(`PPTX text exceeds the ${limits.maxTextBytes}-byte limit`);
+      throw new Error(
+        `PPTX text exceeds the ${limits.maxTextBytes}-byte limit`,
+      );
     }
     return value;
   };
@@ -134,13 +149,13 @@ function textShapeXml(options: {
   anchor?: "ctr" | "t";
 }): string {
   return [
-    '<p:sp><p:nvSpPr>',
+    "<p:sp><p:nvSpPr>",
     `<p:cNvPr id="${options.id}" name="${escapeXml(options.name)}"/>`,
     '<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>',
-    '<p:spPr><a:xfrm>',
+    "<p:spPr><a:xfrm>",
     `<a:off x="${options.x}" y="${options.y}"/><a:ext cx="${options.width}" cy="${options.height}"/>`,
     '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/>',
-    '<a:ln><a:noFill/></a:ln></p:spPr>',
+    "<a:ln><a:noFill/></a:ln></p:spPr>",
     `<p:txBody><a:bodyPr wrap="square" rtlCol="0" anchor="${options.anchor ?? "t"}"/>`,
     `<a:lstStyle/>${options.paragraphs}</p:txBody></p:sp>`,
   ].join("");
@@ -170,15 +185,16 @@ function emptyParagraphXml(): string {
 }
 
 function slideXml(slide: PptxSlide): string {
-  const bullets = slide.bullets.length > 0
-    ? slide.bullets.map(bulletParagraphXml).join("")
-    : emptyParagraphXml();
+  const bullets =
+    slide.bullets.length > 0
+      ? slide.bullets.map(bulletParagraphXml).join("")
+      : emptyParagraphXml();
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ',
     'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ',
     'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">',
-    '<p:cSld><p:spTree>',
+    "<p:cSld><p:spTree>",
     groupShapeXml(),
     textShapeXml({
       id: 2,
@@ -199,7 +215,7 @@ function slideXml(slide: PptxSlide): string {
       height: 4_800_600,
       paragraphs: bullets,
     }),
-    '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>',
+    "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>",
   ].join("");
 }
 
@@ -208,13 +224,14 @@ function slideRelationshipsXml(): string {
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>',
-    '</Relationships>',
+    "</Relationships>",
   ].join("");
 }
 
 function presentationXml(slideCount: number): string {
-  const slideIds = Array.from({ length: slideCount }, (_, index) =>
-    `<p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`,
+  const slideIds = Array.from(
+    { length: slideCount },
+    (_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`,
   ).join("");
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
@@ -226,20 +243,22 @@ function presentationXml(slideCount: number): string {
     `<p:sldSz cx="${SLIDE_WIDTH}" cy="${SLIDE_HEIGHT}" type="screen16x9"/>`,
     '<p:notesSz cx="6858000" cy="9144000"/>',
     '<p:defaultTextStyle><a:defPPr><a:defRPr lang="ja-JP"/></a:defPPr></p:defaultTextStyle>',
-    '</p:presentation>',
+    "</p:presentation>",
   ].join("");
 }
 
 function presentationRelationshipsXml(slideCount: number): string {
-  const slides = Array.from({ length: slideCount }, (_, index) =>
-    `<Relationship Id="rId${index + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`,
+  const slides = Array.from(
+    { length: slideCount },
+    (_, index) =>
+      `<Relationship Id="rId${index + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`,
   ).join("");
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>',
     slides,
-    '</Relationships>',
+    "</Relationships>",
   ].join("");
 }
 
@@ -255,7 +274,7 @@ function slideMasterXml(): string {
     '<p:txStyles><p:titleStyle><a:lvl1pPr algn="l"><a:defRPr sz="2400" b="1"/></a:lvl1pPr></p:titleStyle>',
     '<p:bodyStyle><a:lvl1pPr marL="342900" indent="-285750"><a:defRPr sz="1600"/></a:lvl1pPr></p:bodyStyle>',
     '<p:otherStyle><a:defPPr><a:defRPr lang="ja-JP"/></a:defPPr></p:otherStyle></p:txStyles>',
-    '</p:sldMaster>',
+    "</p:sldMaster>",
   ].join("");
 }
 
@@ -264,7 +283,7 @@ const SLIDE_MASTER_RELATIONSHIPS_XML = [
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>',
   '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>',
-  '</Relationships>',
+  "</Relationships>",
 ].join("");
 
 const SLIDE_LAYOUT_XML = [
@@ -273,14 +292,14 @@ const SLIDE_LAYOUT_XML = [
   'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ',
   'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1">',
   `<p:cSld name="Blank"><p:spTree>${groupShapeXml()}</p:spTree></p:cSld>`,
-  '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>',
+  "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>",
 ].join("");
 
 const SLIDE_LAYOUT_RELATIONSHIPS_XML = [
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>',
-  '</Relationships>',
+  "</Relationships>",
 ].join("");
 
 const THEME_XML = [
@@ -304,14 +323,16 @@ const THEME_XML = [
   '<a:lnStyleLst><a:ln w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln>',
   '<a:ln w="12700" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln>',
   '<a:ln w="19050" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst>',
-  '<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>',
+  "<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>",
   '<a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"><a:tint val="95000"/><a:satMod val="170000"/></a:schemeClr></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>',
-  '</a:fmtScheme></a:themeElements></a:theme>',
+  "</a:fmtScheme></a:themeElements></a:theme>",
 ].join("");
 
 function contentTypesXml(slideCount: number): string {
-  const slides = Array.from({ length: slideCount }, (_, index) =>
-    `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`,
+  const slides = Array.from(
+    { length: slideCount },
+    (_, index) =>
+      `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`,
   ).join("");
   return [
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
@@ -325,7 +346,7 @@ function contentTypesXml(slideCount: number): string {
     '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>',
     '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>',
     slides,
-    '</Types>',
+    "</Types>",
   ].join("");
 }
 
@@ -335,7 +356,7 @@ const ROOT_RELATIONSHIPS_XML = [
   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>',
   '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>',
   '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>',
-  '</Relationships>',
+  "</Relationships>",
 ].join("");
 
 function corePropertiesXml(title: string): string {
@@ -345,10 +366,10 @@ function corePropertiesXml(title: string): string {
     'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" ',
     'xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
     `<dc:title>${escapeXml(title)}</dc:title><dc:creator>Chat Space</dc:creator>`,
-    '<cp:lastModifiedBy>Chat Space</cp:lastModifiedBy>',
+    "<cp:lastModifiedBy>Chat Space</cp:lastModifiedBy>",
     '<dcterms:created xsi:type="dcterms:W3CDTF">2000-01-01T00:00:00Z</dcterms:created>',
     '<dcterms:modified xsi:type="dcterms:W3CDTF">2000-01-01T00:00:00Z</dcterms:modified>',
-    '</cp:coreProperties>',
+    "</cp:coreProperties>",
   ].join("");
 }
 
@@ -358,9 +379,9 @@ function appPropertiesXml(slideCount: number): string {
     '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" ',
     'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">',
     `<Application>Chat Space</Application><PresentationFormat>Widescreen</PresentationFormat><Slides>${slideCount}</Slides>`,
-    '<Notes>0</Notes><HiddenSlides>0</HiddenSlides><MMClips>0</MMClips><ScaleCrop>false</ScaleCrop>',
-    '<Company></Company><LinksUpToDate>false</LinksUpToDate><SharedDoc>false</SharedDoc>',
-    '<HyperlinksChanged>false</HyperlinksChanged><AppVersion>1.0</AppVersion></Properties>',
+    "<Notes>0</Notes><HiddenSlides>0</HiddenSlides><MMClips>0</MMClips><ScaleCrop>false</ScaleCrop>",
+    "<Company></Company><LinksUpToDate>false</LinksUpToDate><SharedDoc>false</SharedDoc>",
+    "<HyperlinksChanged>false</HyperlinksChanged><AppVersion>1.0</AppVersion></Properties>",
   ].join("");
 }
 
@@ -390,7 +411,10 @@ function assertZip32Value(value: number, label: string): void {
   }
 }
 
-function createZip(entries: readonly ZipEntry[], maxOutputBytes: number): Buffer {
+function createZip(
+  entries: readonly ZipEntry[],
+  maxOutputBytes: number,
+): Buffer {
   if (entries.length === 0 || entries.length > ZIP32_MAX_ENTRIES) {
     throw new Error("PPTX ZIP entry count is outside the ZIP32 range");
   }
@@ -487,17 +511,32 @@ export function writePptxPresentation(
     xmlEntry("docProps/core.xml", corePropertiesXml(title)),
     xmlEntry("docProps/app.xml", appPropertiesXml(normalizedSlides.length)),
     xmlEntry("ppt/presentation.xml", presentationXml(normalizedSlides.length)),
-    xmlEntry("ppt/_rels/presentation.xml.rels", presentationRelationshipsXml(normalizedSlides.length)),
+    xmlEntry(
+      "ppt/_rels/presentation.xml.rels",
+      presentationRelationshipsXml(normalizedSlides.length),
+    ),
     xmlEntry("ppt/slideMasters/slideMaster1.xml", slideMasterXml()),
-    xmlEntry("ppt/slideMasters/_rels/slideMaster1.xml.rels", SLIDE_MASTER_RELATIONSHIPS_XML),
+    xmlEntry(
+      "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+      SLIDE_MASTER_RELATIONSHIPS_XML,
+    ),
     xmlEntry("ppt/slideLayouts/slideLayout1.xml", SLIDE_LAYOUT_XML),
-    xmlEntry("ppt/slideLayouts/_rels/slideLayout1.xml.rels", SLIDE_LAYOUT_RELATIONSHIPS_XML),
+    xmlEntry(
+      "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+      SLIDE_LAYOUT_RELATIONSHIPS_XML,
+    ),
     xmlEntry("ppt/theme/theme1.xml", THEME_XML),
   ];
   for (let index = 0; index < normalizedSlides.length; index += 1) {
     entries.push(
-      xmlEntry(`ppt/slides/slide${index + 1}.xml`, slideXml(normalizedSlides[index])),
-      xmlEntry(`ppt/slides/_rels/slide${index + 1}.xml.rels`, slideRelationshipsXml()),
+      xmlEntry(
+        `ppt/slides/slide${index + 1}.xml`,
+        slideXml(normalizedSlides[index]),
+      ),
+      xmlEntry(
+        `ppt/slides/_rels/slide${index + 1}.xml.rels`,
+        slideRelationshipsXml(),
+      ),
     );
   }
   return createZip(entries, limits.maxOutputBytes);

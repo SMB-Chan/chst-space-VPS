@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage, buildRevisionUserMessage } from "./audit";
+import {
+  AUDIT_SYSTEM_PROMPT,
+  buildAuditUserMessage,
+  buildRevisionUserMessage,
+} from "./audit";
 
 describe("buildAuditUserMessage", () => {
   it("includes question, answer and source data with explicit boundaries", () => {

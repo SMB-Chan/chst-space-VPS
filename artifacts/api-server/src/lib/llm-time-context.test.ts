@@ -11,9 +11,7 @@ describe("LLM JST time context", () => {
   const fixedNow = new Date("2026-08-22T22:01:02Z");
 
   it("formats UTC instants in Asia/Tokyo with a fixed +09:00 offset", () => {
-    expect(formatJstDateTime(fixedNow)).toBe(
-      "2026-08-23T07:01:02+09:00",
-    );
+    expect(formatJstDateTime(fixedNow)).toBe("2026-08-23T07:01:02+09:00");
     expect(formatJstDateTime(new Date("2026-12-31T15:00:00Z"))).toBe(
       "2027-01-01T00:00:00+09:00",
     );
@@ -34,7 +32,8 @@ describe("LLM JST time context", () => {
         messages: [
           {
             role: "system",
-            content: "今日の日付: 2026-08-22。あなたは検索判定アシスタントです。",
+            content:
+              "今日の日付: 2026-08-22。あなたは検索判定アシスタントです。",
           },
           { role: "user", content: "今日の出来事は？" },
         ],
@@ -49,8 +48,12 @@ describe("LLM JST time context", () => {
       role: "system",
       content: buildLlmTimeContext(fixedNow),
     });
-    expect(parsed.messages[1].content).toBe("あなたは検索判定アシスタントです。");
-    expect(JSON.stringify(parsed.messages)).not.toContain("今日の日付: 2026-08-22");
+    expect(parsed.messages[1].content).toBe(
+      "あなたは検索判定アシスタントです。",
+    );
+    expect(JSON.stringify(parsed.messages)).not.toContain(
+      "今日の日付: 2026-08-22",
+    );
   });
 
   it("does not duplicate a previously injected JST context", () => {
@@ -65,11 +68,17 @@ describe("LLM JST time context", () => {
       messages: { role: string; content: string }[];
     };
 
-    expect(parsed.messages.filter((message) => message.content.startsWith("現在日時:"))).toHaveLength(1);
+    expect(
+      parsed.messages.filter((message) =>
+        message.content.startsWith("現在日時:"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("wraps only chat-completions fetch requests", async () => {
-    const baseFetch = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+    const baseFetch = vi.fn(
+      async () => new Response("{}", { status: 200 }),
+    ) as unknown as typeof fetch;
     const wrapped = createLlmTimeContextFetch(baseFetch, () => fixedNow);
 
     await wrapped("https://api.example.com/v1/chat/completions", {
@@ -85,13 +94,15 @@ describe("LLM JST time context", () => {
     });
 
     expect(baseFetch).toHaveBeenCalledTimes(2);
-    const firstInit = (baseFetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as RequestInit;
+    const firstInit = (baseFetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[1] as RequestInit;
     const firstBody = JSON.parse(String(firstInit.body)) as {
       messages: { role: string; content: string }[];
     };
     expect(firstBody.messages[0].content).toBe(buildLlmTimeContext(fixedNow));
 
-    const secondInit = (baseFetch as unknown as ReturnType<typeof vi.fn>).mock.calls[1]?.[1] as RequestInit;
+    const secondInit = (baseFetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[1]?.[1] as RequestInit;
     expect(secondInit.body).toBe("not-json-chat-body");
   });
 });

@@ -16,7 +16,10 @@ describe("matchSkills", () => {
 describe("composeSkillSearchQuery", () => {
   it("appends the finance search hint when forced", () => {
     const skills = matchSkills("NVDAのバリュエーションは高い？");
-    const query = composeSkillSearchQuery("NVDAのバリュエーションは高い？", skills);
+    const query = composeSkillSearchQuery(
+      "NVDAのバリュエーションは高い？",
+      skills,
+    );
     expect(query).toContain("NVDA");
     expect(query).toContain("株価");
   });

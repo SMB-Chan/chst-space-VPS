@@ -45,7 +45,10 @@ export class CircuitBreaker {
       throw new CircuitBreakerOpenError(this.opts.name);
     }
 
-    if (state === "half-open" && this.halfOpenAttempts >= this.opts.halfOpenMaxAttempts) {
+    if (
+      state === "half-open" &&
+      this.halfOpenAttempts >= this.opts.halfOpenMaxAttempts
+    ) {
       throw new CircuitBreakerOpenError(this.opts.name);
     }
 
@@ -110,7 +113,9 @@ export class CircuitBreaker {
 export class CircuitBreakerOpenError extends Error {
   readonly circuit: string;
   constructor(circuit: string) {
-    super(`Circuit breaker "${circuit}" is open — service temporarily unavailable`);
+    super(
+      `Circuit breaker "${circuit}" is open — service temporarily unavailable`,
+    );
     this.name = "CircuitBreakerOpenError";
     this.circuit = circuit;
   }

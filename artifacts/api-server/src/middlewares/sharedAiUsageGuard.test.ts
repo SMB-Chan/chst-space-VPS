@@ -36,7 +36,9 @@ class MemorySharedStore implements SharedAiUsageStore {
   private leases = new Map<string, { userId: string; expiresAtMs: number }>();
   private sequence = 0;
 
-  async acquire(input: SharedAiUsageAcquireInput): Promise<SharedAiUsageAcquireResult> {
+  async acquire(
+    input: SharedAiUsageAcquireInput,
+  ): Promise<SharedAiUsageAcquireResult> {
     for (const [leaseId, lease] of this.leases) {
       if (lease.userId === input.userId && lease.expiresAtMs <= input.nowMs) {
         this.leases.delete(leaseId);
@@ -45,7 +47,10 @@ class MemorySharedStore implements SharedAiUsageStore {
 
     if (input.maxConcurrent > 0) {
       const active = [...this.leases.values()]
-        .filter((lease) => lease.userId === input.userId && lease.expiresAtMs > input.nowMs)
+        .filter(
+          (lease) =>
+            lease.userId === input.userId && lease.expiresAtMs > input.nowMs,
+        )
         .sort((a, b) => a.expiresAtMs - b.expiresAtMs);
       if (active.length >= input.maxConcurrent) {
         return {
@@ -53,14 +58,18 @@ class MemorySharedStore implements SharedAiUsageStore {
           reason: "concurrent",
           retryAfterSeconds: Math.max(
             1,
-            Math.ceil(((active[0]?.expiresAtMs ?? input.nowMs + 1_000) - input.nowMs) / 1000),
+            Math.ceil(
+              ((active[0]?.expiresAtMs ?? input.nowMs + 1_000) - input.nowMs) /
+                1000,
+            ),
           ),
         };
       }
     }
 
     if (input.maxRequests > 0) {
-      const windowStartMs = Math.floor(input.nowMs / input.windowMs) * input.windowMs;
+      const windowStartMs =
+        Math.floor(input.nowMs / input.windowMs) * input.windowMs;
       const window = this.windows.get(input.userId);
       const current =
         window?.windowStartMs === windowStartMs
@@ -96,14 +105,21 @@ class MemorySharedStore implements SharedAiUsageStore {
     leaseTtlMs: number;
   }): Promise<boolean> {
     const lease = this.leases.get(input.leaseId);
-    if (!lease || lease.userId !== input.userId || lease.expiresAtMs <= input.nowMs) {
+    if (
+      !lease ||
+      lease.userId !== input.userId ||
+      lease.expiresAtMs <= input.nowMs
+    ) {
       return false;
     }
     lease.expiresAtMs = input.nowMs + input.leaseTtlMs;
     return true;
   }
 
-  async releaseLease(input: { userId: string; leaseId: string }): Promise<void> {
+  async releaseLease(input: {
+    userId: string;
+    leaseId: string;
+  }): Promise<void> {
     const lease = this.leases.get(input.leaseId);
     if (lease?.userId === input.userId) this.leases.delete(input.leaseId);
   }
@@ -134,7 +150,10 @@ describe("createSharedAiUsageGuard", () => {
 
   it("requires an authenticated user before consulting the shared store", async () => {
     const result = await invoke(
-      createSharedAiUsageGuard({ store: new MemorySharedStore(), renewLeases: false }),
+      createSharedAiUsageGuard({
+        store: new MemorySharedStore(),
+        renewLeases: false,
+      }),
       undefined,
     );
     expect(result.nextCalls).toBe(0);

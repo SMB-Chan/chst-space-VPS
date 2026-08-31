@@ -24,8 +24,12 @@ describe("apiSecurityHeaders", () => {
     expect(headers.get("x-frame-options")).toBe("DENY");
     expect(headers.get("referrer-policy")).toBe("no-referrer");
     expect(headers.get("x-permitted-cross-domain-policies")).toBe("none");
-    expect(headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect(headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(headers.get("content-security-policy")).toContain(
+      "default-src 'none'",
+    );
+    expect(headers.get("content-security-policy")).toContain(
+      "frame-ancestors 'none'",
+    );
     expect(next).toHaveBeenCalledOnce();
   });
 });
