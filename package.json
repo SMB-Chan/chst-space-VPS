@@ -8,6 +8,8 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "check:api-routes": "node scripts/check-openapi-routes.mjs",
+    "format:check": "prettier --check \"artifacts/*/src/**/*.{ts,tsx,js,jsx,json,css,md}\" \"lib/*/src/**/*.{ts,tsx,js,json}\" \"scripts/**/*.{ts,js,mjs}\"",
+    "format:fix": "prettier --write \"artifacts/*/src/**/*.{ts,tsx,js,jsx,json,css,md}\" \"lib/*/src/**/*.{ts,tsx,js,json}\" \"scripts/**/*.{ts,js,mjs}\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },
