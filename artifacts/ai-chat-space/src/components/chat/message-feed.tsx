@@ -1,10 +1,33 @@
 import { useRef, useEffect, useState } from "react";
-import { OpenaiMessage, OpenaiVideoJob, getGetOpenaiAssetUrl } from "@workspace/api-client-react";
+import {
+  OpenaiMessage,
+  OpenaiVideoJob,
+  getGetOpenaiAssetUrl,
+} from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
-import { FileGenerationPanel, type FileGenerationPhase } from "./file-generation-panel";
-import { Loader2, Paperclip, Bot, ChevronDown, FileText, Download, ArrowDown, Square, Sparkles, Volume2, Video, Ban } from "lucide-react";
+import {
+  FileGenerationPanel,
+  type FileGenerationPhase,
+} from "./file-generation-panel";
+import {
+  Loader2,
+  Paperclip,
+  Bot,
+  ChevronDown,
+  FileText,
+  Download,
+  ArrowDown,
+  Square,
+  Sparkles,
+  Volume2,
+  Video,
+  Ban,
+  Copy,
+  RotateCcw,
+  Check,
+} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
 import { getModelLabel } from "./model-selector";
@@ -39,16 +62,20 @@ type DisplayMessage = OpenaiMessage & {
   auditModelId?: string | null;
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
-  generatedAssets?: {
-    id: number;
-    filename: string;
-    mimeType: string;
-    size: number;
-    downloadUrl?: string;
-  }[] | null;
+  generatedAssets?:
+    | {
+        id: number;
+        filename: string;
+        mimeType: string;
+        size: number;
+        downloadUrl?: string;
+      }[]
+    | null;
 };
 
-function normalizeSources(value: unknown): { title: string; url: string }[] | null {
+function normalizeSources(
+  value: unknown,
+): { title: string; url: string }[] | null {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return null;
   try {
@@ -64,7 +91,9 @@ function normalizeAssetIds(value: unknown): number[] | null {
   if (typeof value !== "string") return null;
   try {
     const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((id): id is number => typeof id === "number") : null;
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is number => typeof id === "number")
+      : null;
   } catch {
     return null;
   }
@@ -80,7 +109,11 @@ interface MessageFeedProps {
   messages: OpenaiMessage[];
   isLoading: boolean;
   streamingPhase?: StreamingPhase;
-  specialistProgress?: { capability: string; phase: string; message?: string } | null;
+  specialistProgress?: {
+    capability: string;
+    phase: string;
+    message?: string;
+  } | null;
   streamingFiles?: { id: number; filename: string; mimeType: string }[];
   streamingAudit?: string;
   isStreaming?: boolean;
@@ -89,6 +122,7 @@ interface MessageFeedProps {
   onDismissWarning?: () => void;
   videoJob?: OpenaiVideoJob | null;
   onCancelVideo?: () => void;
+  onRegenerate?: () => void;
 }
 
 function VideoJobCard({
@@ -98,7 +132,10 @@ function VideoJobCard({
   job: OpenaiVideoJob;
   onCancel?: () => void;
 }) {
-  const busy = job.status === "SUBMITTING" || job.status === "PENDING" || job.status === "RUNNING";
+  const busy =
+    job.status === "SUBMITTING" ||
+    job.status === "PENDING" ||
+    job.status === "RUNNING";
   const statusLabel: Record<OpenaiVideoJob["status"], string> = {
     SUBMITTING: "送信中",
     PENDING: "待機中",
@@ -110,18 +147,26 @@ function VideoJobCard({
   };
   const asset = job.resultAsset;
   return (
-    <div className={cn(
-      "rounded-2xl border px-4 py-4 shadow-sm",
-      busy
-        ? "border-violet-500/30 bg-violet-500/5"
-        : job.status === "FAILED" || job.status === "UNKNOWN"
-          ? "border-amber-500/30 bg-amber-500/5"
-          : "border-border bg-card",
-    )}>
+    <div
+      className={cn(
+        "rounded-2xl border px-4 py-4 shadow-sm",
+        busy
+          ? "border-violet-500/30 bg-violet-500/5"
+          : job.status === "FAILED" || job.status === "UNKNOWN"
+            ? "border-amber-500/30 bg-amber-500/5"
+            : "border-border bg-card",
+      )}
+    >
       <div className="flex items-center gap-2 text-sm">
-        {busy ? <Loader2 className="h-4 w-4 animate-spin text-violet-500" /> : <Video className="h-4 w-4 text-violet-500" />}
+        {busy ? (
+          <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
+        ) : (
+          <Video className="h-4 w-4 text-violet-500" />
+        )}
         <span className="font-medium">HappyHorse 動画生成</span>
-        <span className="text-xs text-muted-foreground">{job.mode.toUpperCase()}・{statusLabel[job.status]}</span>
+        <span className="text-xs text-muted-foreground">
+          {job.mode.toUpperCase()}・{statusLabel[job.status]}
+        </span>
         {job.status === "PENDING" && onCancel ? (
           <button
             type="button"
@@ -134,11 +179,17 @@ function VideoJobCard({
       </div>
       {busy ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          {job.status === "SUBMITTING" ? "生成サービスに送信しています。" : job.status === "PENDING" ? "生成キューで順番を待っています。" : "動画を生成しています。完了するとここに表示されます。"}
+          {job.status === "SUBMITTING"
+            ? "生成サービスに送信しています。"
+            : job.status === "PENDING"
+              ? "生成キューで順番を待っています。"
+              : "動画を生成しています。完了するとここに表示されます。"}
         </p>
       ) : null}
       {job.failureMessage ? (
-        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{job.failureMessage}</p>
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+          {job.failureMessage}
+        </p>
       ) : null}
       {asset ? (
         <div className="mt-3 grid gap-2">
@@ -236,7 +287,12 @@ function AuditCard({
         <span className="font-medium">{live ? "監査中" : "点検メモ"}</span>
         {modelId ? <span className="opacity-70">{modelId}</span> : null}
         {live ? <PhaseDots /> : null}
-        <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
+        <ChevronDown
+          className={cn(
+            "w-3.5 h-3.5 ml-auto transition-transform",
+            open && "rotate-180",
+          )}
+        />
       </button>
       {open && content ? (
         <div className="px-3 pb-3 text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]">
@@ -251,9 +307,16 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
   return (
     <div className="w-full grid gap-2">
       {artifacts.map((artifact, index) => (
-        <div key={artifact.id ?? `${artifact.filename}-${index}`} className="grid gap-2">
+        <div
+          key={artifact.id ?? `${artifact.filename}-${index}`}
+          className="grid gap-2"
+        >
           {artifact.mime.startsWith("image/") && artifact.downloadUrl ? (
-            <img src={artifact.downloadUrl} alt={artifact.filename} className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain" />
+            <img
+              src={artifact.downloadUrl}
+              alt={artifact.filename}
+              className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain"
+            />
           ) : null}
           {artifact.mime.startsWith("audio/") && artifact.downloadUrl ? (
             <audio
@@ -269,7 +332,9 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
             download={artifact.filename}
             className={cn(
               "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
-              artifact.downloadUrl ? "hover:border-primary/40 hover:bg-primary/5" : "opacity-70 pointer-events-none",
+              artifact.downloadUrl
+                ? "hover:border-primary/40 hover:bg-primary/5"
+                : "opacity-70 pointer-events-none",
             )}
           >
             <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
@@ -280,8 +345,12 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium truncate">{artifact.filename}</div>
-              <div className="text-[11px] text-muted-foreground truncate">{artifact.mime} ・ {formatBytes(artifact.size)}</div>
+              <div className="text-sm font-medium truncate">
+                {artifact.filename}
+              </div>
+              <div className="text-[11px] text-muted-foreground truncate">
+                {artifact.mime} ・ {formatBytes(artifact.size)}
+              </div>
             </div>
             <Download className="w-4 h-4 text-muted-foreground shrink-0" />
           </a>
@@ -329,7 +398,9 @@ function FileDownloadButton({
         ) : (
           <FileText className="w-4 h-4 text-primary" />
         )}
-        <span className="font-medium truncate max-w-[180px]">{filename ?? "生成ファイルをダウンロード"}</span>
+        <span className="font-medium truncate max-w-[180px]">
+          {filename ?? "生成ファイルをダウンロード"}
+        </span>
         <Download className="w-3.5 h-3.5 text-muted-foreground" />
       </a>
     </div>
@@ -343,23 +414,23 @@ function GenerationBadge({ phase }: { phase: StreamingPhase }) {
       ? "推論中"
       : phase === "searching"
         ? "Webを検索中"
-      : phase === "reading-images"
-        ? "画像を読み取り中"
-        : phase === "reading-files"
-          ? "ファイルを解析中"
-        : phase === "generating-file"
-        ? "ファイルを生成中"
-        : phase === "reviewing-layout"
-          ? "レイアウトを確認中"
-          : phase === "revising-layout"
-            ? "レイアウトを修正中"
-            : phase === "generating"
-              ? "生成中"
-              : phase === "auditing"
-                ? "監査中"
-                : phase === "revising"
-                  ? "最終報告を作成中"
-                  : "準備中";
+        : phase === "reading-images"
+          ? "画像を読み取り中"
+          : phase === "reading-files"
+            ? "ファイルを解析中"
+            : phase === "generating-file"
+              ? "ファイルを生成中"
+              : phase === "reviewing-layout"
+                ? "レイアウトを確認中"
+                : phase === "revising-layout"
+                  ? "レイアウトを修正中"
+                  : phase === "generating"
+                    ? "生成中"
+                    : phase === "auditing"
+                      ? "監査中"
+                      : phase === "revising"
+                        ? "最終報告を作成中"
+                        : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -385,16 +456,16 @@ export function MessageFeed({
   onDismissWarning,
   videoJob = null,
   onCancelVideo,
+  onRegenerate,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const { user } = useUser();
   const userInitial =
-    user?.firstName?.[0] ??
-    user?.primaryEmailAddress?.emailAddress?.[0] ??
-    "U";
+    user?.firstName?.[0] ?? user?.primaryEmailAddress?.emailAddress?.[0] ?? "U";
 
   useEffect(() => {
     if (!stickToBottomRef.current) return;
@@ -415,6 +486,9 @@ export function MessageFeed({
   return (
     <div
       ref={containerRef}
+      role="log"
+      aria-live="polite"
+      aria-label="会話メッセージ"
       onScroll={() => {
         const el = containerRef.current;
         if (!el) return;
@@ -431,7 +505,10 @@ export function MessageFeed({
           onClick={() => {
             stickToBottomRef.current = true;
             setAwayFromBottom(false);
-            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+            bottomRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "end",
+            });
           }}
           className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs text-foreground shadow-md"
         >
@@ -442,7 +519,9 @@ export function MessageFeed({
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
-          const parsedUser = isUser ? parseAttachmentMessageForDisplay(message.content) : null;
+          const parsedUser = isUser
+            ? parseAttachmentMessageForDisplay(message.content)
+            : null;
           let displayContent = parsedUser?.displayContent ?? message.content;
           const attachments = parsedUser?.attachments ?? [];
 
@@ -454,9 +533,9 @@ export function MessageFeed({
           if (!isUser) {
             if (!sources || sources.length === 0) {
               // Try to extract legacy sources from the inline block
-              const legacyMatch = displayContent.trimEnd().match(
-                /\n\n参照元:\n((?:- \[.*?\]\(.*?\)\n?)+)/s
-              );
+              const legacyMatch = displayContent
+                .trimEnd()
+                .match(/\n\n参照元:\n((?:- \[.*?\]\(.*?\)\n?)+)/s);
               if (legacyMatch) {
                 const extracted: { title: string; url: string }[] = [];
                 const lineRe = /- \[([^\]]*)\]\(([^)]+)\)/g;
@@ -468,38 +547,46 @@ export function MessageFeed({
               }
             }
             // Remove the legacy block from display content (avoid duplication with cards)
-            displayContent = displayContent.replace(/\n\n参照元:\n(?:- \[.*?\]\(.*?\)\n?)+$/s, "").trimEnd();
+            displayContent = displayContent
+              .replace(/\n\n参照元:\n(?:- \[.*?\]\(.*?\)\n?)+$/s, "")
+              .trimEnd();
           }
-          
+
           return (
-            <div 
-              key={message.id} 
+            <div
+              key={message.id}
               className={cn(
                 "flex gap-3 md:gap-6 group",
-                isUser ? "flex-row-reverse" : "flex-row"
+                isUser ? "flex-row-reverse" : "flex-row",
               )}
             >
               <div className="flex-shrink-0 mt-1">
                 {isUser ? (
                   <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-primary/20 bg-primary/10 text-primary">
-                    {user?.imageUrl ? <AvatarImage src={user.imageUrl} alt="" /> : null}
+                    {user?.imageUrl ? (
+                      <AvatarImage src={user.imageUrl} alt="" />
+                    ) : null}
                     <AvatarFallback className="bg-transparent font-medium">
                       {userInitial.toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                 ) : (
                   <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-border bg-card">
-                    <AvatarFallback className="bg-transparent text-muted-foreground"><Bot className="w-5 h-5" /></AvatarFallback>
+                    <AvatarFallback className="bg-transparent text-muted-foreground">
+                      <Bot className="w-5 h-5" />
+                    </AvatarFallback>
                   </Avatar>
                 )}
               </div>
-              
-              <div className={cn(
-                "flex flex-col gap-2 min-w-0",
-                isUser
-                  ? "items-end max-w-[88%] md:max-w-[70%]"
-                  : "items-start w-full max-w-full md:max-w-[90%]"
-              )}>
+
+              <div
+                className={cn(
+                  "flex flex-col gap-2 min-w-0",
+                  isUser
+                    ? "items-end max-w-[88%] md:max-w-[70%]"
+                    : "items-start w-full max-w-full md:max-w-[90%]",
+                )}
+              >
                 {isUser && attachments.length > 0 && (
                   <div className="flex flex-wrap justify-end gap-2 max-w-full">
                     {attachments.map((attachment, index) => (
@@ -508,35 +595,44 @@ export function MessageFeed({
                         className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-muted-foreground shadow-sm max-w-full"
                       >
                         <Paperclip className="w-4 h-4 text-primary shrink-0" />
-                        <span className="font-medium text-foreground truncate">{attachment.name}</span>
+                        <span className="font-medium text-foreground truncate">
+                          {attachment.name}
+                        </span>
                       </div>
                     ))}
                   </div>
                 )}
-                
-                {(!isUser && message.id === STREAMING_ASSISTANT_ID && !displayContent) ? (
+
+                {!isUser &&
+                message.id === STREAMING_ASSISTANT_ID &&
+                !displayContent ? (
                   <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
                     <GenerationBadge phase={streamingPhase} />
                   </div>
                 ) : (
-                  <div className={cn(
-                    "px-4 py-3 md:px-5 md:py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words [overflow-wrap:anywhere]",
-                    isUser 
-                      ? "bg-primary text-primary-foreground font-sans font-normal" 
-                      : "bg-card border border-border font-serif text-foreground prose-p:leading-loose"
-                  )}>
+                  <div
+                    className={cn(
+                      "px-4 py-3 md:px-5 md:py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words [overflow-wrap:anywhere]",
+                      isUser
+                        ? "bg-primary text-primary-foreground font-sans font-normal"
+                        : "bg-card border border-border font-serif text-foreground prose-p:leading-loose",
+                    )}
+                  >
                     {isUser ? (
-                      <div className="whitespace-pre-wrap">{displayContent}</div>
+                      <div className="whitespace-pre-wrap">
+                        {displayContent}
+                      </div>
                     ) : (
                       <>
                         <SafeMarkdown content={displayContent} />
                         {message.id === STREAMING_ASSISTANT_ID &&
-                          (streamingPhase === "generating" || streamingPhase === "revising") && (
-                          <span
-                            className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
-                            aria-hidden
-                          />
-                        )}
+                          (streamingPhase === "generating" ||
+                            streamingPhase === "revising") && (
+                            <span
+                              className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
+                              aria-hidden
+                            />
+                          )}
                       </>
                     )}
                   </div>
@@ -544,50 +640,75 @@ export function MessageFeed({
                 {!isUser &&
                   message.id === STREAMING_ASSISTANT_ID &&
                   displayContent &&
-                  (streamingPhase === "generating" || streamingPhase === "revising") && (
-                  <GenerationBadge phase={streamingPhase} />
-                )}
+                  (streamingPhase === "generating" ||
+                    streamingPhase === "revising") && (
+                    <GenerationBadge phase={streamingPhase} />
+                  )}
 
-                {!isUser && message.id === STREAMING_ASSISTANT_ID && specialistProgress && (
-                  <SpecialistProgress progress={specialistProgress} />
-                )}
+                {!isUser &&
+                  message.id === STREAMING_ASSISTANT_ID &&
+                  specialistProgress && (
+                    <SpecialistProgress progress={specialistProgress} />
+                  )}
 
                 {!isUser &&
                   message.id === STREAMING_ASSISTANT_ID &&
                   (streamingPhase === "generating-file" ||
                     streamingPhase === "reviewing-layout" ||
                     streamingPhase === "revising-layout") && (
-                  <FileGenerationPanel phase={streamingPhase as FileGenerationPhase} />
-                )}
+                    <FileGenerationPanel
+                      phase={streamingPhase as FileGenerationPhase}
+                    />
+                  )}
 
-                {!isUser && message.id === STREAMING_ASSISTANT_ID && isStreaming && onStop && (
-                  <button
-                    type="button"
-                    onClick={onStop}
-                    className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
-                    aria-label="この回答を停止"
-                  >
-                    <Square className="h-3 w-3 fill-current" /> 停止
-                  </button>
-                )}
-
-                {!isUser && message.id === STREAMING_ASSISTANT_ID && streamingWarning && (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                    <span className="shrink-0">⚠️</span>
-                    <span className="flex-1">{streamingWarning}</span>
-                    <button type="button" onClick={onDismissWarning} className="shrink-0 rounded p-0.5 hover:bg-amber-500/20" aria-label="警告を閉じる">
-                      <span aria-hidden>×</span>
+                {!isUser &&
+                  message.id === STREAMING_ASSISTANT_ID &&
+                  isStreaming &&
+                  onStop && (
+                    <button
+                      type="button"
+                      onClick={onStop}
+                      className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
+                      aria-label="この回答を停止"
+                    >
+                      <Square className="h-3 w-3 fill-current" /> 停止
                     </button>
-                  </div>
-                )}
+                  )}
 
-                {!isUser && (display.auditContent || (message.id === STREAMING_ASSISTANT_ID && (streamingAudit || streamingPhase === "auditing"))) && (
-                  <AuditCard
-                    content={message.id === STREAMING_ASSISTANT_ID ? streamingAudit || display.auditContent || "" : display.auditContent || ""}
-                    modelId={display.auditModelId}
-                    live={message.id === STREAMING_ASSISTANT_ID && streamingPhase === "auditing"}
-                  />
-                )}
+                {!isUser &&
+                  message.id === STREAMING_ASSISTANT_ID &&
+                  streamingWarning && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                      <span className="shrink-0">⚠️</span>
+                      <span className="flex-1">{streamingWarning}</span>
+                      <button
+                        type="button"
+                        onClick={onDismissWarning}
+                        className="shrink-0 rounded p-0.5 hover:bg-amber-500/20"
+                        aria-label="警告を閉じる"
+                      >
+                        <span aria-hidden>×</span>
+                      </button>
+                    </div>
+                  )}
+
+                {!isUser &&
+                  (display.auditContent ||
+                    (message.id === STREAMING_ASSISTANT_ID &&
+                      (streamingAudit || streamingPhase === "auditing"))) && (
+                    <AuditCard
+                      content={
+                        message.id === STREAMING_ASSISTANT_ID
+                          ? streamingAudit || display.auditContent || ""
+                          : display.auditContent || ""
+                      }
+                      modelId={display.auditModelId}
+                      live={
+                        message.id === STREAMING_ASSISTANT_ID &&
+                        streamingPhase === "auditing"
+                      }
+                    />
+                  )}
 
                 {!isUser && sources && sources.length > 0 && (
                   <div className="w-full px-1">
@@ -595,9 +716,11 @@ export function MessageFeed({
                   </div>
                 )}
 
-                {!isUser && display.artifacts && display.artifacts.length > 0 && (
-                  <ArtifactCards artifacts={display.artifacts} />
-                )}
+                {!isUser &&
+                  display.artifacts &&
+                  display.artifacts.length > 0 && (
+                    <ArtifactCards artifacts={display.artifacts} />
+                  )}
                 {!isUser && generatedAssets.length > 0 && (
                   <div className="flex flex-wrap gap-2 px-1">
                     {generatedAssets.map((asset) => (
@@ -610,29 +733,81 @@ export function MessageFeed({
                     ))}
                   </div>
                 )}
-                {!isUser && generatedAssets.length === 0 && assetIds && assetIds.length > 0 && (
-                  <div className="flex flex-wrap gap-2 px-1">
-                    {assetIds.map((assetId) => (
-                      <FileDownloadButton
-                        key={assetId}
-                        assetId={assetId}
-                        filename={streamingFiles.find((file) => file.id === assetId)?.filename}
-                        mimeType={streamingFiles.find((file) => file.id === assetId)?.mimeType}
-                      />
-                    ))}
-                  </div>
-                )}
+                {!isUser &&
+                  generatedAssets.length === 0 &&
+                  assetIds &&
+                  assetIds.length > 0 && (
+                    <div className="flex flex-wrap gap-2 px-1">
+                      {assetIds.map((assetId) => (
+                        <FileDownloadButton
+                          key={assetId}
+                          assetId={assetId}
+                          filename={
+                            streamingFiles.find((file) => file.id === assetId)
+                              ?.filename
+                          }
+                          mimeType={
+                            streamingFiles.find((file) => file.id === assetId)
+                              ?.mimeType
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
 
                 {!isUser && message.modelId && (
                   <div className="text-[11px] text-muted-foreground/60 px-1 select-none">
                     {getModelLabel(message.modelId)}
                   </div>
                 )}
+                {!isUser &&
+                  message.id !== STREAMING_ASSISTANT_ID &&
+                  displayContent && (
+                    <div className="flex items-center gap-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(displayContent);
+                          setCopiedId(message.id);
+                          setTimeout(() => setCopiedId(null), 2000);
+                        }}
+                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted"
+                        aria-label="メッセージをコピー"
+                      >
+                        {copiedId === message.id ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        {copiedId === message.id ? "コピー済み" : "コピー"}
+                      </button>
+                      {onRegenerate &&
+                        messages
+                          .filter(
+                            (m) =>
+                              m.role === "assistant" &&
+                              m.id !== STREAMING_ASSISTANT_ID,
+                          )
+                          .at(-1)?.id === message.id && (
+                          <button
+                            type="button"
+                            onClick={onRegenerate}
+                            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted"
+                            aria-label="回答を再生成"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            再生成
+                          </button>
+                        )}
+                    </div>
+                  )}
               </div>
             </div>
           );
         })}
-        {videoJob ? <VideoJobCard job={videoJob} onCancel={onCancelVideo} /> : null}
+        {videoJob ? (
+          <VideoJobCard job={videoJob} onCancel={onCancelVideo} />
+        ) : null}
         <div ref={bottomRef} />
       </div>
     </div>

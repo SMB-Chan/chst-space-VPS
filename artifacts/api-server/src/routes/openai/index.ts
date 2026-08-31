@@ -160,6 +160,122 @@ function contentDisposition(filename: string): string {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
+interface ResolvedChatParams {
+  modelId: string;
+  modelDef: (typeof AVAILABLE_MODELS)[number];
+  reasoningLevel: ReasoningLevel;
+  auditModelId: string | undefined;
+  auditReasoningLevel: ReasoningLevel;
+  translationMode: TranslationMode;
+  supportsVision: boolean;
+  useVisionBridge: boolean;
+  audioAttachmentsForTools: { name: string; buffer: Buffer; mime: string }[];
+  resolvedMessage: ParsedUserMessageContent;
+}
+
+async function resolveSharedChatParams(
+  req: Request,
+  res: Response,
+  parsedData: {
+    content: string;
+    attachments?: unknown;
+    modelId?: string;
+    fileFormat?: string;
+  },
+  cancellation: ResponseCancellation,
+): Promise<ResolvedChatParams | null> {
+  let newMessage: ParsedUserMessageContent;
+  try {
+    newMessage = parseUserMessageContent(
+      parsedData.content,
+      parsedData.attachments as IncomingAttachment[] | undefined,
+    );
+  } catch (error) {
+    if (sendMessageContentError(res, error)) return null;
+    throw error;
+  }
+
+  const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
+  const requestedModelId = parsedData.modelId || modelQuery || DEFAULT_MODEL;
+  const modelDef = AVAILABLE_MODELS.find(
+    (model) => model.id === requestedModelId,
+  );
+  if (!modelDef) {
+    res.status(400).json({ error: `未対応のモデルです: ${requestedModelId}` });
+    return null;
+  }
+  const modelId = modelDef.id;
+  const reasoningLevel = parseReasoningLevel(req.query.reasoning);
+  const auditModelQuery =
+    typeof req.query.auditModel === "string" ? req.query.auditModel : "";
+  const auditModelId =
+    auditModelQuery &&
+    auditModelQuery !== modelId &&
+    AVAILABLE_MODELS.some((m) => m.id === auditModelQuery)
+      ? auditModelQuery
+      : undefined;
+  const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
+  const translationMode = parseTranslationMode(req.query.translate);
+
+  const supportsVision = VISION_MODEL_IDS.has(modelId);
+  const useVisionBridge =
+    newMessage.hasImages && !supportsVision && isVisionBridgeAvailable();
+  if (newMessage.hasImages && !supportsVision && !useVisionBridge) {
+    res.status(400).json({
+      error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
+    });
+    return null;
+  }
+
+  const audioAttachmentsForTools = newMessage.binaries
+    .filter((attachment) => attachment.family === "audio")
+    .map((attachment) => ({
+      name: attachment.name,
+      buffer: attachment.buffer,
+      mime: attachment.mime,
+    }));
+
+  try {
+    newMessage = await resolveMessageBinaries(
+      newMessage,
+      res,
+      cancellation.signal,
+    );
+  } catch (err) {
+    if (cancellation.signal.aborted) return null;
+    logger.warn(
+      safeFailureFields(
+        err,
+        "openai-route",
+        "ATTACHMENT_EXTRACTION_FAILED",
+        400,
+      ),
+      "Attachment extraction failed",
+    );
+    const message = extractionPublicError(err);
+    if (!res.headersSent) {
+      res.status(400).json({ error: message });
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+      res.end();
+    }
+    return null;
+  }
+
+  return {
+    modelId,
+    modelDef,
+    reasoningLevel,
+    auditModelId,
+    auditReasoningLevel,
+    translationMode,
+    supportsVision,
+    useVisionBridge,
+    audioAttachmentsForTools,
+    resolvedMessage: newMessage,
+  };
+}
+
 async function getHydratedMessages(conversationId: number, userId: string) {
   const messageRows = await db
     .select()
@@ -1024,93 +1140,28 @@ router.post(
         return;
       }
 
-      let newMessage: ParsedUserMessageContent;
-      try {
-        newMessage = parseUserMessageContent(
-          parsed.data.content,
-          parsed.data.attachments as IncomingAttachment[] | undefined,
-        );
-      } catch (error) {
-        if (sendMessageContentError(res, error)) return;
-        throw error;
-      }
-
-      const modelQuery =
-        typeof req.query.model === "string" ? req.query.model : "";
-      const requestedModelId =
-        parsed.data.modelId || modelQuery || DEFAULT_MODEL;
-      const modelDef = AVAILABLE_MODELS.find(
-        (model) => model.id === requestedModelId,
-      );
-      if (!modelDef) {
-        res
-          .status(400)
-          .json({ error: `未対応のモデルです: ${requestedModelId}` });
-        return;
-      }
-      const modelId = modelDef.id;
-      const reasoningLevel = parseReasoningLevel(req.query.reasoning);
-      const auditModelQuery =
-        typeof req.query.auditModel === "string" ? req.query.auditModel : "";
-      const auditModelId =
-        auditModelQuery &&
-        auditModelQuery !== modelId &&
-        AVAILABLE_MODELS.some((m) => m.id === auditModelQuery)
-          ? auditModelQuery
-          : undefined;
-      const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
-      const translationMode = parseTranslationMode(req.query.translate);
-
       const requestedFileFormat = parsed.data.fileFormat as
         FileFormat | undefined;
 
-      const supportsVision = VISION_MODEL_IDS.has(modelId);
-      // Non-vision models are still usable with image attachments: a
-      // vision-capable model transcribes the images to text first. Reject only
-      // when no vision bridge can be constructed at all.
-      const useVisionBridge =
-        newMessage.hasImages && !supportsVision && isVisionBridgeAvailable();
-      if (newMessage.hasImages && !supportsVision && !useVisionBridge) {
-        res.status(400).json({
-          error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
-        });
-        return;
-      }
-
-      const audioAttachmentsForTools = newMessage.binaries
-        .filter((attachment) => attachment.family === "audio")
-        .map((attachment) => ({
-          name: attachment.name,
-          buffer: attachment.buffer,
-          mime: attachment.mime,
-        }));
-
-      try {
-        newMessage = await resolveMessageBinaries(
-          newMessage,
-          res,
-          cancellation.signal,
-        );
-      } catch (err) {
-        if (cancellation.signal.aborted) return;
-        logger.warn(
-          safeFailureFields(
-            err,
-            "openai-route",
-            "ATTACHMENT_EXTRACTION_FAILED",
-            400,
-          ),
-          "Attachment extraction failed",
-        );
-        const message = extractionPublicError(err);
-        if (!res.headersSent) {
-          res.status(400).json({ error: message });
-        } else if (!res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-          res.end();
-        }
-        return;
-      }
+      const shared = await resolveSharedChatParams(
+        req,
+        res,
+        parsed.data,
+        cancellation,
+      );
+      if (!shared) return;
+      const {
+        modelId,
+        modelDef,
+        reasoningLevel,
+        auditModelId,
+        auditReasoningLevel,
+        translationMode,
+        supportsVision,
+        useVisionBridge,
+        audioAttachmentsForTools,
+      } = shared;
+      let newMessage = shared.resolvedMessage;
 
       if (cancellation.signal.aborted) return;
       const history = await db
@@ -1283,89 +1334,25 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       return;
     }
 
-    let newMessage: ParsedUserMessageContent;
-    try {
-      newMessage = parseUserMessageContent(
-        parsed.data.content,
-        parsed.data.attachments as IncomingAttachment[] | undefined,
-      );
-    } catch (error) {
-      if (sendMessageContentError(res, error)) return;
-      throw error;
-    }
-
-    const modelQuery =
-      typeof req.query.model === "string" ? req.query.model : "";
-    const requestedModelId = parsed.data.modelId || modelQuery || DEFAULT_MODEL;
-    const modelDef = AVAILABLE_MODELS.find(
-      (model) => model.id === requestedModelId,
+    const shared = await resolveSharedChatParams(
+      req,
+      res,
+      parsed.data,
+      cancellation,
     );
-    if (!modelDef) {
-      res
-        .status(400)
-        .json({ error: `未対応のモデルです: ${requestedModelId}` });
-      return;
-    }
-    const modelId = modelDef.id;
-    const reasoningLevel = parseReasoningLevel(req.query.reasoning);
-    const auditModelQuery =
-      typeof req.query.auditModel === "string" ? req.query.auditModel : "";
-    const auditModelId =
-      auditModelQuery &&
-      auditModelQuery !== modelId &&
-      AVAILABLE_MODELS.some((m) => m.id === auditModelQuery)
-        ? auditModelQuery
-        : undefined;
-    const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
-    const translationMode = parseTranslationMode(req.query.translate);
-
-    const supportsVision = VISION_MODEL_IDS.has(modelId);
-    // Non-vision models are still usable with image attachments: a
-    // vision-capable model transcribes the images to text first. Reject only
-    // when no vision bridge can be constructed at all.
-    const useVisionBridge =
-      newMessage.hasImages && !supportsVision && isVisionBridgeAvailable();
-    if (newMessage.hasImages && !supportsVision && !useVisionBridge) {
-      res.status(400).json({
-        error: `選択中のモデル（${modelDef.label}）は画像入力に対応していません。画像を送る場合は対応モデルに切り替えてください。`,
-      });
-      return;
-    }
-
-    const audioAttachmentsForTools = newMessage.binaries
-      .filter((attachment) => attachment.family === "audio")
-      .map((attachment) => ({
-        name: attachment.name,
-        buffer: attachment.buffer,
-        mime: attachment.mime,
-      }));
-
-    try {
-      newMessage = await resolveMessageBinaries(
-        newMessage,
-        res,
-        cancellation.signal,
-      );
-    } catch (err) {
-      if (cancellation.signal.aborted) return;
-      logger.warn(
-        safeFailureFields(
-          err,
-          "openai-route",
-          "ATTACHMENT_EXTRACTION_FAILED",
-          400,
-        ),
-        "Attachment extraction failed",
-      );
-      const message = extractionPublicError(err);
-      if (!res.headersSent) {
-        res.status(400).json({ error: message });
-      } else if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-        res.end();
-      }
-      return;
-    }
+    if (!shared) return;
+    const {
+      modelId,
+      modelDef,
+      reasoningLevel,
+      auditModelId,
+      auditReasoningLevel,
+      translationMode,
+      supportsVision,
+      useVisionBridge,
+      audioAttachmentsForTools,
+    } = shared;
+    let newMessage = shared.resolvedMessage;
 
     if (cancellation.signal.aborted) return;
     const historicalImageBudget = createHistoricalImageBudget();

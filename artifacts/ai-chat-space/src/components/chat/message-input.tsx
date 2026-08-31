@@ -31,7 +31,8 @@ export type VideoGenerationInput = {
   mode: VideoMode;
   referenceImages?: OutgoingAttachment[];
   resolution: "720P" | "1080P";
-  ratio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "4:5" | "5:4" | "9:21" | "21:9";
+  ratio:
+    "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "4:5" | "5:4" | "9:21" | "21:9";
   duration: number;
 };
 
@@ -48,13 +49,25 @@ interface MessageInputProps {
   conversationId?: number | null;
   selectedModel?: string;
   videoGenerationEnabled?: boolean;
-  onGenerateVideo?: (input: VideoGenerationInput) => void | boolean | Promise<void | boolean>;
+  onGenerateVideo?: (
+    input: VideoGenerationInput,
+  ) => void | boolean | Promise<void | boolean>;
 }
 
 // 画像・テキスト・文書（PDF/ZIP/Office）・音声を受け付け。
 // バイナリはサーバー側でマジックナンバー検証のうえテキスト抽出される。
-const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-const ACCEPTED_TEXT_TYPES = ["text/plain", "text/markdown", "text/csv", "application/json"];
+const ACCEPTED_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+const ACCEPTED_TEXT_TYPES = [
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+];
 const ACCEPTED_DOCUMENT_TYPES = [
   "application/pdf",
   "application/zip",
@@ -63,8 +76,21 @@ const ACCEPTED_DOCUMENT_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ];
-const ACCEPTED_DOCUMENT_EXTENSIONS = [".pdf", ".zip", ".docx", ".xlsx", ".pptx"];
-const ACCEPTED_AUDIO_EXTENSIONS = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"];
+const ACCEPTED_DOCUMENT_EXTENSIONS = [
+  ".pdf",
+  ".zip",
+  ".docx",
+  ".xlsx",
+  ".pptx",
+];
+const ACCEPTED_AUDIO_EXTENSIONS = [
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".ogg",
+  ".flac",
+  ".webm",
+];
 // 画像・文書・音声に共通の1件あたり上限
 const MAX_DOCUMENT_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT_FILE_SIZE_BYTES = 1 * 1024 * 1024;
@@ -74,7 +100,11 @@ const MAX_FILES = 5;
 
 type StagedFile = { file: File; note: string | null };
 
-const FORMAT_BUTTONS: { format: FileFormat; label: string; icon: React.ElementType }[] = [
+const FORMAT_BUTTONS: {
+  format: FileFormat;
+  label: string;
+  icon: React.ElementType;
+}[] = [
   { format: "pdf", label: "PDF", icon: FileText },
   { format: "docx", label: "Word", icon: FileText },
   { format: "xlsx", label: "Excel", icon: FileSpreadsheet },
@@ -83,9 +113,13 @@ const FORMAT_BUTTONS: { format: FileFormat; label: string; icon: React.ElementTy
 
 function isTextFile(file: Pick<File, "type" | "name">): boolean {
   const lowerName = file.name.toLowerCase();
-  return ACCEPTED_TEXT_TYPES.includes(file.type) ||
-    lowerName.endsWith(".txt") || lowerName.endsWith(".md") ||
-    lowerName.endsWith(".csv") || lowerName.endsWith(".json");
+  return (
+    ACCEPTED_TEXT_TYPES.includes(file.type) ||
+    lowerName.endsWith(".txt") ||
+    lowerName.endsWith(".md") ||
+    lowerName.endsWith(".csv") ||
+    lowerName.endsWith(".json")
+  );
 }
 
 function hasExtension(file: Pick<File, "name">, extensions: string[]): boolean {
@@ -94,11 +128,17 @@ function hasExtension(file: Pick<File, "name">, extensions: string[]): boolean {
 }
 
 function isDocumentFile(file: Pick<File, "type" | "name">): boolean {
-  return ACCEPTED_DOCUMENT_TYPES.includes(file.type) || hasExtension(file, ACCEPTED_DOCUMENT_EXTENSIONS);
+  return (
+    ACCEPTED_DOCUMENT_TYPES.includes(file.type) ||
+    hasExtension(file, ACCEPTED_DOCUMENT_EXTENSIONS)
+  );
 }
 
 function isAudioFile(file: Pick<File, "type" | "name">): boolean {
-  return file.type.startsWith("audio/") || hasExtension(file, ACCEPTED_AUDIO_EXTENSIONS);
+  return (
+    file.type.startsWith("audio/") ||
+    hasExtension(file, ACCEPTED_AUDIO_EXTENSIONS)
+  );
 }
 
 function validateFile(file: File): string | null {
@@ -109,10 +149,18 @@ function validateFile(file: File): string | null {
   if (!isImage && !isText && !isDocument && !isAudio) {
     return `${file.name} は対応していないファイル形式です。画像（JPEG・PNG・GIF・WebP）、テキスト（TXT・MD・CSV・JSON）、文書（PDF・ZIP・DOCX・XLSX・PPTX）、音声（MP3・WAV・M4A・OGG・FLAC・WebM）を添付できます。`;
   }
-  const limit = isText ? MAX_TEXT_FILE_SIZE_BYTES : MAX_DOCUMENT_FILE_SIZE_BYTES;
+  const limit = isText
+    ? MAX_TEXT_FILE_SIZE_BYTES
+    : MAX_DOCUMENT_FILE_SIZE_BYTES;
   if (file.size > limit) {
     const limitMb = limit / 1024 / 1024;
-    const label = isImage ? "画像" : isText ? "テキストファイル" : isDocument ? "文書ファイル" : "音声ファイル";
+    const label = isImage
+      ? "画像"
+      : isText
+        ? "テキストファイル"
+        : isDocument
+          ? "文書ファイル"
+          : "音声ファイル";
     return `${file.name} は大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。${label}は1件${limitMb}MB以下にしてください。`;
   }
   return null;
@@ -123,7 +171,10 @@ function totalSize(files: StagedFile[]): number {
 }
 
 function totalTextSize(files: StagedFile[]): number {
-  return files.reduce((sum, item) => sum + (isTextFile(item.file) ? item.file.size : 0), 0);
+  return files.reduce(
+    (sum, item) => sum + (isTextFile(item.file) ? item.file.size : 0),
+    0,
+  );
 }
 
 function readOne(file: File): Promise<OutgoingAttachment> {
@@ -145,7 +196,8 @@ function readOne(file: File): Promise<OutgoingAttachment> {
         kind: isImage ? "image" : "file",
       });
     };
-    reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました。"));
+    reader.onerror = () =>
+      reject(new Error("ファイルの読み込みに失敗しました。"));
     if (asDataUrl) reader.readAsDataURL(file);
     else reader.readAsText(file);
   });
@@ -167,8 +219,11 @@ export function MessageInput({
   const [fileFormat, setFileFormat] = useState<FileFormat | null>(null);
   const [compressing, setCompressing] = useState(false);
   const [videoMode, setVideoMode] = useState<VideoMode | null>(null);
-  const [videoResolution, setVideoResolution] = useState<"720P" | "1080P">("720P");
-  const [videoRatio, setVideoRatio] = useState<VideoGenerationInput["ratio"]>("16:9");
+  const [videoResolution, setVideoResolution] = useState<"720P" | "1080P">(
+    "720P",
+  );
+  const [videoRatio, setVideoRatio] =
+    useState<VideoGenerationInput["ratio"]>("16:9");
   const [videoDuration, setVideoDuration] = useState(5);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -211,32 +266,48 @@ export function MessageInput({
           errors.push(error);
           continue;
         }
-        if (next.some((existing) => existing.file.name === item.name && existing.file.size === item.size)) {
+        if (
+          next.some(
+            (existing) =>
+              existing.file.name === item.name &&
+              existing.file.size === item.size,
+          )
+        ) {
           continue;
         }
         try {
           const { file: compressed, reduced } = await compressImageFile(item);
           const candidate = {
             file: compressed,
-            note: reduced ? `${formatBytes(item.size)} → ${formatBytes(compressed.size)} に軽量化` : null,
+            note: reduced
+              ? `${formatBytes(item.size)} → ${formatBytes(compressed.size)} に軽量化`
+              : null,
           };
           if (totalSize([...next, candidate]) > MAX_TOTAL_SIZE_BYTES) {
-            errors.push(`添付の合計が20MBを超えます。${item.name} を追加できませんでした。`);
+            errors.push(
+              `添付の合計が20MBを超えます。${item.name} を追加できませんでした。`,
+            );
             continue;
           }
           if (totalTextSize([...next, candidate]) > MAX_TOTAL_TEXT_SIZE_BYTES) {
-            errors.push(`テキスト添付の合計が2MBを超えます。${item.name} を追加できませんでした。`);
+            errors.push(
+              `テキスト添付の合計が2MBを超えます。${item.name} を追加できませんでした。`,
+            );
             continue;
           }
           next.push(candidate);
         } catch {
           const candidate = { file: item, note: null };
           if (totalSize([...next, candidate]) > MAX_TOTAL_SIZE_BYTES) {
-            errors.push(`添付の合計が20MBを超えます。${item.name} を追加できませんでした。`);
+            errors.push(
+              `添付の合計が20MBを超えます。${item.name} を追加できませんでした。`,
+            );
             continue;
           }
           if (totalTextSize([...next, candidate]) > MAX_TOTAL_TEXT_SIZE_BYTES) {
-            errors.push(`テキスト添付の合計が2MBを超えます。${item.name} を追加できませんでした。`);
+            errors.push(
+              `テキスト添付の合計が2MBを超えます。${item.name} を追加できませんでした。`,
+            );
             continue;
           }
           next.push(candidate);
@@ -251,27 +322,41 @@ export function MessageInput({
   };
 
   const handleSubmit = async () => {
-    if ((!content.trim() && files.length === 0) || disabled || compressing) return;
+    if ((!content.trim() && files.length === 0) || disabled || compressing)
+      return;
     // 実行中ガード（二重送信防止）
     if (isSendingRef.current) return;
     isSendingRef.current = true;
 
     try {
       if (videoMode && onGenerateVideo) {
-        const nonImages = files.filter((item) => !ACCEPTED_IMAGE_TYPES.includes(item.file.type));
-        const imageFiles = files.filter((item) => ACCEPTED_IMAGE_TYPES.includes(item.file.type));
+        const nonImages = files.filter(
+          (item) => !ACCEPTED_IMAGE_TYPES.includes(item.file.type),
+        );
+        const imageFiles = files.filter((item) =>
+          ACCEPTED_IMAGE_TYPES.includes(item.file.type),
+        );
         const expected =
-          videoMode === "t2v" ? "画像を添付しない" : videoMode === "i2v" ? "先頭画像を1枚" : "参照画像を1〜9枚";
+          videoMode === "t2v"
+            ? "画像を添付しない"
+            : videoMode === "i2v"
+              ? "先頭画像を1枚"
+              : "参照画像を1〜9枚";
         if (nonImages.length > 0) {
-          setFileError("動画生成では画像ファイルだけを参照素材に指定できます。");
+          setFileError(
+            "動画生成では画像ファイルだけを参照素材に指定できます。",
+          );
           return;
         }
         if (
           (videoMode === "t2v" && imageFiles.length !== 0) ||
           (videoMode === "i2v" && imageFiles.length !== 1) ||
-          (videoMode === "r2v" && (imageFiles.length < 1 || imageFiles.length > 9))
+          (videoMode === "r2v" &&
+            (imageFiles.length < 1 || imageFiles.length > 9))
         ) {
-          setFileError(`${videoMode.toUpperCase()} は ${expected} 指定してください。`);
+          setFileError(
+            `${videoMode.toUpperCase()} は ${expected} 指定してください。`,
+          );
           return;
         }
         const confirmed = window.confirm(
@@ -297,12 +382,15 @@ export function MessageInput({
         return;
       }
       if (files.length > 5) {
-        setFileError("通常のチャット添付は最大5件までです。動画生成では動画モードを選択してください。");
+        setFileError(
+          "通常のチャット添付は最大5件までです。動画生成では動画モードを選択してください。",
+        );
         return;
       }
-      const attachments = files.length > 0
-        ? await Promise.all(files.map((item) => readOne(item.file)))
-        : undefined;
+      const attachments =
+        files.length > 0
+          ? await Promise.all(files.map((item) => readOne(item.file)))
+          : undefined;
 
       const result = await onSend(
         content.trim() || "添付ファイルの内容を説明してください。",
@@ -328,12 +416,15 @@ export function MessageInput({
     }
   };
 
-  const adjustHeight = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const el = e.target;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-    setContent(el.value);
-  }, []);
+  const adjustHeight = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const el = e.target;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+      setContent(el.value);
+    },
+    [],
+  );
 
   const hasFiles = files.length > 0;
 
@@ -354,7 +445,9 @@ export function MessageInput({
         </div>
       )}
       {compressing && (
-        <div className="px-4 pt-3 pb-1 text-xs text-muted-foreground">画像を軽量化しています...</div>
+        <div className="px-4 pt-3 pb-1 text-xs text-muted-foreground">
+          画像を軽量化しています...
+        </div>
       )}
       {hasFiles && (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
@@ -370,9 +463,13 @@ export function MessageInput({
               ) : (
                 <FileIcon className="w-3.5 h-3.5 text-primary shrink-0" />
               )}
-              <span className="truncate font-medium max-w-[10rem]">{item.file.name}</span>
+              <span className="truncate font-medium max-w-[10rem]">
+                {item.file.name}
+              </span>
               {item.note && (
-                <span className="text-muted-foreground shrink-0 hidden sm:inline">{item.note}</span>
+                <span className="text-muted-foreground shrink-0 hidden sm:inline">
+                  {item.note}
+                </span>
               )}
               <button
                 onClick={() => {
@@ -392,7 +489,7 @@ export function MessageInput({
         <div className="flex items-center gap-2 px-3 pt-2 pb-1 flex-wrap">
           <button
             type="button"
-            onClick={() => setVideoMode((current) => current ? null : "t2v")}
+            onClick={() => setVideoMode((current) => (current ? null : "t2v"))}
             disabled={disabled || compressing}
             className={cn(
               "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
@@ -408,7 +505,9 @@ export function MessageInput({
             <>
               <select
                 value={videoMode}
-                onChange={(event) => setVideoMode(event.target.value as VideoMode)}
+                onChange={(event) =>
+                  setVideoMode(event.target.value as VideoMode)
+                }
                 className="h-7 rounded-full border border-violet-500/30 bg-background px-2 text-[11px] text-foreground outline-none"
                 aria-label="動画生成モード"
               >
@@ -418,17 +517,23 @@ export function MessageInput({
               </select>
               <select
                 value={videoDuration}
-                onChange={(event) => setVideoDuration(Number(event.target.value))}
+                onChange={(event) =>
+                  setVideoDuration(Number(event.target.value))
+                }
                 className="h-7 rounded-full border border-border bg-background px-2 text-[11px] text-foreground outline-none"
                 aria-label="動画の長さ"
               >
                 {[3, 5, 8, 10, 15].map((seconds) => (
-                  <option key={seconds} value={seconds}>{seconds}秒</option>
+                  <option key={seconds} value={seconds}>
+                    {seconds}秒
+                  </option>
                 ))}
               </select>
               <select
                 value={videoResolution}
-                onChange={(event) => setVideoResolution(event.target.value as "720P" | "1080P")}
+                onChange={(event) =>
+                  setVideoResolution(event.target.value as "720P" | "1080P")
+                }
                 className="h-7 rounded-full border border-border bg-background px-2 text-[11px] text-foreground outline-none"
                 aria-label="動画の解像度"
               >
@@ -438,16 +543,36 @@ export function MessageInput({
               <select
                 value={videoRatio}
                 disabled={videoMode === "i2v"}
-                onChange={(event) => setVideoRatio(event.target.value as VideoGenerationInput["ratio"])}
+                onChange={(event) =>
+                  setVideoRatio(
+                    event.target.value as VideoGenerationInput["ratio"],
+                  )
+                }
                 className="h-7 rounded-full border border-border bg-background px-2 text-[11px] text-foreground outline-none disabled:opacity-50"
                 aria-label="動画の比率"
               >
-                {["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4", "9:21", "21:9"].map((ratio) => (
-                  <option key={ratio} value={ratio}>{ratio}</option>
+                {[
+                  "16:9",
+                  "9:16",
+                  "1:1",
+                  "4:3",
+                  "3:4",
+                  "4:5",
+                  "5:4",
+                  "9:21",
+                  "21:9",
+                ].map((ratio) => (
+                  <option key={ratio} value={ratio}>
+                    {ratio}
+                  </option>
                 ))}
               </select>
               <span className="w-full text-[11px] text-muted-foreground">
-                {videoMode === "t2v" ? "画像なしで生成" : videoMode === "i2v" ? "画像を1枚添付" : "画像を1〜9枚添付"}
+                {videoMode === "t2v"
+                  ? "画像なしで生成"
+                  : videoMode === "i2v"
+                    ? "画像を1枚添付"
+                    : "画像を1〜9枚添付"}
               </span>
             </>
           )}
@@ -512,10 +637,16 @@ export function MessageInput({
 
         <textarea
           ref={textareaRef}
+          aria-label="メッセージ入力"
           value={content}
           onChange={adjustHeight}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? (fileFormat ? `この内容を ${fileFormat.toUpperCase()} で生成...` : "メッセージを入力...")}
+          placeholder={
+            placeholder ??
+            (fileFormat
+              ? `この内容を ${fileFormat.toUpperCase()} で生成...`
+              : "メッセージを入力...")
+          }
           className="flex-1 max-h-[200px] min-h-[44px] w-full resize-none bg-transparent py-3 px-1 text-base outline-none placeholder:text-muted-foreground/60 scrollbar-none font-sans"
           rows={1}
           disabled={disabled || compressing}
@@ -530,7 +661,7 @@ export function MessageInput({
             "mb-1 w-10 h-10 rounded-full flex-shrink-0 transition-all duration-300",
             content.trim() || hasFiles
               ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:scale-105"
-              : "bg-muted text-muted-foreground"
+              : "bg-muted text-muted-foreground",
           )}
         >
           <Send className="w-4 h-4 ml-0.5" />
