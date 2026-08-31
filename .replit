@@ -29,4 +29,4 @@ FRONTEND_URL = "https://chat-smb.replit.app"
 
 [nix]
 channel = "stable-25_05"
-packages = ["libreoffice", "ipaexfont", "chromium"]
+packages = ["libreoffice", "ipaexfont", "chromium", "codex"]

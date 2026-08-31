@@ -5,6 +5,11 @@ import {
   createAlibabaTokenPlanQuotaGuardedFetch,
   resolveAlibabaDashScopeBaseUrl,
 } from "./alibaba-token-plan-usage";
+import {
+  type CircuitBreaker,
+  CircuitBreakerOpenError,
+  getOrCreateCircuitBreaker,
+} from "./circuit-breaker";
 
 // Replit-managed OpenAI proxy
 if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
@@ -168,4 +173,28 @@ export function getClientForModel(modelId: string): { client: OpenAI; provider: 
     return { client: dashscopeClient, provider: "dashscope" };
   }
   return { client: openaiClient, provider: "openai" };
+}
+
+const openaiCircuit = getOrCreateCircuitBreaker("openai", { failureThreshold: 5, resetTimeoutMs: 30_000 });
+const dashscopeCircuit = getOrCreateCircuitBreaker("dashscope", { failureThreshold: 5, resetTimeoutMs: 30_000 });
+
+export function getCircuitBreakerForProvider(provider: ModelProvider): CircuitBreaker {
+  return provider === "dashscope" ? dashscopeCircuit : openaiCircuit;
+}
+
+export async function withCircuitBreaker<T>(
+  provider: ModelProvider,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const circuit = getCircuitBreakerForProvider(provider);
+  try {
+    return await circuit.execute(fn);
+  } catch (err) {
+    if (err instanceof CircuitBreakerOpenError) {
+      throw new Error(
+        `${provider === "dashscope" ? "DashScope" : "OpenAI"} APIが一時的に利用できません。しばらく待ってから再試行してください。`,
+      );
+    }
+    throw err;
+  }
 }

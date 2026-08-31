@@ -58,6 +58,18 @@ async function main(): Promise<void> {
     void shutdown("SIGINT");
   });
 
+  process.on("unhandledRejection", (reason) => {
+    logger.error(
+      { err: reason instanceof Error ? reason : undefined },
+      "Unhandled promise rejection — initiating graceful shutdown",
+    );
+    void shutdown("unhandledRejection");
+  });
+  process.on("uncaughtException", (err) => {
+    logger.error({ err }, "Uncaught exception — initiating graceful shutdown");
+    void shutdown("uncaughtException");
+  });
+
   try {
     await ensureMessageSchema((sql) => pool.query(sql));
     await ensureAssetsSchema((sql) => pool.query(sql));

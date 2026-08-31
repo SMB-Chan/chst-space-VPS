@@ -15,8 +15,18 @@ const MAX_REFERENCE_DATA_URL_CHARS =
   Math.ceil((MAX_REFERENCE_IMAGE_BYTES * 4) / 3) + 128;
 const MAX_GENERATED_VIDEO_BYTES = 256 * 1024 * 1024;
 const TASK_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+const VIDEO_HTTP_TIMEOUT_MS = 30_000;
 
 export const ALIBABA_VIDEO_POLL_INTERVAL_MS = 15_000;
+
+function combineSignals(
+  caller: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (!caller || caller.aborted) return timeout;
+  return AbortSignal.any([caller, timeout]);
+}
 
 export type AlibabaVideoMode = "t2v" | "i2v" | "r2v";
 export type AlibabaVideoResolution = "720P" | "1080P";
@@ -359,7 +369,7 @@ export async function submitAlibabaVideoTask(
     method: "POST",
     headers: specialistHeaders(specialist.apiKey, specialist.workspaceId, true),
     body: JSON.stringify({ model: validated.modelId, input, parameters }),
-    signal: request.signal,
+    signal: combineSignals(request.signal, VIDEO_HTTP_TIMEOUT_MS),
   });
   const task = normalizeTaskPayload(
     await parseApiResponse(response, "submission"),
@@ -387,7 +397,7 @@ export async function getAlibabaVideoTask(
   const response = await fetch(endpoint, {
     method: "GET",
     headers: specialistHeaders(specialist.apiKey, specialist.workspaceId),
-    signal: options.signal,
+    signal: combineSignals(options.signal, VIDEO_HTTP_TIMEOUT_MS),
   });
   return normalizeTaskPayload(await parseApiResponse(response, "status query"));
 }
@@ -406,7 +416,7 @@ export async function cancelAlibabaVideoTask(
   const response = await fetch(endpoint, {
     method: "POST",
     headers: specialistHeaders(specialist.apiKey, specialist.workspaceId),
-    signal: options.signal,
+    signal: combineSignals(options.signal, VIDEO_HTTP_TIMEOUT_MS),
   });
   return normalizeTaskPayload(await parseApiResponse(response, "cancellation"));
 }
