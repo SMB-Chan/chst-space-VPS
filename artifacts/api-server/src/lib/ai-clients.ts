@@ -178,7 +178,7 @@ export const AVAILABLE_MODELS = [
   },
 ] as const satisfies readonly ChatModel[];
 
-export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
+export type ModelId = string;
 
 export const DEFAULT_MODEL: ModelId = AVAILABLE_MODELS[0].id;
 

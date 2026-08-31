@@ -29,7 +29,8 @@ export interface ModelInfo {
   provider: "openai" | "dashscope";
   description: string;
   supportsVision: boolean;
-  supportsReasoning?: boolean;
+  supportsReasoning: boolean;
+  reasoning?: "none" | "openai" | "dashscope";
 }
 
 export interface TokenPlanQuotaHint {
@@ -159,7 +160,8 @@ function isModelInfo(value: unknown): value is ModelInfo {
     typeof v.label === "string" &&
     (v.provider === "openai" || v.provider === "dashscope") &&
     typeof v.description === "string" &&
-    typeof v.supportsVision === "boolean"
+    typeof v.supportsVision === "boolean" &&
+    typeof v.supportsReasoning === "boolean"
   );
 }
 

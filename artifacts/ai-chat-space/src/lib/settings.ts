@@ -101,7 +101,7 @@ export function subscribeSettings(
 
 export function pickAuditModel(
   primaryId: string,
-  models: { id: string; provider: string }[],
+  models: { id: string; provider: "openai" | "dashscope" }[],
   preferred?: string,
 ): string {
   if (

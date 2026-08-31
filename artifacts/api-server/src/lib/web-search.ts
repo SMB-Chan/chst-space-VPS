@@ -33,6 +33,7 @@ import {
 } from "./search-enhance";
 import { fetchWithBrowser } from "./render-fetch";
 import { searchWithApiProviders } from "./search-providers";
+import type { ModelProvider } from "./ai-clients";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchHtml };
@@ -579,7 +580,7 @@ export async function searchWeb(
 export async function decideSearch(
   client: OpenAI,
   model: string,
-  provider: "openai" | "dashscope",
+  provider: ModelProvider,
   userMessage: string,
   options?: { forceQuery?: string; signal?: AbortSignal },
 ): Promise<{
@@ -698,7 +699,7 @@ const FOLLOWUP_DECIDE_TIMEOUT_MS = 6_000;
 export async function decideFollowUpSearch(
   client: OpenAI,
   model: string,
-  provider: "openai" | "dashscope",
+  provider: ModelProvider,
   userMessage: string,
   previousQuery: string,
   gatheredSummary: string,
@@ -788,7 +789,7 @@ export async function decideFollowUpSearch(
 export async function buildWebContext(
   client: OpenAI,
   model: string,
-  provider: "openai" | "dashscope",
+  provider: ModelProvider,
   userMessage: string,
   onStatus: (event: Record<string, unknown>) => void,
   options?: { forceQuery?: string; signal?: AbortSignal },
