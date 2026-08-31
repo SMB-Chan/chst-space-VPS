@@ -29,7 +29,7 @@ import {
 } from "../../lib/chat-stream";
 import { isVisionBridgeAvailable } from "../../lib/vision-bridge";
 import { parseTranslationMode } from "../../lib/translation";
-import { logger } from "../../lib/logger";
+import { logger, safeFailureFields } from "../../lib/logger";
 import type { FileFormat } from "../../lib/file-generation";
 import {
   FILE_EXTRACTION_TIMEOUT_MS,
@@ -110,7 +110,10 @@ function parseStoredAssetIds(raw: string | null): number[] | null {
       (id): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 0,
     );
   } catch {
-    logger.warn({ raw }, "Ignoring malformed message assetIds JSON");
+    logger.warn(
+      { component: "openai-route", errorCode: "MALFORMED_ASSET_IDS" },
+      "Ignoring malformed message assetIds JSON",
+    );
     return null;
   }
 }
@@ -128,7 +131,10 @@ function parseStoredSources(raw: string | null): { title: string; url: string }[
         typeof (item as { url?: unknown }).url === "string",
     );
   } catch {
-    logger.warn({ raw }, "Ignoring malformed message sources JSON");
+    logger.warn(
+      { component: "openai-route", errorCode: "MALFORMED_SOURCES" },
+      "Ignoring malformed message sources JSON",
+    );
     return null;
   }
 }
@@ -921,7 +927,10 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       newMessage = await resolveMessageBinaries(newMessage, res, cancellation.signal);
     } catch (err) {
       if (cancellation.signal.aborted) return;
-      logger.warn({ err, conversationId }, "Attachment extraction failed");
+      logger.warn(
+        safeFailureFields(err, "openai-route", "ATTACHMENT_EXTRACTION_FAILED", 400),
+        "Attachment extraction failed",
+      );
       const message = extractionPublicError(err);
       if (!res.headersSent) {
         res.status(400).json({ error: message });
@@ -958,7 +967,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
           });
         } catch (error) {
           logger.warn(
-            { err: error, messageId: msg.id, conversationId },
+            safeFailureFields(error, "openai-route", "HISTORICAL_ATTACHMENT_OMITTED"),
             "Historical attachment could not be reconstructed; omitting its payload",
           );
           historicalChatMessages.push({
@@ -1138,7 +1147,10 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       newMessage = await resolveMessageBinaries(newMessage, res, cancellation.signal);
     } catch (err) {
       if (cancellation.signal.aborted) return;
-      logger.warn({ err }, "Attachment extraction failed");
+      logger.warn(
+        safeFailureFields(err, "openai-route", "ATTACHMENT_EXTRACTION_FAILED", 400),
+        "Attachment extraction failed",
+      );
       const message = extractionPublicError(err);
       if (!res.headersSent) {
         res.status(400).json({ error: message });
@@ -1174,7 +1186,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
         } catch (error) {
           if (cancellation.signal.aborted) return;
           logger.warn(
-            { err: error },
+            safeFailureFields(error, "openai-route", "HISTORICAL_ATTACHMENT_OMITTED"),
             "Private-session history attachment could not be reconstructed; omitting its payload",
           );
           historicalChatMessages.push({
@@ -1271,7 +1283,7 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
     const buffer = Buffer.from(asset.data, "base64");
     if (buffer.length !== asset.size) {
       logger.warn(
-        { assetId, expectedSize: asset.size, actualSize: buffer.length },
+        { component: "openai-route", errorCode: "ASSET_SIZE_MISMATCH" },
         "Asset size mismatch; using decoded buffer length",
       );
     }

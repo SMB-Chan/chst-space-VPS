@@ -11,7 +11,7 @@ import {
   nextAlibabaVideoPollAt,
 } from "./alibaba-video-job-state";
 import { isAlibabaSpecialistConfigured } from "./alibaba-specialist-config";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 
 const WORKER_TICK_MS = 5_000;
 const WORKER_LEASE_MS = 5 * 60_000;
@@ -445,7 +445,12 @@ export function startAlibabaVideoWorker(): AlibabaVideoWorkerHandle {
       const job = await claimDueJob(new Date());
       if (job) await processAlibabaVideoJob(job);
     })()
-      .catch((error) => logger.error({ error }, "Alibaba video worker tick failed"))
+      .catch((error) =>
+        logger.error(
+          safeFailureFields(error, "alibaba-video-worker", "VIDEO_WORKER_TICK_FAILED"),
+          "Alibaba video worker tick failed",
+        ),
+      )
       .finally(() => {
         active = undefined;
       });

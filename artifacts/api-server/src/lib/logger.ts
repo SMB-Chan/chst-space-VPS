@@ -18,6 +18,29 @@ export function safeExceptionName(error: unknown): string {
   return candidate;
 }
 
+export function safeFailureFields(
+  error: unknown,
+  component: string,
+  errorCode: string,
+  status?: number,
+): {
+  component: string;
+  errorCode: string;
+  exceptionName: string;
+  status?: number;
+} {
+  return {
+    component,
+    errorCode,
+    exceptionName: error ? safeExceptionName(error) : "None",
+    ...(status === undefined ? {} : { status }),
+  };
+}
+
+const safeErrorSerializer = (error: unknown) => ({
+  name: safeExceptionName(error),
+});
+
 export const logger = pino({
   level: process.env.LOG_LEVEL ?? "info",
   redact: [
@@ -26,7 +49,8 @@ export const logger = pino({
     "res.headers['set-cookie']",
   ],
   serializers: {
-    err: (error) => ({ name: safeExceptionName(error) }),
+    err: safeErrorSerializer,
+    error: safeErrorSerializer,
   },
   ...(isProduction
     ? {}
