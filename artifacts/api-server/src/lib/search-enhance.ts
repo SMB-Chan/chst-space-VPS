@@ -3,9 +3,9 @@ import { Readability } from "@mozilla/readability";
 import { stripHtml, type SearchResult } from "./search-parse";
 
 /** Number of top-scored results whose pages are fetched for full-text context. */
-export const FETCH_TOP_N = 3;
+export const FETCH_TOP_N = 5;
 /** Maximum results to return from a merged search. */
-export const MAX_MERGED_RESULTS = 6;
+export const MAX_MERGED_RESULTS = 8;
 /** First-pass cap for one hostname in the final ranked result set. */
 const FINAL_HOSTNAME_SOFT_CAP = 2;
 

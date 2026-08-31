@@ -41,6 +41,9 @@ export { extractUrls, inferSearchQuery, parseSearchHtml };
 // this module and exercise the guard through it.
 export { isPrivateAddress };
 
+/** Maximum total search rounds (1 initial + follow-ups). */
+const MAX_SEARCH_ROUNDS = 5;
+
 export interface WebContext {
   searched: boolean;
   query?: string;
@@ -61,7 +64,7 @@ const PAGE_FETCH_TIMEOUT_MS = 6_000;
 /** Hard deadline for the search-decision LLM call. Heuristic covers timeouts. */
 const DECIDE_TIMEOUT_MS = 6_000;
 
-const MAX_PAGE_CHARS = 4000;
+const MAX_PAGE_CHARS = 2500;
 /** Maximum decompressed bytes accepted from a fetched page/search response. */
 export const MAX_PAGE_RESPONSE_BYTES = 1024 * 1024;
 export const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -866,6 +869,7 @@ export async function buildWebContext(
   // the shared sources/parts.  Sources and fetched pages are deduplicated by
   // URL across rounds.
   const seenSourceUrls = new Set<string>();
+  let sourceIndex = 0;
   const runSearchRound = async (roundQuery: string): Promise<void> => {
     onStatus({ status: "searching", query: roundQuery });
     if (signal?.aborted) return;
@@ -906,10 +910,10 @@ export async function buildWebContext(
     if (newResults.length === 0) return; // follow-up round found only duplicates
 
     const snippetBlock = newResults
-      .map(
-        (r, i) =>
-          `${i + 1}. ${r.title}\n   URL: ${r.url}\n   概要: ${r.snippet}`,
-      )
+      .map((r) => {
+        sourceIndex++;
+        return `[${sourceIndex}] ${r.title}\n    URL: ${r.url}\n    概要: ${r.snippet}`;
+      })
       .join("\n");
     const expandedQueries = expandSearchQueries(roundQuery);
     const queryNote =
@@ -920,11 +924,20 @@ export async function buildWebContext(
       `【Web検索結果（クエリ: ${roundQuery}）${queryNote}】\n${snippetBlock}`,
     );
 
+    const urlToIndex = new Map<string, number>();
+    {
+      let idx = sourceIndex - newResults.length + 1;
+      for (const r of newResults) {
+        urlToIndex.set(r.url, idx++);
+      }
+    }
     let pagesFetched = 0;
     pages.forEach((page, i) => {
       if (page) {
         pagesFetched++;
-        parts.push(`【ページ内容: ${top[i].url}】\n${page.text}`);
+        const ref = urlToIndex.get(top[i].url);
+        const label = ref ? `[${ref}]` : top[i].url;
+        parts.push(`【ページ内容 ${label}: ${top[i].url}】\n${page.text}`);
       }
     });
 
@@ -944,30 +957,25 @@ export async function buildWebContext(
     query = decision.query;
     await runSearchRound(decision.query);
 
-    // One bounded follow-up round: re-search only when the model judges the
-    // gathered material insufficient (off-target, thin, or stale).
-    if (signal?.aborted)
-      return {
-        searched,
-        query,
-        sources,
-        contextText: parts.join("\n\n"),
-        searchWarning,
-      };
-    const followUp = await decideFollowUpSearch(
-      client,
-      model,
-      provider,
-      userMessage,
-      decision.query,
-      parts.join("\n\n"),
-      signal,
-    );
-    if (
-      followUp.search &&
-      followUp.query &&
-      normalizeQuery(followUp.query) !== normalizeQuery(decision.query)
-    ) {
+    // Multi-step research: re-search while the model judges the gathered
+    // material insufficient, up to MAX_SEARCH_ROUNDS total rounds.
+    const previousQueries = new Set([normalizeQuery(decision.query)]);
+    for (let round = 1; round < MAX_SEARCH_ROUNDS; round++) {
+      if (signal?.aborted) break;
+      const followUp = await decideFollowUpSearch(
+        client,
+        model,
+        provider,
+        userMessage,
+        decision.query,
+        parts.join("\n\n"),
+        signal,
+      );
+      if (!followUp.search || !followUp.query) break;
+      const normalized = normalizeQuery(followUp.query);
+      if (previousQueries.has(normalized)) break;
+      previousQueries.add(normalized);
+      onStatus({ status: "searching", query: followUp.query });
       await runSearchRound(followUp.query);
     }
   }

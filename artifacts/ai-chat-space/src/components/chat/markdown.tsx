@@ -55,7 +55,12 @@ function CodeBlock({
   );
 }
 
+function citeSourceLinks(content: string): string {
+  return content.replace(/\[(\d+)\]/g, "[[$1]](#source-$1)");
+}
+
 export function Markdown({ content, className }: MarkdownProps) {
+  const processedContent = useMemo(() => citeSourceLinks(content), [content]);
   const remarkPlugins = useMemo(() => [remarkGfm], []);
   const rehypePlugins = useMemo(
     () => [[rehypeSanitize, sanitizeSchema]] as const,
@@ -74,6 +79,20 @@ export function Markdown({ content, className }: MarkdownProps) {
         rehypePlugins={rehypePlugins as never}
         components={{
           a: ({ href, children }) => {
+            if (href?.startsWith("#source-")) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById(href.slice(1));
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                  className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-primary/10 text-primary text-[10px] font-mono font-medium hover:bg-primary/20 transition-colors align-baseline cursor-pointer border-none"
+                >
+                  {children}
+                </button>
+              );
+            }
             const safeHref = safeHttpHref(href);
             if (!safeHref) return <span>{children}</span>;
             return (
@@ -171,7 +190,7 @@ export function Markdown({ content, className }: MarkdownProps) {
           pre: ({ children }) => <>{children as ReactNode}</>,
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );

@@ -140,10 +140,10 @@ async function withBrowserDeadline<T>(
 // Concurrency limiter (Chromium contexts are expensive on small hosts)
 // ---------------------------------------------------------------------------
 
-/** Max simultaneous browser page loads. Default 1; raise after load testing. */
+/** Max simultaneous browser page loads. Default 2; raise after load testing. */
 const MAX_BROWSER_CONCURRENCY = (() => {
-  const n = Number(process.env.PLAYWRIGHT_MAX_CONCURRENCY ?? "1");
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  const n = Number(process.env.PLAYWRIGHT_MAX_CONCURRENCY ?? "2");
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
 })();
 
 let activeBrowserJobs = 0;
