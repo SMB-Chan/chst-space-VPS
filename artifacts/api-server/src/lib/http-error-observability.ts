@@ -7,6 +7,22 @@ const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 const TRACEPARENT_PATTERN = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
 const SAFE_METHOD_PATTERN = /^[A-Z]{3,12}$/;
 const SAFE_ERROR_LOGGED = Symbol("safeHttpErrorLogged");
+const REGISTERED_ROUTE_TEMPLATES = new Set([
+  "/api/",
+  "/api/healthz",
+  "/api/openai/models",
+  "/api/openai/capabilities",
+  "/api/openai/realtime/session",
+  "/api/openai/conversations",
+  "/api/openai/conversations/:conversationId",
+  "/api/openai/conversations/:conversationId/video-jobs",
+  "/api/openai/conversations/:conversationId/messages",
+  "/api/openai/video-jobs/:jobId",
+  "/api/openai/artifacts/:artifactId",
+  "/api/openai/messages",
+  "/api/openai/ephemeral/messages",
+  "/api/openai/assets/:assetId",
+]);
 
 export const SAFE_HTTP_ERROR_MESSAGE = "HTTP request failed";
 export const SAFE_HTTP_ACCESS_MESSAGE = "HTTP request completed";
@@ -85,7 +101,11 @@ function normalizeRoute(request: SafeHttpRequest): string {
   const baseUrl = asString(request.baseUrl);
   const candidate = `${baseUrl}${asString(template)}`;
 
-  if (candidate.length === 0 || !SAFE_ROUTE_PATTERN.test(candidate)) {
+  if (
+    candidate.length === 0 ||
+    !SAFE_ROUTE_PATTERN.test(candidate) ||
+    !REGISTERED_ROUTE_TEMPLATES.has(candidate)
+  ) {
     return "route_unknown";
   }
   return candidate;
