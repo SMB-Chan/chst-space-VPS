@@ -44,9 +44,21 @@ export function formatJstDateTime(date: Date = new Date()): string {
 export function buildLlmTimeContext(date: Date = new Date()): string {
   const timestamp = formatJstDateTime(date);
   const weekday = WEEKDAY_FORMATTER.format(date);
+  const jstParts = dateTimeParts(date);
+  const jstYear = jstParts.year;
+  const jstMonth = jstParts.month;
   return (
     `現在日時: ${timestamp} (${weekday}, ${LLM_TIME_ZONE}, ${LLM_TIME_ZONE_LABEL}, UTC${LLM_UTC_OFFSET})。` +
-    `「今日」「明日」「昨日」「今朝」「今夜」などの相対日時は、この日本標準時を基準に解釈してください。`
+    `現在年: ${jstYear}年、現在月: ${jstMonth}月。\n` +
+    `時間推論の規則:\n` +
+    `「今日」「明日」「昨日」「今朝」「今夜」などの相対日時は、この日本標準時を基準に解釈してください。\n` +
+    `「去年」「昨年」「一昨年」などの過去の相対表現も、この日付を基準に具体的な年を算出してください。\n` +
+    `「来年」「再来年」「今後」「〜年後」などの未来の表現も、この日付を基準に解釈してください。\n` +
+    `あなたの訓練データには知識のカットオフがあり、最新の情報・最近の出来事・将来の予測は不正確な場合があります。` +
+    `過去・現在・未来の具体的な事実（ニュース・価格・イベント・リリース・統計・天候など）については、` +
+    `web_searchツールやシステムのWeb検索機能を使って最新情報を取得してください。\n` +
+    `「〜以来の変化」「〜から今の推移」「〜の今後の見通し」など、時間軸にまたがる質問では、` +
+    `過去の事実と最新の情報の両方を収集してから回答を構成してください。`
   );
 }
 

@@ -69,6 +69,15 @@ export function expandSearchQueries(baseQuery: string): string[] {
   const hasJapanese =
     /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(normalized);
 
+  const hasPast =
+    /去年|昨年|一昨年|先月|先週|\d+年前|以来|前回|当時|以前|過去|last year|ago|since|historical/i.test(
+      normalized,
+    );
+  const hasFuture =
+    /来年|再来年|来月|来週|今後|\d+年後|将来|予定|予測|見通し|next year|future|forecast|prediction|upcoming/i.test(
+      normalized,
+    );
+
   // Only add angle variants when the query does not already contain them.
   if (!hasLatest && !hasNews) {
     variants.add(hasJapanese ? `${normalized} 最新` : `${normalized} latest`);
@@ -77,7 +86,15 @@ export function expandSearchQueries(baseQuery: string): string[] {
     }
   }
 
-  return Array.from(variants).slice(0, 3);
+  // Add temporal variants for past/future queries to improve recall.
+  if (hasPast && hasJapanese) {
+    variants.add(`${normalized} 結果`);
+  }
+  if (hasFuture && hasJapanese) {
+    variants.add(`${normalized} 予想`);
+  }
+
+  return Array.from(variants).slice(0, 4);
 }
 
 const AUTHORITY_DOMAINS = new Set([
@@ -164,12 +181,17 @@ function domainScore(url: string): number {
 
 function recencyScore(text: string, now = new Date()): number {
   const combined = `${text}`;
-  const currentYear = now.getUTCFullYear();
-  const previousYear = currentYear - 1;
+  const jstYear = Number(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+    }).format(now),
+  );
+  const previousYear = jstYear - 1;
   const years = Array.from(combined.matchAll(/\b(20\d{2})\b/g), (match) =>
     Number(match[1]),
   );
-  if (years.includes(currentYear)) return 4;
+  if (years.includes(jstYear)) return 4;
   if (years.includes(previousYear)) return 2;
   // Japanese date patterns.  Without a year this is only a modest signal.
   if (/[0-9]{1,2}月[0-9]{1,2}日/.test(combined)) return 2;

@@ -47,9 +47,15 @@ import { applyValidatedAuditPatch } from "./audit-patch";
 import {
   executeSpecialistTool,
   getSpecialistTools,
+  isResearchTool,
   type GeneratedAsset,
   type SpecialistToolCall,
 } from "./specialist-capabilities";
+import {
+  findRelevantMemories,
+  formatMemoriesForPrompt,
+  runMemoryMaintenance,
+} from "./llm-memory-tools";
 import {
   planCapabilityTool,
   type CapabilityToolPlan,
@@ -60,6 +66,10 @@ const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
 const SPECIALIST_TIMEOUT_MS = 120_000;
+/** Maximum research tool calls (web_search/fetch_page) per turn. */
+const MAX_RESEARCH_STEPS = 6;
+/** Per-step timeout for a single research tool execution. */
+const RESEARCH_STEP_TIMEOUT_MS = 30_000;
 
 export function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -156,6 +166,33 @@ const FILE_GENERATION_SYSTEM_PROMPT = `ユーザーが PDF / Word / Excel / Powe
 - 「ユーザー側で作成してください」「ブラウザで印刷してください」「ダウンロードして作成」など、ユーザーに作業を押し付ける指示を出さない。
 - 「ファイルを生成できません」などと断らない。システムが必ず生成する。
 - 作成するファイルの概要（タイトルや主なセクション）を短く述べ、後はファイルの自動生成に任せる。`;
+
+const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツールを使って自律的に情報を収集できます。
+また、memory_store/memory_recall/memory_update/memory_forget/memory_supersede ツールを使って、あなたの長期的な記憶を管理できます。
+
+方針:
+- 最新情報・固有名詞・具体的な数値データが必要な場合、積極的に web_search を使ってください。
+- 検索結果のスニペットだけでは不十分な場合、fetch_page でページ本文を直接読んでください。
+- 複数の角度から情報を収集したい場合、異なるクエリで複数回検索できます。
+- 情報を収集したら、出典を [1] [2] などの番号で本文に引用してください。
+- 十分な情報が集まったら、収集した情報を使って回答を生成してください。
+
+記憶の管理:
+- Web検索で得た重要な事実や、ユーザーとの会話で学んだことは memory_store で保存してください。
+- 同じトピックの古い記憶がある場合は、memory_supersede で古いものを置き換えてから memory_store で新しいものを保存してください。
+- 誤った情報や不要になった情報は memory_forget で削除してください。
+- 過去の記憶を参照したい場合は memory_recall を使ってください。
+- 記憶はあなたのものです。将来の会話で再利用できる重要な情報を積極的に保存してください。
+
+時間軸に関する注意:
+- あなたの知識には訓練データのカットオフがあり、最近の出来事や将来の情報は不正確な場合があります。
+- 「去年」「〜年前」「〜以来」などの過去の質問では、web_search で当時の情報を検索してください。検索クエリに具体的な年（例: 「2024年」）を含めると精度が上がります。
+- 「来年」「今後」「〜の見通し」などの未来の質問では、最新の予測・展望・計画を web_search で検索してください。
+- 「〜の変化」「〜の推移」「〜比較」など時間軸にまたがる質問では、過去のデータと最新のデータの両方を検索してから回答してください。
+
+注意:
+- 不要な検索は避けてください。一般的な挨拶や既知の事実には検索不要です。
+- 各ツール呼び出しの後は、結果を確認してから次のアクションを判断してください。`;
 
 function wantsArtifact(userText: string): boolean {
   return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html)/i.test(
@@ -334,6 +371,9 @@ export async function streamChatReply(args: {
         content: FILE_GENERATION_SYSTEM_PROMPT,
       });
     }
+    if (!translationMode && !brokerToolCall) {
+      workingMessages.push({ role: "system", content: RESEARCH_SYSTEM_PROMPT });
+    }
 
     const skills = translationMode ? [] : matchSkills(userText);
     if (skills.length > 0 && !clientGone()) {
@@ -447,6 +487,24 @@ export async function streamChatReply(args: {
       }
     }
 
+    // Auto-inject relevant LLM memories based on the user's message
+    if (!translationMode) {
+      try {
+        const relevantMemories = findRelevantMemories(userText, 5);
+        if (relevantMemories.length > 0) {
+          const memoryPrompt = formatMemoriesForPrompt(relevantMemories);
+          workingMessages.push({
+            role: "system",
+            content: memoryPrompt,
+          });
+        }
+        // Run maintenance periodically (non-blocking)
+        runMemoryMaintenance();
+      } catch {
+        // Memory store failures should not break the chat flow
+      }
+    }
+
     let brokerToolCall: SpecialistToolCall | undefined;
     if (!translationMode) {
       const plan = await planCapabilityTool({
@@ -514,110 +572,389 @@ export async function streamChatReply(args: {
     const effectiveToolCalls = brokerToolCall
       ? [brokerToolCall]
       : specialistToolCalls;
+
+    // Separate research tools (web_search/fetch_page) from non-research
+    // specialist tools. Research tools enter an agentic loop; non-research
+    // tools execute once after the loop.
+    const researchCalls = effectiveToolCalls.filter(isResearchTool);
+    const nonResearchCalls = effectiveToolCalls.filter(
+      (c) => !isResearchTool(c),
+    );
+    const allResearchSources: {
+      title: string;
+      url: string;
+      publishedAt?: string | null;
+    }[] = [];
+
     if (
       effectiveToolCalls.length > 0 &&
       !clientAbort.signal.aborted &&
       !translationMode
     ) {
-      const [toolCall] = effectiveToolCalls;
-      if (effectiveToolCalls.length > 1 && !clientGone()) {
-        res.write(
-          `data: ${JSON.stringify({
-            status: "specialist_warning",
-            message:
-              "安全上の上限により、同じターンでは専門能力を1回だけ実行しました。",
-          })}\n\n`,
-        );
-      }
-      if (!clientGone()) {
-        res.write(
-          `data: ${JSON.stringify({
-            status: "specialist",
-            capability: toolCall.name,
-            phase: "planned",
-          })}\n\n`,
-        );
-        res.write(
-          `data: ${JSON.stringify({
-            status: "specialist",
-            capability: toolCall.name,
-            phase: "running",
-          })}\n\n`,
-        );
-      }
-      const specialistResult = await withTimeout(
-        (signal) =>
-          executeSpecialistTool(toolCall, {
-            imageAttachments: imageAttachmentsForTools,
-            audioAttachments: audioAttachmentsForTools,
-            signal,
-          }),
-        SPECIALIST_TIMEOUT_MS,
-        "Specialist capability",
-        clientAbort.signal,
-      );
-      if (specialistResult.asset) generatedAssets = [specialistResult.asset];
-      if (!clientGone()) {
-        res.write(
-          `data: ${JSON.stringify({
-            status: specialistResult.ok ? "specialist" : "specialist_warning",
-            capability: specialistResult.capability,
-            phase: specialistResult.ok ? "completed" : "failed",
-            message: specialistResult.summary,
-          })}\n\n`,
-        );
-      }
+      // --- Research agent loop ---
+      if (researchCalls.length > 0 && !brokerToolCall) {
+        let researchStep = 0;
+        let currentResearchCalls = researchCalls;
 
-      workingMessages.push({
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          {
-            id: toolCall.id,
-            type: "function",
-            function: { name: toolCall.name, arguments: toolCall.arguments },
-          },
-        ],
-      } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
-      workingMessages.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({
-          ok: specialistResult.ok,
-          capability: specialistResult.capability,
-          summary: specialistResult.summary,
-          text: specialistResult.text,
-          generatedAsset: specialistResult.asset
-            ? {
-                filename: specialistResult.asset.filename,
-                mimeType: specialistResult.asset.mimeType,
-                size: specialistResult.asset.size,
-              }
-            : undefined,
-        }),
-      });
-      const continuation = await streamModelText({
-        client,
-        provider,
-        modelId,
-        reasoningLevel,
-        messages: workingMessages,
-        onDelta: (added, kind) => {
-          if (clientGone()) return;
-          if (kind === "reasoning") {
-            if (!clientAbort.signal.aborted) {
-              res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
-            }
-          } else {
+        while (
+          currentResearchCalls.length > 0 &&
+          researchStep < MAX_RESEARCH_STEPS &&
+          !clientAbort.signal.aborted
+        ) {
+          researchStep++;
+          if (!clientGone()) {
             res.write(
-              `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+              `data: ${JSON.stringify({
+                status: "researching",
+                step: researchStep,
+                maxSteps: MAX_RESEARCH_STEPS,
+                toolCount: currentResearchCalls.length,
+              })}\n\n`,
             );
           }
-        },
-        shouldStop: () => clientGone() || clientAbort.signal.aborted,
-        signal: clientAbort.signal,
-      });
-      fullResponse += continuation;
+
+          // Execute all research tool calls for this round
+          const toolResults: {
+            call: SpecialistToolCall;
+            result: Awaited<ReturnType<typeof executeSpecialistTool>>;
+          }[] = [];
+          for (const toolCall of currentResearchCalls) {
+            if (clientGone() || clientAbort.signal.aborted) break;
+            if (!clientGone()) {
+              res.write(
+                `data: ${JSON.stringify({
+                  status: "specialist",
+                  capability: toolCall.name,
+                  phase: "running",
+                })}\n\n`,
+              );
+            }
+            const result = await withTimeout(
+              (signal) =>
+                executeSpecialistTool(toolCall, {
+                  imageAttachments: imageAttachmentsForTools,
+                  audioAttachments: audioAttachmentsForTools,
+                  signal,
+                }),
+              RESEARCH_STEP_TIMEOUT_MS,
+              "Research step",
+              clientAbort.signal,
+            );
+            if (result.sources) {
+              for (const source of result.sources) {
+                if (!allResearchSources.some((s) => s.url === source.url)) {
+                  allResearchSources.push(source);
+                }
+              }
+            }
+            toolResults.push({ call: toolCall, result });
+            if (!clientGone()) {
+              res.write(
+                `data: ${JSON.stringify({
+                  status: result.ok ? "specialist" : "specialist_warning",
+                  capability: result.capability,
+                  phase: result.ok ? "completed" : "failed",
+                  message: result.summary,
+                })}\n\n`,
+              );
+            }
+          }
+
+          // Feed tool results back to the LLM
+          const assistantToolCalls = toolResults.map(({ call }) => ({
+            id: call.id,
+            type: "function" as const,
+            function: { name: call.name, arguments: call.arguments },
+          }));
+          workingMessages.push({
+            role: "assistant",
+            content: null,
+            tool_calls: assistantToolCalls,
+          } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+          for (const { call, result } of toolResults) {
+            workingMessages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                ok: result.ok,
+                capability: result.capability,
+                summary: result.summary,
+                text: result.text,
+              }),
+            });
+          }
+
+          // Stream sources incrementally
+          if (allResearchSources.length > 0 && !clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({ sources: allResearchSources })}\n\n`,
+            );
+          }
+
+          // Ask the LLM to continue (may produce more tool calls or a response)
+          const nextRoundCalls: SpecialistToolCall[] = [];
+          const continuation = await streamModelText({
+            client,
+            provider,
+            modelId,
+            reasoningLevel,
+            messages: workingMessages,
+            tools: specialistTools,
+            onToolCalls: (calls) => nextRoundCalls.push(...calls),
+            onDelta: (added, kind) => {
+              if (clientGone()) return;
+              if (kind === "reasoning") {
+                if (!clientAbort.signal.aborted) {
+                  res.write(
+                    `data: ${JSON.stringify({ status: "thinking" })}\n\n`,
+                  );
+                }
+              } else {
+                res.write(
+                  `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+                );
+              }
+            },
+            shouldStop: () => clientGone() || clientAbort.signal.aborted,
+            signal: clientAbort.signal,
+          });
+          fullResponse += continuation;
+
+          // Check if the LLM wants to do more research
+          const nextResearchCalls = nextRoundCalls.filter(isResearchTool);
+          if (
+            nextResearchCalls.length > 0 &&
+            researchStep < MAX_RESEARCH_STEPS
+          ) {
+            currentResearchCalls = nextResearchCalls;
+            // Any non-research calls from intermediate rounds are deferred
+            // to after the research loop completes.
+            for (const c of nextRoundCalls) {
+              if (!isResearchTool(c) && !nonResearchCalls.includes(c)) {
+                nonResearchCalls.push(c);
+              }
+            }
+          } else {
+            // LLM produced a text response or hit the step limit
+            if (
+              nextRoundCalls.length > 0 &&
+              !nextRoundCalls.every(isResearchTool)
+            ) {
+              for (const c of nextRoundCalls) {
+                if (!isResearchTool(c) && !nonResearchCalls.includes(c)) {
+                  nonResearchCalls.push(c);
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      // --- Non-research specialist tool execution (single call) ---
+      if (
+        nonResearchCalls.length > 0 &&
+        !clientAbort.signal.aborted &&
+        !brokerToolCall
+      ) {
+        const [toolCall] = nonResearchCalls;
+        if (nonResearchCalls.length > 1 && !clientGone()) {
+          res.write(
+            `data: ${JSON.stringify({
+              status: "specialist_warning",
+              message:
+                "安全上の上限により、同じターンでは専門能力を1回だけ実行しました。",
+            })}\n\n`,
+          );
+        }
+        if (!clientGone()) {
+          res.write(
+            `data: ${JSON.stringify({
+              status: "specialist",
+              capability: toolCall.name,
+              phase: "planned",
+            })}\n\n`,
+          );
+          res.write(
+            `data: ${JSON.stringify({
+              status: "specialist",
+              capability: toolCall.name,
+              phase: "running",
+            })}\n\n`,
+          );
+        }
+        const specialistResult = await withTimeout(
+          (signal) =>
+            executeSpecialistTool(toolCall, {
+              imageAttachments: imageAttachmentsForTools,
+              audioAttachments: audioAttachmentsForTools,
+              signal,
+            }),
+          SPECIALIST_TIMEOUT_MS,
+          "Specialist capability",
+          clientAbort.signal,
+        );
+        if (specialistResult.asset) generatedAssets = [specialistResult.asset];
+        if (!clientGone()) {
+          res.write(
+            `data: ${JSON.stringify({
+              status: specialistResult.ok ? "specialist" : "specialist_warning",
+              capability: specialistResult.capability,
+              phase: specialistResult.ok ? "completed" : "failed",
+              message: specialistResult.summary,
+            })}\n\n`,
+          );
+        }
+
+        workingMessages.push({
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: toolCall.id,
+              type: "function",
+              function: { name: toolCall.name, arguments: toolCall.arguments },
+            },
+          ],
+        } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+        workingMessages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({
+            ok: specialistResult.ok,
+            capability: specialistResult.capability,
+            summary: specialistResult.summary,
+            text: specialistResult.text,
+            generatedAsset: specialistResult.asset
+              ? {
+                  filename: specialistResult.asset.filename,
+                  mimeType: specialistResult.asset.mimeType,
+                  size: specialistResult.asset.size,
+                }
+              : undefined,
+          }),
+        });
+        const continuation = await streamModelText({
+          client,
+          provider,
+          modelId,
+          reasoningLevel,
+          messages: workingMessages,
+          onDelta: (added, kind) => {
+            if (clientGone()) return;
+            if (kind === "reasoning") {
+              if (!clientAbort.signal.aborted) {
+                res.write(
+                  `data: ${JSON.stringify({ status: "thinking" })}\n\n`,
+                );
+              }
+            } else {
+              res.write(
+                `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+              );
+            }
+          },
+          shouldStop: () => clientGone() || clientAbort.signal.aborted,
+          signal: clientAbort.signal,
+        });
+        fullResponse += continuation;
+      }
+
+      // --- Broker tool call (image/audio generation) — unchanged path ---
+      if (brokerToolCall) {
+        const toolCall = brokerToolCall;
+        if (!clientGone()) {
+          res.write(
+            `data: ${JSON.stringify({
+              status: "specialist",
+              capability: toolCall.name,
+              phase: "planned",
+            })}\n\n`,
+          );
+          res.write(
+            `data: ${JSON.stringify({
+              status: "specialist",
+              capability: toolCall.name,
+              phase: "running",
+            })}\n\n`,
+          );
+        }
+        const specialistResult = await withTimeout(
+          (signal) =>
+            executeSpecialistTool(toolCall, {
+              imageAttachments: imageAttachmentsForTools,
+              audioAttachments: audioAttachmentsForTools,
+              signal,
+            }),
+          SPECIALIST_TIMEOUT_MS,
+          "Specialist capability",
+          clientAbort.signal,
+        );
+        if (specialistResult.asset) generatedAssets = [specialistResult.asset];
+        if (!clientGone()) {
+          res.write(
+            `data: ${JSON.stringify({
+              status: specialistResult.ok ? "specialist" : "specialist_warning",
+              capability: specialistResult.capability,
+              phase: specialistResult.ok ? "completed" : "failed",
+              message: specialistResult.summary,
+            })}\n\n`,
+          );
+        }
+
+        workingMessages.push({
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: toolCall.id,
+              type: "function",
+              function: { name: toolCall.name, arguments: toolCall.arguments },
+            },
+          ],
+        } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+        workingMessages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({
+            ok: specialistResult.ok,
+            capability: specialistResult.capability,
+            summary: specialistResult.summary,
+            text: specialistResult.text,
+            generatedAsset: specialistResult.asset
+              ? {
+                  filename: specialistResult.asset.filename,
+                  mimeType: specialistResult.asset.mimeType,
+                  size: specialistResult.asset.size,
+                }
+              : undefined,
+          }),
+        });
+        const continuation = await streamModelText({
+          client,
+          provider,
+          modelId,
+          reasoningLevel,
+          messages: workingMessages,
+          onDelta: (added, kind) => {
+            if (clientGone()) return;
+            if (kind === "reasoning") {
+              if (!clientAbort.signal.aborted) {
+                res.write(
+                  `data: ${JSON.stringify({ status: "thinking" })}\n\n`,
+                );
+              }
+            } else {
+              res.write(
+                `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+              );
+            }
+          },
+          shouldStop: () => clientGone() || clientAbort.signal.aborted,
+          signal: clientAbort.signal,
+        });
+        fullResponse += continuation;
+      }
     }
 
     if (!fullResponse.trim()) {

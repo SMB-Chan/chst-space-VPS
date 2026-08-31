@@ -8,6 +8,16 @@ import {
   type ModelProvider,
 } from "./ai-clients";
 import { transcribeDashScopeAudio } from "./audio-transcription";
+import {
+  getMemoryToolDefinitions,
+  executeMemoryTool,
+  isMemoryTool,
+} from "./llm-memory-tools";
+import {
+  getFormToolDefinitions,
+  executeFormTool,
+  isFormTool,
+} from "./form-tools";
 import { generateAlibabaImage } from "./alibaba-image";
 import {
   QWEN_AUDIO_TTS_PLUS_VOICES,
@@ -397,16 +407,28 @@ export interface SpecialistToolResult {
     | "image-edit"
     | "speech-to-text"
     | "audio-synthesis"
-    | "web-search";
+    | "web-search"
+    | "fetch-page";
   summary: string;
   text?: string;
   asset?: GeneratedAsset;
+  sources?: { title: string; url: string; publishedAt?: string | null }[];
 }
 
 export interface SpecialistToolCall {
   id: string;
   name: string;
   arguments: string;
+}
+
+const RESEARCH_TOOL_NAMES = new Set(["web_search", "fetch_page"]);
+
+export function isResearchTool(call: SpecialistToolCall): boolean {
+  return (
+    RESEARCH_TOOL_NAMES.has(call.name) ||
+    isMemoryTool(call.name) ||
+    isFormTool(call.name)
+  );
 }
 
 export interface SpecialistToolContext {
@@ -458,6 +480,11 @@ const synthesizeSpeechArgs = z.object({
 
 const webSearchArgs = z.object({
   query: z.string().trim().min(1).max(500),
+  fetchContent: z.boolean().optional(),
+});
+
+const fetchPageArgs = z.object({
+  url: z.string().trim().min(1).max(2000),
 });
 
 export function getSpecialistTools(
@@ -565,7 +592,7 @@ export function getSpecialistTools(
     function: {
       name: "web_search",
       description:
-        "Web検索を実行します。最新の情報・事実確認・複数の情報源からの裏付けが必要な場合に使用してください。検索クエリは具体的で対象を絞ったものにしてください。",
+        "Web検索を実行します。最新の情報・事実確認・複数の情報源からの裏付けが必要な場合に使用してください。検索クエリは具体的で対象を絞ったものにしてください。fetchContent=trueで上位結果のページ本文も取得します。",
       parameters: {
         type: "object",
         properties: {
@@ -575,12 +602,45 @@ export function getSpecialistTools(
             maxLength: 500,
             description: "検索クエリ",
           },
+          fetchContent: {
+            type: "boolean",
+            description:
+              "trueの場合、上位結果のページ本文も取得します。重要そうなページの本文をまとめて読みたい場合に指定してください。",
+          },
         },
         required: ["query"],
         additionalProperties: false,
       },
     },
   });
+  tools.push({
+    type: "function",
+    function: {
+      name: "fetch_page",
+      description:
+        "指定URLのWebページを取得し、本文テキストを抽出します。検索結果で見つけた重要なページを詳しく読みたい場合に使用してください。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            minLength: 1,
+            maxLength: 2000,
+            description: "取得対象のURL (http/https)",
+          },
+        },
+        required: ["url"],
+        additionalProperties: false,
+      },
+    },
+  });
+
+  // Memory tools: always available for the LLM to manage its own knowledge
+  tools.push(...getMemoryToolDefinitions());
+
+  // Form interaction tools: analyze and fill web forms for information gathering
+  tools.push(...getFormToolDefinitions());
+
   return tools;
 }
 
@@ -725,7 +785,7 @@ export async function executeSpecialistTool(
     }
     if (call.name === "web_search") {
       const args = parseToolArgs(webSearchArgs, call.arguments);
-      const { searchWeb } = await import("./web-search");
+      const { searchWeb, fetchPageText } = await import("./web-search");
       const results = await searchWeb(args.query, context.signal);
       if (results.length === 0) {
         return {
@@ -735,19 +795,81 @@ export async function executeSpecialistTool(
           text: "",
         };
       }
-      const formatted = results
-        .slice(0, 5)
-        .map(
-          (r, i) =>
-            `[${i + 1}] ${r.title}\n    URL: ${r.url}\n    概要: ${r.snippet}`,
-        )
-        .join("\n\n");
+      const top = results.slice(0, 5);
+      const sources = top.map((r) => ({
+        title: r.title,
+        url: r.url,
+        publishedAt: null as string | null,
+      }));
+      const snippetLines = top.map(
+        (r, i) =>
+          `[${i + 1}] ${r.title}\n    URL: ${r.url}\n    概要: ${r.snippet}`,
+      );
+      if (args.fetchContent) {
+        const pages = await Promise.all(
+          top.map((r) => fetchPageText(r.url, context.signal)),
+        );
+        const contentBlocks: string[] = [];
+        pages.forEach((page, i) => {
+          if (page) {
+            sources[i].publishedAt = page.publishedAt ?? null;
+            contentBlocks.push(
+              `[${i + 1}] ${page.title || top[i].title}\n    URL: ${top[i].url}\n    概要: ${top[i].snippet}\n    本文:\n${page.text}`,
+            );
+          } else {
+            contentBlocks.push(snippetLines[i]);
+          }
+        });
+        return {
+          ok: true,
+          capability: "web-search",
+          summary: `Web検索で${results.length}件の結果を取得し、${contentBlocks.filter((b) => b.includes("本文:")).length}件のページ本文を取得しました。`,
+          text: contentBlocks.join("\n\n"),
+          sources,
+        };
+      }
       return {
         ok: true,
         capability: "web-search",
         summary: `Web検索で${results.length}件の結果を取得しました。`,
-        text: formatted,
+        text: snippetLines.join("\n\n"),
+        sources,
       };
+    }
+    if (call.name === "fetch_page") {
+      const args = parseToolArgs(fetchPageArgs, call.arguments);
+      const { fetchPageText } = await import("./web-search");
+      const page = await fetchPageText(args.url, context.signal);
+      if (!page) {
+        return {
+          ok: true,
+          capability: "fetch-page",
+          summary:
+            "ページを取得できませんでした（タイムアウト・アクセス拒否・ボット対策など）。",
+          text: "",
+        };
+      }
+      return {
+        ok: true,
+        capability: "fetch-page",
+        summary: `ページ「${page.title}」を取得しました。`,
+        text: `タイトル: ${page.title}\nURL: ${args.url}${page.publishedAt ? `\n公開日: ${page.publishedAt}` : ""}\n本文:\n${page.text}`,
+        sources: [
+          {
+            title: page.title,
+            url: args.url,
+            publishedAt: page.publishedAt ?? null,
+          },
+        ],
+      };
+    }
+    // Memory tools: delegate to the memory tools module
+    if (isMemoryTool(call.name)) {
+      return executeMemoryTool(call);
+    }
+    // Form tools: delegate to the form tools module
+    if (isFormTool(call.name)) {
+      return executeFormTool(call);
     }
     throw new Error("許可されていない専門能力です");
   } catch (error) {
@@ -762,7 +884,9 @@ export async function executeSpecialistTool(
               ? "audio-synthesis"
               : call.name === "web_search"
                 ? "web-search"
-                : "image-generate",
+                : call.name === "fetch_page"
+                  ? "fetch-page"
+                  : "image-generate",
       summary:
         error instanceof Error ? error.message : "専門能力の実行に失敗しました",
     };

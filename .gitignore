@@ -53,5 +53,8 @@ Thumbs.db
 .cache/
 .local/
 
+# LLM memory store (runtime SQLite database)
+data/llm-memory/
+
 # generated test bundles
 .ssrf-test-bundle.mjs

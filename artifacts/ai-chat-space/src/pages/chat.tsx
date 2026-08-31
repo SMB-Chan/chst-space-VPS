@@ -75,6 +75,7 @@ async function streamMessage(
     message?: string;
   }) => void,
   onSearchWarning: (message: string) => void,
+  onResearchStep: (step: { step: number; maxSteps: number }) => void,
   onSources: (
     sources: {
       title: string;
@@ -188,6 +189,15 @@ async function streamMessage(
       if (parsed.status === "searching")
         onStatus("searching", parsed.query as string | undefined);
       if (parsed.status === "fetching") onStatus("fetching");
+      if (parsed.status === "researching") {
+        onStatus("researching");
+        if (
+          typeof parsed.step === "number" &&
+          typeof parsed.maxSteps === "number"
+        ) {
+          onResearchStep({ step: parsed.step, maxSteps: parsed.maxSteps });
+        }
+      }
       if (parsed.status === "reading-images") onStatus("reading-images");
       if (parsed.status === "reading-files") onStatus("reading-files");
       if (parsed.status === "thinking") onStatus("thinking");
@@ -420,6 +430,10 @@ export function ChatPage() {
     message?: string;
   } | null>(null);
   const [searchWarning, setSearchWarning] = useState<string | null>(null);
+  const [researchStep, setResearchStep] = useState<{
+    step: number;
+    maxSteps: number;
+  } | null>(null);
   const [activeSkills, setActiveSkills] = useState<
     { id: string; label: string }[]
   >([]);
@@ -454,6 +468,7 @@ export function ChatPage() {
     abortRef.current = null;
     setIsStreaming(false);
     setSearchStatus(null);
+    setResearchStep(null);
     setSpecialistProgress(null);
     setStreamingAudit("");
     setStreamError(null);
@@ -531,6 +546,7 @@ export function ChatPage() {
     setOptimisticUserMessage(null);
     setStreamError(null);
     setSearchStatus(null);
+    setResearchStep(null);
     setSearchWarning(null);
     setActiveSkills([]);
     setStreamingAudit("");
@@ -575,6 +591,7 @@ export function ChatPage() {
       abortRef.current = null;
       setIsStreaming(false);
       setSearchStatus(null);
+      setResearchStep(null);
       setStreamError(
         "応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。",
       );
@@ -849,6 +866,7 @@ export function ChatPage() {
       },
       async () => {
         setSearchStatus(null);
+        setResearchStep(null);
         try {
           if (isPrivate) {
             const now = new Date().toISOString();
@@ -914,6 +932,7 @@ export function ChatPage() {
       (err) => {
         setIsStreaming(false);
         setSearchStatus(null);
+        setResearchStep(null);
         setStreamingSources([]);
         setStreamingArtifacts([]);
         setStreamingFiles([]);
@@ -938,6 +957,9 @@ export function ChatPage() {
       },
       (message) => {
         setSearchWarning(message);
+      },
+      (step) => {
+        setResearchStep(step);
       },
       (sources) => {
         streamSnapshotRef.current.sources = sources;
@@ -1096,20 +1118,23 @@ export function ChatPage() {
                         ? "revising"
                         : searchStatus?.kind === "auditing"
                           ? "auditing"
-                          : searchStatus?.kind === "searching" ||
-                              searchStatus?.kind === "fetching"
-                            ? "searching"
-                            : searchStatus?.kind === "generating-file"
-                              ? "generating-file"
-                              : searchStatus?.kind === "reviewing-layout"
-                                ? "reviewing-layout"
-                                : searchStatus?.kind === "revising-layout"
-                                  ? "revising-layout"
-                                  : streamingContent
-                                    ? "generating"
-                                    : "starting"
+                          : searchStatus?.kind === "researching"
+                            ? "researching"
+                            : searchStatus?.kind === "searching" ||
+                                searchStatus?.kind === "fetching"
+                              ? "searching"
+                              : searchStatus?.kind === "generating-file"
+                                ? "generating-file"
+                                : searchStatus?.kind === "reviewing-layout"
+                                  ? "reviewing-layout"
+                                  : searchStatus?.kind === "revising-layout"
+                                    ? "revising-layout"
+                                    : streamingContent
+                                      ? "generating"
+                                      : "starting"
                 : null
             }
+            researchStep={researchStep}
             streamingAudit={streamingAudit}
             specialistProgress={specialistProgress}
             streamingFiles={streamingFiles}

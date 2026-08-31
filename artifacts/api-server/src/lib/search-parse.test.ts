@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractUrls,
+  inferSearchQuery,
   normalizeExternalHttpUrl,
   parseSearchHtml,
 } from "./search-parse";
@@ -68,5 +69,34 @@ describe("parseSearchHtml", () => {
     const results = parseSearchHtml(html);
     expect(results).toHaveLength(1);
     expect(results[0]?.url).toBe("https://example.com/story");
+  });
+});
+
+describe("inferSearchQuery temporal expressions", () => {
+  it("detects past temporal expressions", () => {
+    expect(inferSearchQuery("去年の流行は何だった？").needed).toBe(true);
+    expect(inferSearchQuery("3年前のデータを見せて").needed).toBe(true);
+    expect(inferSearchQuery("昨年の売上は？").needed).toBe(true);
+    expect(inferSearchQuery("先月のイベント結果").needed).toBe(true);
+    expect(inferSearchQuery("前回の変更以来どうなった？").needed).toBe(true);
+  });
+
+  it("detects future temporal expressions", () => {
+    expect(inferSearchQuery("来年の予定は？").needed).toBe(true);
+    expect(inferSearchQuery("今後の見通しを教えてください").needed).toBe(true);
+    expect(inferSearchQuery("来月のイベント").needed).toBe(true);
+    expect(inferSearchQuery("3年後の予測").needed).toBe(true);
+    expect(inferSearchQuery("次のリリースはいつ？").needed).toBe(true);
+  });
+
+  it("detects temporal span expressions", () => {
+    expect(inferSearchQuery("AI技術の変化について").needed).toBe(true);
+    expect(inferSearchQuery("株価の推移を教えて").needed).toBe(true);
+    expect(inferSearchQuery("去年と今年を比較して").needed).toBe(true);
+  });
+
+  it("does not trigger on non-temporal queries", () => {
+    expect(inferSearchQuery("こんにちは").needed).toBe(false);
+    expect(inferSearchQuery("Pythonでソート怎么写く？").needed).toBe(false);
   });
 });

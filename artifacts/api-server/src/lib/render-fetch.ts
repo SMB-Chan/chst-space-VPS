@@ -237,7 +237,9 @@ export async function isSafeBrowserRequestUrl(
 }
 
 /** Attach interception before any page is created. */
-async function installRequestGuard(context: BrowserContext): Promise<void> {
+export async function installRequestGuard(
+  context: BrowserContext,
+): Promise<void> {
   await context.route("**/*", async (route: Route) => {
     const request = route.request();
     if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
@@ -359,7 +361,7 @@ async function launchBrowser(): Promise<Browser> {
   return browser;
 }
 
-function getBrowser(): Promise<Browser> {
+export function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = launchBrowser();
     browserPromise.catch(() => {

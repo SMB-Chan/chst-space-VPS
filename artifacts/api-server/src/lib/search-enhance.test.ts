@@ -66,8 +66,26 @@ describe("expandSearchQueries", () => {
     expect(variants).toContain("円安 ニュース");
   });
 
-  it("caps variants at 3", () => {
-    expect(expandSearchQueries("テストクエリ").length).toBeLessThanOrEqual(3);
+  it("caps variants at 4", () => {
+    expect(expandSearchQueries("テストクエリ").length).toBeLessThanOrEqual(4);
+  });
+
+  it("adds temporal variants for past queries", () => {
+    const variants = expandSearchQueries("去年の流行");
+    expect(variants).toContain("去年の流行");
+    expect(variants).toContain("去年の流行 結果");
+  });
+
+  it("adds temporal variants for future queries", () => {
+    const variants = expandSearchQueries("来年の予定");
+    expect(variants).toContain("来年の予定");
+    expect(variants).toContain("来年の予定 予想");
+  });
+
+  it("does not add temporal variants for non-temporal queries", () => {
+    const variants = expandSearchQueries("東京 天気");
+    expect(variants).not.toContain("東京 天気 結果");
+    expect(variants).not.toContain("東京 天気 予想");
   });
 });
 

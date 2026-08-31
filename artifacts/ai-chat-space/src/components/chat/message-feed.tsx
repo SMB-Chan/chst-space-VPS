@@ -37,6 +37,7 @@ import { parseAttachmentMessageForDisplay } from "@/lib/attachments";
 export type StreamingPhase =
   | "starting"
   | "searching"
+  | "researching"
   | "reading-images"
   | "reading-files"
   | "thinking"
@@ -123,6 +124,7 @@ interface MessageFeedProps {
   videoJob?: OpenaiVideoJob | null;
   onCancelVideo?: () => void;
   onRegenerate?: () => void;
+  researchStep?: { step: number; maxSteps: number } | null;
 }
 
 function VideoJobCard({
@@ -407,30 +409,40 @@ function FileDownloadButton({
   );
 }
 
-function GenerationBadge({ phase }: { phase: StreamingPhase }) {
+function GenerationBadge({
+  phase,
+  researchStep,
+}: {
+  phase: StreamingPhase;
+  researchStep?: { step: number; maxSteps: number } | null;
+}) {
   if (!phase) return null;
   const label =
     phase === "thinking"
       ? "推論中"
-      : phase === "searching"
-        ? "Webを検索中"
-        : phase === "reading-images"
-          ? "画像を読み取り中"
-          : phase === "reading-files"
-            ? "ファイルを解析中"
-            : phase === "generating-file"
-              ? "ファイルを生成中"
-              : phase === "reviewing-layout"
-                ? "レイアウトを確認中"
-                : phase === "revising-layout"
-                  ? "レイアウトを修正中"
-                  : phase === "generating"
-                    ? "生成中"
-                    : phase === "auditing"
-                      ? "監査中"
-                      : phase === "revising"
-                        ? "最終報告を作成中"
-                        : "準備中";
+      : phase === "researching"
+        ? researchStep
+          ? `情報を収集中 (${researchStep.step}/${researchStep.maxSteps})`
+          : "情報を収集中"
+        : phase === "searching"
+          ? "Webを検索中"
+          : phase === "reading-images"
+            ? "画像を読み取り中"
+            : phase === "reading-files"
+              ? "ファイルを解析中"
+              : phase === "generating-file"
+                ? "ファイルを生成中"
+                : phase === "reviewing-layout"
+                  ? "レイアウトを確認中"
+                  : phase === "revising-layout"
+                    ? "レイアウトを修正中"
+                    : phase === "generating"
+                      ? "生成中"
+                      : phase === "auditing"
+                        ? "監査中"
+                        : phase === "revising"
+                          ? "最終報告を作成中"
+                          : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -457,6 +469,7 @@ export function MessageFeed({
   videoJob = null,
   onCancelVideo,
   onRegenerate,
+  researchStep = null,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -607,7 +620,10 @@ export function MessageFeed({
                 message.id === STREAMING_ASSISTANT_ID &&
                 !displayContent ? (
                   <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
-                    <GenerationBadge phase={streamingPhase} />
+                    <GenerationBadge
+                      phase={streamingPhase}
+                      researchStep={researchStep}
+                    />
                   </div>
                 ) : (
                   <div
@@ -642,7 +658,10 @@ export function MessageFeed({
                   displayContent &&
                   (streamingPhase === "generating" ||
                     streamingPhase === "revising") && (
-                    <GenerationBadge phase={streamingPhase} />
+                    <GenerationBadge
+                      phase={streamingPhase}
+                      researchStep={researchStep}
+                    />
                   )}
 
                 {!isUser &&

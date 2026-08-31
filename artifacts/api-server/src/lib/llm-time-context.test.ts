@@ -25,6 +25,15 @@ describe("LLM JST time context", () => {
     expect(prompt).toContain("今日");
   });
 
+  it("includes temporal reasoning guidance for past and future", () => {
+    const prompt = buildLlmTimeContext(fixedNow);
+    expect(prompt).toContain("去年");
+    expect(prompt).toContain("来年");
+    expect(prompt).toContain("知識のカットオフ");
+    expect(prompt).toContain("現在年: 2026年");
+    expect(prompt).toContain("現在月: 08月");
+  });
+
   it("prepends JST context and removes the legacy UTC-only date prefix", () => {
     const transformed = injectLlmTimeContextIntoBody(
       JSON.stringify({

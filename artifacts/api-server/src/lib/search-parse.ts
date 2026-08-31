@@ -69,7 +69,7 @@ export function stripHtml(html: string): string {
 }
 
 const STRONG_SEARCH_RE =
-  /最新|きょう|今日|昨日|明日|ニュース|天気|気温|株価|為替|円安|円高|選挙|速報|発売|リリース|試合結果|スコア|開場|いまの|今の|現在の|202[5-9]年|\b(today|tonight|latest|breaking|news|weather|price|who won|current|released?)\b/i;
+  /最新|きょう|今日|昨日|明日|ニュース|天気|気温|株価|為替|円安|円高|選挙|速報|発売|リリース|試合結果|スコア|開場|いまの|今の|現在の|202[4-9]年|203\d年|去年|昨年|一昨年|先月|先週|昨年|〜年前|\d+年前|以来|前回|当時|以前|過去|来年|再来年|来月|来週|今後|予定|予測|見通し|次回|\d+年後|将来|変化|推移|比較|変遷|経年|年度|\b(today|tonight|latest|breaking|news|weather|price|who won|current|released?|last year|next year|future|forecast|prediction|since|ago|compared to|over time|trend)\b/i;
 const SMALLTALK_RE =
   /^(こんにちは|おはよう|こんばんは|ありがとう|よろしく|hello|hi|hey)[\s!！。．]*$/i;
 

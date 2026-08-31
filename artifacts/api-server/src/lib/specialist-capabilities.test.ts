@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const fetchPageTextMock = vi.fn();
+const searchWebMock = vi.fn();
+
 const {
   generateAlibabaImageMock,
   transcribeDashScopeAudioMock,
@@ -37,11 +40,17 @@ vi.mock("./audio-transcription", () => ({
   transcribeDashScopeAudio: transcribeDashScopeAudioMock,
 }));
 
+vi.mock("./web-search", () => ({
+  searchWeb: (...args: unknown[]) => searchWebMock(...args),
+  fetchPageText: (...args: unknown[]) => fetchPageTextMock(...args),
+}));
+
 import {
   executeSpecialistTool,
   getAvailableChatModels,
   getCapabilityRegistry,
   getSpecialistTools,
+  isResearchTool,
   resetModelDiscoveryCache,
 } from "./specialist-capabilities";
 
@@ -51,6 +60,8 @@ describe("specialist capability registry", () => {
     vi.stubEnv("DASHSCOPE_API_KEY", "test-regular-chat-credential");
     generateAlibabaImageMock.mockReset();
     transcribeDashScopeAudioMock.mockReset();
+    fetchPageTextMock.mockReset();
+    searchWebMock.mockReset();
     generateAlibabaImageMock.mockResolvedValue([
       {
         buffer: Buffer.from("png"),
@@ -179,6 +190,111 @@ describe("specialist capability registry", () => {
     expect(result.ok).toBe(true);
     expect(result.text).toBe("hello from audio");
     expect(transcribeDashScopeAudioMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes web_search and fetch_page in tool definitions", () => {
+    const tools = getSpecialistTools({});
+    const names = tools.map((tool) => tool.function.name);
+    expect(names).toContain("web_search");
+    expect(names).toContain("fetch_page");
+  });
+
+  it("web_search returns snippets by default", async () => {
+    searchWebMock.mockResolvedValue([
+      { title: "Test Page", url: "https://example.com", snippet: "A test" },
+    ]);
+    const result = await executeSpecialistTool(
+      {
+        id: "call-search",
+        name: "web_search",
+        arguments: JSON.stringify({ query: "test query" }),
+      },
+      {},
+    );
+    expect(result.ok).toBe(true);
+    expect(result.capability).toBe("web-search");
+    expect(result.text).toContain("[1] Test Page");
+    expect(result.text).toContain("概要: A test");
+    expect(result.text).not.toContain("本文:");
+    expect(result.sources).toHaveLength(1);
+    expect(fetchPageTextMock).not.toHaveBeenCalled();
+  });
+
+  it("web_search with fetchContent=true also fetches page bodies", async () => {
+    searchWebMock.mockResolvedValue([
+      { title: "Test Page", url: "https://example.com", snippet: "A test" },
+    ]);
+    fetchPageTextMock.mockResolvedValue({
+      title: "Test Page",
+      text: "Full article content here",
+      publishedAt: "2026-01-15T00:00:00Z",
+    });
+    const result = await executeSpecialistTool(
+      {
+        id: "call-search-fetch",
+        name: "web_search",
+        arguments: JSON.stringify({ query: "test", fetchContent: true }),
+      },
+      {},
+    );
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("本文:");
+    expect(result.text).toContain("Full article content here");
+    expect(result.sources?.[0]?.publishedAt).toBe("2026-01-15T00:00:00Z");
+    expect(fetchPageTextMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetch_page returns page content", async () => {
+    fetchPageTextMock.mockResolvedValue({
+      title: "Article Title",
+      text: "Article body text content",
+      publishedAt: null,
+    });
+    const result = await executeSpecialistTool(
+      {
+        id: "call-fetch",
+        name: "fetch_page",
+        arguments: JSON.stringify({ url: "https://example.com/article" }),
+      },
+      {},
+    );
+    expect(result.ok).toBe(true);
+    expect(result.capability).toBe("fetch-page");
+    expect(result.text).toContain("Article Title");
+    expect(result.text).toContain("Article body text content");
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources?.[0]?.url).toBe("https://example.com/article");
+  });
+
+  it("fetch_page handles failure gracefully", async () => {
+    fetchPageTextMock.mockResolvedValue(null);
+    const result = await executeSpecialistTool(
+      {
+        id: "call-fetch-fail",
+        name: "fetch_page",
+        arguments: JSON.stringify({ url: "https://blocked.example.com" }),
+      },
+      {},
+    );
+    expect(result.ok).toBe(true);
+    expect(result.capability).toBe("fetch-page");
+    expect(result.text).toBe("");
+    expect(result.summary).toContain("取得できませんでした");
+  });
+
+  it("isResearchTool identifies research tools correctly", () => {
+    expect(
+      isResearchTool({ id: "1", name: "web_search", arguments: "{}" }),
+    ).toBe(true);
+    expect(
+      isResearchTool({ id: "2", name: "fetch_page", arguments: "{}" }),
+    ).toBe(true);
+    expect(
+      isResearchTool({ id: "3", name: "generate_image", arguments: "{}" }),
+    ).toBe(false);
+    expect(
+      isResearchTool({ id: "4", name: "synthesize_speech", arguments: "{}" }),
+    ).toBe(false);
   });
 });
 
