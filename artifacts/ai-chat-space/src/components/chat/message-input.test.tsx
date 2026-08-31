@@ -33,6 +33,30 @@ describe("MessageInput (composer)", () => {
     expect(html).not.toContain('data-testid="composer-tools-toggle"');
   });
 
+  it("renders the tools toggle for mobile model selection", () => {
+    const html = renderToStaticMarkup(
+      <MessageInput
+        onSend={() => {}}
+        onSelectModel={() => {}}
+        fileGenerationEnabled={false}
+        videoGenerationEnabled={false}
+      />,
+    );
+    expect(html).toContain('data-testid="composer-tools-toggle"');
+  });
+
+  it("renders the tools toggle when reasoning is the only secondary control", () => {
+    const html = renderToStaticMarkup(
+      <MessageInput
+        onSend={() => {}}
+        onReasoningChange={() => {}}
+        fileGenerationEnabled={false}
+        videoGenerationEnabled={false}
+      />,
+    );
+    expect(html).toContain('data-testid="composer-tools-toggle"');
+  });
+
   it("renders active skills as a subtle indicator", () => {
     const html = renderToStaticMarkup(
       <MessageInput

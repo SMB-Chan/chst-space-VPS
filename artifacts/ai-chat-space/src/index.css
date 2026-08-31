@@ -1,8 +1,8 @@
 @layer theme, base, clerk, components, utilities;
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap');
-@import 'tailwindcss';
-@import '@clerk/themes/shadcn.css';
-@import 'tw-animate-css';
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap");
+@import "tailwindcss";
+@import "@clerk/themes/shadcn.css";
+@import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -106,19 +106,21 @@
   --chart-4: 280 40% 40%;
   --chart-5: 330 40% 40%;
 
-  --app-font-sans: 'Outfit', sans-serif;
-  --app-font-serif: 'Lora', serif;
-  --app-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --app-font-sans: "Outfit", sans-serif;
+  --app-font-serif: "Lora", serif;
+  --app-font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
   --radius: 0.75rem;
 
-  --shadow-2xs: 0px 1px 2px 0px rgba(0,0,0,0.05);
-  --shadow-xs: 0px 1px 3px 0px rgba(0,0,0,0.1);
-  --shadow-sm: 0px 2px 4px 0px rgba(0,0,0,0.1);
-  --shadow: 0px 4px 6px -1px rgba(0,0,0,0.1);
-  --shadow-md: 0px 6px 8px -2px rgba(0,0,0,0.1);
-  --shadow-lg: 0px 10px 15px -3px rgba(0,0,0,0.1);
-  --shadow-xl: 0px 20px 25px -5px rgba(0,0,0,0.1);
-  --shadow-2xl: 0px 25px 50px -12px rgba(0,0,0,0.1);
+  --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
+  --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
+  --shadow-sm: 0px 2px 4px 0px rgba(0, 0, 0, 0.1);
+  --shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0px 6px 8px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0px 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0px 20px 25px -5px rgba(0, 0, 0, 0.1);
+  --shadow-2xl: 0px 25px 50px -12px rgba(0, 0, 0, 0.1);
 
   --tracking-normal: 0em;
   --spacing: 0.25rem;
@@ -129,11 +131,11 @@
   --background: 224 25% 7%;
   --foreground: 220 15% 90%;
   --border: 224 20% 15%;
-  
+
   --card: 224 25% 9%;
   --card-foreground: 220 15% 90%;
   --card-border: 224 20% 15%;
-  
+
   --sidebar: 224 30% 5%;
   --sidebar-foreground: 220 15% 85%;
   --sidebar-border: 224 20% 12%;
@@ -142,29 +144,29 @@
   --sidebar-accent: 224 25% 12%;
   --sidebar-accent-foreground: 35 92% 55%;
   --sidebar-ring: 35 92% 55%;
-  
+
   --popover: 224 25% 9%;
   --popover-foreground: 220 15% 90%;
   --popover-border: 224 20% 15%;
-  
+
   --primary: 35 92% 55%;
   --primary-foreground: 224 30% 10%;
-  
+
   --secondary: 224 20% 14%;
   --secondary-foreground: 220 15% 90%;
-  
+
   --muted: 224 20% 12%;
   --muted-foreground: 220 15% 60%;
-  
+
   --accent: 224 20% 15%;
   --accent-foreground: 35 92% 55%;
-  
+
   --destructive: 0 62% 30%;
   --destructive-foreground: 0 0% 98%;
-  
+
   --input: 224 20% 15%;
   --ring: 35 92% 55%;
-  
+
   --chart-1: 35 92% 55%;
   --chart-2: 200 40% 50%;
   --chart-3: 150 40% 50%;
@@ -179,6 +181,27 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground selection:bg-primary/20 selection:text-primary;
+    min-width: 320px;
+    background-image:
+      radial-gradient(
+        circle at 12% -8%,
+        hsl(var(--primary) / 0.08),
+        transparent 30rem
+      ),
+      radial-gradient(
+        circle at 92% 108%,
+        hsl(200 70% 48% / 0.06),
+        transparent 32rem
+      );
+    background-attachment: fixed;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
@@ -186,14 +209,56 @@
   .glass {
     @apply bg-background/80 backdrop-blur-md border-b border-border;
   }
-  
+
   .glass-card {
     @apply bg-card/80 backdrop-blur-md border border-card-border;
   }
 
+  .ambient-grid {
+    background-image:
+      linear-gradient(hsl(var(--foreground) / 0.025) 1px, transparent 1px),
+      linear-gradient(
+        90deg,
+        hsl(var(--foreground) / 0.025) 1px,
+        transparent 1px
+      );
+    background-size: 32px 32px;
+    mask-image: linear-gradient(to bottom, black, transparent 88%);
+  }
+
+  .surface-panel {
+    @apply border border-border/70 bg-card/75 backdrop-blur-xl;
+    box-shadow:
+      0 1px 0 hsl(var(--foreground) / 0.04) inset,
+      0 18px 60px -32px hsl(224 35% 2% / 0.55);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-rise-in {
+    animation: rise-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
   @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 
   /* Custom scrollbar for webkit */
@@ -209,5 +274,11 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/40;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-rise-in {
+      animation: none;
+    }
   }
 }

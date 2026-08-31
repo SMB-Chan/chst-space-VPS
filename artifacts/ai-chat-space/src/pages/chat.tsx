@@ -1084,8 +1084,8 @@ export function ChatPage() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden flex flex-col">
+    <div className="relative flex h-full flex-col">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {!isPrivate &&
         (invalidConversationId ||
           (conversationLoadError && !optimisticUserMessage && !isStreaming)) ? (
@@ -1101,13 +1101,13 @@ export function ChatPage() {
         ) : !conversationId &&
           !optimisticUserMessage &&
           privateMessages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-2xl mx-auto w-full">
+          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10 text-center sm:px-8">
             <div
               className={cn(
-                "w-16 h-16 rounded-2xl flex items-center justify-center mb-6 shadow-inner border",
+                "relative mb-7 flex h-16 w-16 items-center justify-center rounded-2xl border shadow-xl before:absolute before:inset-0 before:-z-10 before:rounded-[1.5rem] before:blur-2xl",
                 isPrivate
-                  ? "bg-violet-500/10 border-violet-500/30"
-                  : "bg-primary/10 border-primary/20",
+                  ? "bg-violet-500/10 border-violet-500/30 before:bg-violet-500/15"
+                  : "bg-primary/10 border-primary/25 before:bg-primary/20",
               )}
             >
               {isPrivate ? (
@@ -1116,14 +1116,29 @@ export function ChatPage() {
                 <Sparkles className="w-8 h-8 text-primary" />
               )}
             </div>
-            <h2 className="text-3xl font-serif font-medium mb-3 text-foreground tracking-tight">
+            <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/70">
+              {isPrivate ? "Ephemeral workspace" : "Ready when you are"}
+            </div>
+            <h2 className="text-balance mb-3 font-serif text-3xl font-medium tracking-[-0.025em] text-foreground sm:text-4xl">
               {isPrivate ? "プライベートセッション" : greeting.title}
             </h2>
-            <p className="text-muted-foreground mb-8 text-lg max-w-md font-sans font-light">
+            <p className="text-balance mb-8 max-w-lg font-sans text-base font-light leading-7 text-muted-foreground sm:text-lg">
               {isPrivate
                 ? "この会話はサーバーに保存されません。タブを閉じると履歴は消えます。"
                 : greeting.subtitle}
             </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
+              {["Webリサーチ", "画像・文書解析", "資料生成", "複数モデル"].map(
+                (capability) => (
+                  <span
+                    key={capability}
+                    className="rounded-full border border-border/70 bg-card/55 px-3 py-1.5 shadow-sm backdrop-blur"
+                  >
+                    {capability}
+                  </span>
+                ),
+              )}
+            </div>
           </div>
         ) : (
           <MessageFeed
@@ -1173,7 +1188,7 @@ export function ChatPage() {
       </div>
 
       {streamError && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+        <div className="mx-auto mb-2 w-full max-w-4xl px-4 md:px-6">
           <div className="flex items-start gap-2 px-4 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
             <span className="flex-1">エラー: {streamError}</span>
             <button
@@ -1188,8 +1203,8 @@ export function ChatPage() {
         </div>
       )}
 
-      <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background to-transparent">
-        <div className="max-w-4xl mx-auto">
+      <div className="bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-8 sm:px-5 md:px-6 md:pb-5 md:pt-10">
+        <div className="mx-auto max-w-4xl">
           <MessageInput
             onSend={handleSend}
             disabled={isStreaming || videoBusy || createConversation.isPending}

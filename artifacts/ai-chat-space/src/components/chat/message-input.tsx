@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Paperclip,
   Send,
   X,
@@ -254,7 +259,6 @@ export function MessageInput({
   const [toolsOpen, setToolsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const toolsRef = useRef<HTMLDivElement>(null);
   const isSendingRef = useRef(false);
 
   useEffect(() => {
@@ -264,18 +268,6 @@ export function MessageInput({
   useEffect(() => {
     if (!videoGenerationEnabled) setVideoMode(null);
   }, [videoGenerationEnabled]);
-
-  // Close tools panel when clicking outside
-  useEffect(() => {
-    if (!toolsOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
-        setToolsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [toolsOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -472,18 +464,27 @@ export function MessageInput({
   const showTranslation = onTranslationModeChange != null;
   const showAudit = onAuditToggle != null;
   const hasTools =
+    showModelSelector ||
+    showReasoning ||
     showTranslation ||
     showAudit ||
     fileGenerationEnabled ||
     videoGenerationEnabled;
+  const activeModes = [
+    translationMode !== "off" ? "翻訳" : null,
+    auditEnabled ? "監査 ON" : null,
+    fileFormat ? `${fileFormat.toUpperCase()} 出力` : null,
+    videoMode ? `${videoMode.toUpperCase()} 動画` : null,
+  ].filter((label): label is string => label !== null);
+  const hasComposerStatus = hasActiveSkills || activeModes.length > 0;
 
   return (
     <div
       className={cn(
-        "relative bg-card rounded-3xl border shadow-md flex flex-col transition-all",
+        "relative flex flex-col rounded-[1.75rem] border bg-card/90 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] backdrop-blur-xl transition-all",
         toolsOpen
-          ? "border-primary/30 ring-1 ring-primary/10"
-          : "border-border focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20",
+          ? "border-primary/35 ring-1 ring-primary/15"
+          : "border-border/80 focus-within:border-primary/45 focus-within:ring-1 focus-within:ring-primary/15",
       )}
       data-testid="composer"
     >
@@ -497,21 +498,33 @@ export function MessageInput({
         multiple
       />
 
-      {/* Skills indicator */}
-      {hasActiveSkills && (
-        <div className="flex items-center gap-2 px-4 pt-3 pb-0">
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-500/80">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/60 animate-pulse" />
-            <span className="uppercase tracking-wider font-medium">スキル</span>
-            {activeSkills.map((skill) => (
-              <span
-                key={skill.id}
-                className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400/90 font-medium"
-              >
-                {skill.label}
+      {/* Active capabilities */}
+      {hasComposerStatus && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3 pb-0">
+          {hasActiveSkills && (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-emerald-500/80">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/70 animate-pulse" />
+              <span className="uppercase tracking-[0.14em] font-semibold">
+                スキル
               </span>
-            ))}
-          </div>
+              {activeSkills.map((skill) => (
+                <span
+                  key={skill.id}
+                  className="max-w-32 truncate rounded-md border border-emerald-500/15 bg-emerald-500/8 px-1.5 py-0.5 font-medium text-emerald-400/90"
+                >
+                  {skill.label}
+                </span>
+              ))}
+            </div>
+          )}
+          {activeModes.map((mode) => (
+            <span
+              key={mode}
+              className="rounded-md border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-medium text-primary/85"
+            >
+              {mode}
+            </span>
+          ))}
         </div>
       )}
 
@@ -589,14 +602,14 @@ export function MessageInput({
             ? `この内容を ${fileFormat.toUpperCase()} で生成...`
             : "メッセージを入力...")
         }
-        className="flex-1 max-h-[200px] min-h-[48px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none placeholder:text-muted-foreground/60 scrollbar-none font-sans leading-relaxed"
+        className="flex-1 max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none placeholder:text-muted-foreground/55 scrollbar-none font-sans leading-relaxed"
         rows={1}
         disabled={disabled || compressing}
         data-testid="composer-textarea"
       />
 
       {/* Bottom toolbar */}
-      <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+      <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
         {/* Left: primary actions */}
         <Button
           type="button"
@@ -620,6 +633,10 @@ export function MessageInput({
           }}
         />
 
+        <span className="hidden pl-1 text-[10px] text-muted-foreground/45 lg:inline">
+          Enterで送信 · Shift + Enterで改行
+        </span>
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -636,259 +653,261 @@ export function MessageInput({
 
         {/* Tools toggle */}
         {hasTools && (
-          <div className="relative" ref={toolsRef}>
-            <button
-              type="button"
-              onClick={() => setToolsOpen((v) => !v)}
-              disabled={disabled || compressing}
-              className={cn(
-                "h-8 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center transition-colors",
-                toolsOpen
-                  ? "text-primary border-primary/40 bg-primary/10"
-                  : "text-muted-foreground border-border/50 hover:text-foreground hover:border-border",
-                (disabled || compressing) && "opacity-50 cursor-not-allowed",
-              )}
-              aria-label="追加ツール"
-              aria-expanded={toolsOpen}
-              data-testid="composer-tools-toggle"
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">ツール</span>
-              <ChevronDown
+          <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                disabled={disabled || compressing}
                 className={cn(
-                  "w-3 h-3 transition-transform",
-                  toolsOpen && "rotate-180",
+                  "h-8 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center transition-colors",
+                  toolsOpen
+                    ? "text-primary border-primary/40 bg-primary/10"
+                    : "text-muted-foreground border-border/50 hover:text-foreground hover:border-border",
+                  (disabled || compressing) && "opacity-50 cursor-not-allowed",
                 )}
-              />
-            </button>
+                aria-label="追加ツール"
+                aria-expanded={toolsOpen}
+                data-testid="composer-tools-toggle"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">ツール</span>
+                <ChevronDown
+                  className={cn(
+                    "w-3 h-3 transition-transform",
+                    toolsOpen && "rotate-180",
+                  )}
+                />
+              </button>
+            </PopoverTrigger>
 
             {/* Tools panel */}
-            {toolsOpen && (
-              <div
-                className="absolute bottom-full right-0 mb-2 w-72 sm:w-80 bg-card border border-border rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-2"
-                data-testid="composer-tools-panel"
-              >
-                <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto scrollbar-none">
-                  {/* Model selector (mobile) */}
-                  {showModelSelector && (
-                    <div className="sm:hidden">
-                      <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                        モデル
-                      </label>
-                      <ModelSelector
-                        selectedModel={selectedModel}
-                        onSelect={onSelectModel!}
-                        disabled={disabled || compressing}
-                      />
-                    </div>
-                  )}
+            <PopoverContent
+              side="top"
+              align="end"
+              sideOffset={10}
+              className="w-72 overflow-hidden rounded-2xl border-border/80 bg-card/95 p-0 shadow-2xl backdrop-blur-xl sm:w-80"
+              data-testid="composer-tools-panel"
+            >
+              <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto scrollbar-none">
+                {/* Model selector (mobile) */}
+                {showModelSelector && (
+                  <div className="sm:hidden">
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                      モデル
+                    </label>
+                    <ModelSelector
+                      selectedModel={selectedModel}
+                      onSelect={onSelectModel!}
+                      disabled={disabled || compressing}
+                    />
+                  </div>
+                )}
 
-                  {/* Reasoning */}
-                  {showReasoning && (
-                    <div>
-                      <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                        推論レベル
-                      </label>
-                      <ReasoningSelector
-                        value={reasoningLevel}
-                        onSelect={onReasoningChange!}
-                        disabled={disabled || compressing}
-                      />
-                    </div>
-                  )}
+                {/* Reasoning */}
+                {showReasoning && (
+                  <div>
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                      推論レベル
+                    </label>
+                    <ReasoningSelector
+                      value={reasoningLevel}
+                      onSelect={onReasoningChange!}
+                      disabled={disabled || compressing}
+                    />
+                  </div>
+                )}
 
-                  {/* Translation */}
-                  {showTranslation && (
-                    <div>
-                      <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                        翻訳
-                      </label>
-                      <TranslationModeSelector
-                        value={translationMode}
-                        onSelect={onTranslationModeChange!}
-                        disabled={disabled || compressing}
-                      />
-                    </div>
-                  )}
+                {/* Translation */}
+                {showTranslation && (
+                  <div>
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                      翻訳
+                    </label>
+                    <TranslationModeSelector
+                      value={translationMode}
+                      onSelect={onTranslationModeChange!}
+                      disabled={disabled || compressing}
+                    />
+                  </div>
+                )}
 
-                  {/* Audit */}
-                  {showAudit && (
-                    <div>
-                      <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                        監査
-                      </label>
+                {/* Audit */}
+                {showAudit && (
+                  <div>
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                      監査
+                    </label>
+                    <button
+                      type="button"
+                      disabled={disabled || compressing}
+                      onClick={onAuditToggle}
+                      className={cn(
+                        "h-8 gap-1.5 px-3 rounded-full text-xs font-medium border inline-flex items-center transition-colors",
+                        auditEnabled
+                          ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
+                          : "text-muted-foreground border-border/50 hover:text-foreground",
+                        (disabled || compressing) &&
+                          "opacity-50 cursor-not-allowed",
+                      )}
+                      title={
+                        auditEnabled && auditModel
+                          ? `監査: ${auditModel}`
+                          : auditEnabled
+                            ? "監査 ON（監査モデルが選択されていません）"
+                            : "監査モード"
+                      }
+                      data-testid="composer-audit-toggle"
+                    >
+                      <Scale className="w-3.5 h-3.5" />
+                      {auditEnabled ? "ON" : "OFF"}
+                      {auditEnabled && auditModel && (
+                        <span className="text-sky-400/60 text-[10px] ml-1">
+                          {auditModel}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* File format */}
+                {fileGenerationEnabled && !videoMode && (
+                  <div>
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                      ファイル出力
+                    </label>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
+                        const active = fileFormat === format;
+                        return (
+                          <button
+                            key={format}
+                            type="button"
+                            onClick={() =>
+                              setFileFormat(active ? null : format)
+                            }
+                            disabled={disabled || compressing}
+                            className={cn(
+                              "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              active
+                                ? "bg-primary/10 border-primary/40 text-primary"
+                                : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
+                              (disabled || compressing) &&
+                                "opacity-50 cursor-not-allowed",
+                            )}
+                            data-testid={`composer-format-${format}`}
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Video generation */}
+                {videoGenerationEnabled && (
+                  <div>
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                      動画生成
+                    </label>
+                    <div className="space-y-2">
                       <button
                         type="button"
+                        onClick={() =>
+                          setVideoMode((current) => (current ? null : "t2v"))
+                        }
                         disabled={disabled || compressing}
-                        onClick={onAuditToggle}
                         className={cn(
-                          "h-8 gap-1.5 px-3 rounded-full text-xs font-medium border inline-flex items-center transition-colors",
-                          auditEnabled
-                            ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
-                            : "text-muted-foreground border-border/50 hover:text-foreground",
+                          "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                          videoMode
+                            ? "bg-violet-500/10 border-violet-500/40 text-violet-300"
+                            : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
                           (disabled || compressing) &&
                             "opacity-50 cursor-not-allowed",
                         )}
-                        title={
-                          auditEnabled && auditModel
-                            ? `監査: ${auditModel}`
-                            : auditEnabled
-                              ? "監査 ON（監査モデルが選択されていません）"
-                              : "監査モード"
-                        }
-                        data-testid="composer-audit-toggle"
+                        data-testid="composer-video-toggle"
                       >
-                        <Scale className="w-3.5 h-3.5" />
-                        {auditEnabled ? "ON" : "OFF"}
-                        {auditEnabled && auditModel && (
-                          <span className="text-sky-400/60 text-[10px] ml-1">
-                            {auditModel}
-                          </span>
-                        )}
+                        <VideoIcon className="w-3.5 h-3.5" />
+                        {videoMode ? videoMode.toUpperCase() : "動画生成"}
                       </button>
+                      {videoMode && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            value={videoMode}
+                            onChange={(event) =>
+                              setVideoMode(event.target.value as VideoMode)
+                            }
+                            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                            aria-label="動画生成モード"
+                          >
+                            <option value="t2v">T2V・テキスト</option>
+                            <option value="i2v">I2V・先頭画像</option>
+                            <option value="r2v">R2V・参照画像</option>
+                          </select>
+                          <select
+                            value={videoDuration}
+                            onChange={(event) =>
+                              setVideoDuration(Number(event.target.value))
+                            }
+                            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                            aria-label="動画の長さ"
+                          >
+                            {[3, 5, 8, 10, 15].map((seconds) => (
+                              <option key={seconds} value={seconds}>
+                                {seconds}秒
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={videoResolution}
+                            onChange={(event) =>
+                              setVideoResolution(
+                                event.target.value as "720P" | "1080P",
+                              )
+                            }
+                            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                            aria-label="動画の解像度"
+                          >
+                            <option value="720P">720P</option>
+                            <option value="1080P">1080P</option>
+                          </select>
+                          <select
+                            value={videoRatio}
+                            disabled={videoMode === "i2v"}
+                            onChange={(event) =>
+                              setVideoRatio(
+                                event.target
+                                  .value as VideoGenerationInput["ratio"],
+                              )
+                            }
+                            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none disabled:opacity-50 focus:border-primary/50"
+                            aria-label="動画の比率"
+                          >
+                            {[
+                              "16:9",
+                              "9:16",
+                              "1:1",
+                              "4:3",
+                              "3:4",
+                              "4:5",
+                              "5:4",
+                              "9:21",
+                              "21:9",
+                            ].map((ratio) => (
+                              <option key={ratio} value={ratio}>
+                                {ratio}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
-                  )}
-
-                  {/* File format */}
-                  {fileGenerationEnabled && !videoMode && (
-                    <div>
-                      <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                        ファイル出力
-                      </label>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
-                          const active = fileFormat === format;
-                          return (
-                            <button
-                              key={format}
-                              type="button"
-                              onClick={() =>
-                                setFileFormat(active ? null : format)
-                              }
-                              disabled={disabled || compressing}
-                              className={cn(
-                                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                                active
-                                  ? "bg-primary/10 border-primary/40 text-primary"
-                                  : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
-                                (disabled || compressing) &&
-                                  "opacity-50 cursor-not-allowed",
-                              )}
-                              data-testid={`composer-format-${format}`}
-                            >
-                              <Icon className="w-3.5 h-3.5" />
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Video generation */}
-                  {videoGenerationEnabled && (
-                    <div>
-                      <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                        動画生成
-                      </label>
-                      <div className="space-y-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setVideoMode((current) => (current ? null : "t2v"))
-                          }
-                          disabled={disabled || compressing}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                            videoMode
-                              ? "bg-violet-500/10 border-violet-500/40 text-violet-300"
-                              : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
-                            (disabled || compressing) &&
-                              "opacity-50 cursor-not-allowed",
-                          )}
-                          data-testid="composer-video-toggle"
-                        >
-                          <VideoIcon className="w-3.5 h-3.5" />
-                          {videoMode ? videoMode.toUpperCase() : "動画生成"}
-                        </button>
-                        {videoMode && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <select
-                              value={videoMode}
-                              onChange={(event) =>
-                                setVideoMode(event.target.value as VideoMode)
-                              }
-                              className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
-                              aria-label="動画生成モード"
-                            >
-                              <option value="t2v">T2V・テキスト</option>
-                              <option value="i2v">I2V・先頭画像</option>
-                              <option value="r2v">R2V・参照画像</option>
-                            </select>
-                            <select
-                              value={videoDuration}
-                              onChange={(event) =>
-                                setVideoDuration(Number(event.target.value))
-                              }
-                              className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
-                              aria-label="動画の長さ"
-                            >
-                              {[3, 5, 8, 10, 15].map((seconds) => (
-                                <option key={seconds} value={seconds}>
-                                  {seconds}秒
-                                </option>
-                              ))}
-                            </select>
-                            <select
-                              value={videoResolution}
-                              onChange={(event) =>
-                                setVideoResolution(
-                                  event.target.value as "720P" | "1080P",
-                                )
-                              }
-                              className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
-                              aria-label="動画の解像度"
-                            >
-                              <option value="720P">720P</option>
-                              <option value="1080P">1080P</option>
-                            </select>
-                            <select
-                              value={videoRatio}
-                              disabled={videoMode === "i2v"}
-                              onChange={(event) =>
-                                setVideoRatio(
-                                  event.target
-                                    .value as VideoGenerationInput["ratio"],
-                                )
-                              }
-                              className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none disabled:opacity-50 focus:border-primary/50"
-                              aria-label="動画の比率"
-                            >
-                              {[
-                                "16:9",
-                                "9:16",
-                                "1:1",
-                                "4:3",
-                                "3:4",
-                                "4:5",
-                                "5:4",
-                                "9:21",
-                                "21:9",
-                              ].map((ratio) => (
-                                <option key={ratio} value={ratio}>
-                                  {ratio}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </PopoverContent>
+          </Popover>
         )}
 
         {/* Send button */}

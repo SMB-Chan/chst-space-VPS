@@ -14,7 +14,6 @@ import {
 import {
   Loader2,
   Paperclip,
-  Bot,
   ChevronDown,
   FileText,
   Download,
@@ -510,7 +509,7 @@ export function MessageFeed({
         stickToBottomRef.current = atBottom;
         setAwayFromBottom(!atBottom);
       }}
-      className="relative flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 pb-[calc(6rem+env(safe-area-inset-bottom))]"
+      className="relative flex-1 overflow-y-auto px-3 py-5 sm:px-5 md:px-8 md:py-7 pb-[calc(6rem+env(safe-area-inset-bottom))]"
     >
       {awayFromBottom && (
         <button
@@ -523,12 +522,12 @@ export function MessageFeed({
               block: "end",
             });
           }}
-          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs text-foreground shadow-md"
+          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border/80 bg-card/90 px-3 py-1.5 text-xs text-foreground shadow-lg backdrop-blur-xl"
         >
           <ArrowDown className="h-3.5 w-3.5" /> 最新へ戻る
         </button>
       )}
-      <div className="max-w-5xl mx-auto space-y-8 md:space-y-12">
+      <div className="mx-auto max-w-4xl space-y-8 md:space-y-10">
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
@@ -569,13 +568,13 @@ export function MessageFeed({
             <div
               key={message.id}
               className={cn(
-                "flex gap-3 md:gap-6 group",
+                "group flex gap-2.5 sm:gap-3.5 md:gap-4",
                 isUser ? "flex-row-reverse" : "flex-row",
               )}
             >
               <div className="flex-shrink-0 mt-1">
                 {isUser ? (
-                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-primary/20 bg-primary/10 text-primary">
+                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/25 bg-primary/10 text-primary shadow-sm">
                     {user?.imageUrl ? (
                       <AvatarImage src={user.imageUrl} alt="" />
                     ) : null}
@@ -584,9 +583,9 @@ export function MessageFeed({
                     </AvatarFallback>
                   </Avatar>
                 ) : (
-                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-border bg-card">
-                    <AvatarFallback className="bg-transparent text-muted-foreground">
-                      <Bot className="w-5 h-5" />
+                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/20 bg-gradient-to-br from-primary/15 to-sky-500/10 shadow-sm">
+                    <AvatarFallback className="bg-transparent text-primary">
+                      <Sparkles className="w-4 h-4" />
                     </AvatarFallback>
                   </Avatar>
                 )}
@@ -594,12 +593,28 @@ export function MessageFeed({
 
               <div
                 className={cn(
-                  "flex flex-col gap-2 min-w-0",
+                  "flex min-w-0 flex-col gap-2",
                   isUser
-                    ? "items-end max-w-[88%] md:max-w-[70%]"
-                    : "items-start w-full max-w-full md:max-w-[90%]",
+                    ? "items-end max-w-[90%] md:max-w-[72%]"
+                    : "items-start w-full max-w-full md:max-w-[92%]",
                 )}
               >
+                <div
+                  className={cn(
+                    "flex items-center gap-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/65",
+                    isUser && "flex-row-reverse",
+                  )}
+                >
+                  <span>{isUser ? "You" : "AI Space"}</span>
+                  {!isUser && message.modelId ? (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
+                      <span className="normal-case tracking-normal text-muted-foreground/55">
+                        {getModelLabel(message.modelId)}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
                 {isUser && attachments.length > 0 && (
                   <div className="flex flex-wrap justify-end gap-2 max-w-full">
                     {attachments.map((attachment, index) => (
@@ -619,7 +634,7 @@ export function MessageFeed({
                 {!isUser &&
                 message.id === STREAMING_ASSISTANT_ID &&
                 !displayContent ? (
-                  <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
+                  <div className="surface-panel rounded-[1.35rem] rounded-tl-md px-5 py-4">
                     <GenerationBadge
                       phase={streamingPhase}
                       researchStep={researchStep}
@@ -628,10 +643,10 @@ export function MessageFeed({
                 ) : (
                   <div
                     className={cn(
-                      "px-4 py-3 md:px-5 md:py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words [overflow-wrap:anywhere]",
+                      "break-words rounded-[1.35rem] px-4 py-3 text-[15px] leading-relaxed shadow-sm [overflow-wrap:anywhere] md:px-5 md:py-4",
                       isUser
-                        ? "bg-primary text-primary-foreground font-sans font-normal"
-                        : "bg-card border border-border font-serif text-foreground prose-p:leading-loose",
+                        ? "rounded-tr-md bg-primary text-primary-foreground font-sans font-normal shadow-primary/10"
+                        : "surface-panel rounded-tl-md font-serif text-foreground prose-p:leading-loose",
                     )}
                   >
                     {isUser ? (
@@ -774,11 +789,6 @@ export function MessageFeed({
                     </div>
                   )}
 
-                {!isUser && message.modelId && (
-                  <div className="text-[11px] text-muted-foreground/80 px-1 select-none">
-                    {getModelLabel(message.modelId)}
-                  </div>
-                )}
                 {!isUser &&
                   message.id !== STREAMING_ASSISTANT_ID &&
                   displayContent && (
