@@ -11,7 +11,8 @@ import { logger } from "./logger";
 
 const MAX_PROMPT_CHARS = 5_000;
 const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024;
-const MAX_REFERENCE_DATA_URL_CHARS = Math.ceil(MAX_REFERENCE_IMAGE_BYTES * 4 / 3) + 128;
+const MAX_REFERENCE_DATA_URL_CHARS =
+  Math.ceil((MAX_REFERENCE_IMAGE_BYTES * 4) / 3) + 128;
 const MAX_GENERATED_VIDEO_BYTES = 256 * 1024 * 1024;
 const TASK_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
 
@@ -20,22 +21,9 @@ export const ALIBABA_VIDEO_POLL_INTERVAL_MS = 15_000;
 export type AlibabaVideoMode = "t2v" | "i2v" | "r2v";
 export type AlibabaVideoResolution = "720P" | "1080P";
 export type AlibabaVideoRatio =
-  | "16:9"
-  | "9:16"
-  | "1:1"
-  | "4:3"
-  | "3:4"
-  | "4:5"
-  | "5:4"
-  | "9:21"
-  | "21:9";
+  "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "4:5" | "5:4" | "9:21" | "21:9";
 export type AlibabaVideoTaskStatus =
-  | "PENDING"
-  | "RUNNING"
-  | "SUCCEEDED"
-  | "FAILED"
-  | "CANCELED"
-  | "UNKNOWN";
+  "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "UNKNOWN";
 
 export interface AlibabaVideoRequest {
   mode: AlibabaVideoMode;
@@ -101,7 +89,10 @@ function capabilityForMode(
   return `video.${mode}`;
 }
 
-function normalizeVideoModel(mode: AlibabaVideoMode, modelId: string | undefined): string {
+function normalizeVideoModel(
+  mode: AlibabaVideoMode,
+  modelId: string | undefined,
+): string {
   const capability = capabilityForMode(mode);
   const candidate = modelId?.trim() || ALIBABA_CAPABILITY_DEFAULTS[capability];
   if (!candidate || !modelHasAlibabaCapability(candidate, capability)) {
@@ -115,7 +106,10 @@ function normalizeVideoModel(mode: AlibabaVideoMode, modelId: string | undefined
 
 function validateReferenceImage(value: string): void {
   if (value.length > MAX_REFERENCE_DATA_URL_CHARS) {
-    throw new AlibabaVideoError("Reference image is too large", "参照画像が大きすぎます。");
+    throw new AlibabaVideoError(
+      "Reference image is too large",
+      "参照画像が大きすぎます。",
+    );
   }
 
   const dataMatch = value.match(
@@ -124,9 +118,12 @@ function validateReferenceImage(value: string): void {
   if (dataMatch) {
     const encoded = dataMatch[1];
     const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
-    const decodedBytes = Math.floor(encoded.length * 3 / 4) - padding;
+    const decodedBytes = Math.floor((encoded.length * 3) / 4) - padding;
     if (decodedBytes <= 0 || decodedBytes > MAX_REFERENCE_IMAGE_BYTES) {
-      throw new AlibabaVideoError("Reference image is too large", "参照画像が大きすぎます。");
+      throw new AlibabaVideoError(
+        "Reference image is too large",
+        "参照画像が大きすぎます。",
+      );
     }
     return;
   }
@@ -135,7 +132,10 @@ function validateReferenceImage(value: string): void {
   try {
     url = new URL(value);
   } catch {
-    throw new AlibabaVideoError("Invalid reference image URL", "参照画像の形式に対応していません。");
+    throw new AlibabaVideoError(
+      "Invalid reference image URL",
+      "参照画像の形式に対応していません。",
+    );
   }
   const hostname = url.hostname.toLowerCase();
   if (
@@ -164,9 +164,16 @@ function validateRequest(request: AlibabaVideoRequest): {
   watermark: boolean;
 } {
   const prompt = request.prompt.trim();
-  if (!prompt) throw new AlibabaVideoError("Video prompt is empty", "動画の内容を指定してください。");
+  if (!prompt)
+    throw new AlibabaVideoError(
+      "Video prompt is empty",
+      "動画の内容を指定してください。",
+    );
   if (prompt.length > MAX_PROMPT_CHARS) {
-    throw new AlibabaVideoError("Video prompt is too long", "動画生成の指示が長すぎます。");
+    throw new AlibabaVideoError(
+      "Video prompt is too long",
+      "動画生成の指示が長すぎます。",
+    );
   }
 
   const referenceImages = request.referenceImages ?? [];
@@ -174,10 +181,19 @@ function validateRequest(request: AlibabaVideoRequest): {
     throw new AlibabaVideoError("T2V does not accept reference images");
   }
   if (request.mode === "i2v" && referenceImages.length !== 1) {
-    throw new AlibabaVideoError("I2V requires exactly one first-frame image", "先頭フレーム画像を1枚指定してください。");
+    throw new AlibabaVideoError(
+      "I2V requires exactly one first-frame image",
+      "先頭フレーム画像を1枚指定してください。",
+    );
   }
-  if (request.mode === "r2v" && (referenceImages.length < 1 || referenceImages.length > 9)) {
-    throw new AlibabaVideoError("R2V requires 1 to 9 reference images", "参照画像は1〜9枚で指定してください。");
+  if (
+    request.mode === "r2v" &&
+    (referenceImages.length < 1 || referenceImages.length > 9)
+  ) {
+    throw new AlibabaVideoError(
+      "R2V requires 1 to 9 reference images",
+      "参照画像は1〜9枚で指定してください。",
+    );
   }
   referenceImages.forEach(validateReferenceImage);
 
@@ -190,13 +206,21 @@ function validateRequest(request: AlibabaVideoRequest): {
 
   const duration = request.duration ?? 5;
   if (!Number.isSafeInteger(duration) || duration < 3 || duration > 15) {
-    throw new AlibabaVideoError("Invalid video duration", "動画の長さは3〜15秒で指定してください。");
+    throw new AlibabaVideoError(
+      "Invalid video duration",
+      "動画の長さは3〜15秒で指定してください。",
+    );
   }
   if (
     request.seed !== undefined &&
-    (!Number.isSafeInteger(request.seed) || request.seed < 0 || request.seed > 2_147_483_647)
+    (!Number.isSafeInteger(request.seed) ||
+      request.seed < 0 ||
+      request.seed > 2_147_483_647)
   ) {
-    throw new AlibabaVideoError("Invalid video seed", "seed の指定が不正です。");
+    throw new AlibabaVideoError(
+      "Invalid video seed",
+      "seed の指定が不正です。",
+    );
   }
 
   return {
@@ -212,7 +236,10 @@ function validateRequest(request: AlibabaVideoRequest): {
 
 function assertValidTaskId(taskId: string): void {
   if (!TASK_ID_PATTERN.test(taskId)) {
-    throw new AlibabaVideoError("Invalid Alibaba video task ID", "動画タスクIDが不正です。");
+    throw new AlibabaVideoError(
+      "Invalid Alibaba video task ID",
+      "動画タスクIDが不正です。",
+    );
   }
 }
 
@@ -229,14 +256,28 @@ function specialistHeaders(
   };
 }
 
-function normalizeTaskPayload(payload: AlibabaVideoApiResponse): AlibabaVideoTask {
+function normalizeTaskPayload(
+  payload: AlibabaVideoApiResponse,
+): AlibabaVideoTask {
   const taskId = payload.output?.task_id;
   const status = payload.output?.task_status;
   if (!taskId || !TASK_ID_PATTERN.test(taskId)) {
     throw new AlibabaVideoError("Alibaba video API returned no valid task ID");
   }
-  if (!status || !["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELED", "UNKNOWN"].includes(status)) {
-    throw new AlibabaVideoError("Alibaba video API returned an invalid task status");
+  if (
+    !status ||
+    ![
+      "PENDING",
+      "RUNNING",
+      "SUCCEEDED",
+      "FAILED",
+      "CANCELED",
+      "UNKNOWN",
+    ].includes(status)
+  ) {
+    throw new AlibabaVideoError(
+      "Alibaba video API returned an invalid task status",
+    );
   }
   return {
     taskId,
@@ -248,20 +289,31 @@ function normalizeTaskPayload(payload: AlibabaVideoApiResponse): AlibabaVideoTas
   };
 }
 
-async function parseApiResponse(response: Response, operation: string): Promise<AlibabaVideoApiResponse> {
+async function parseApiResponse(
+  response: Response,
+  operation: string,
+): Promise<AlibabaVideoApiResponse> {
   let payload: AlibabaVideoApiResponse;
   try {
     payload = (await response.json()) as AlibabaVideoApiResponse;
   } catch (error) {
-    throw new AlibabaVideoError(`Alibaba video ${operation} returned invalid JSON: ${String(error)}`);
+    throw new AlibabaVideoError(
+      `Alibaba video ${operation} returned invalid JSON: ${String(error)}`,
+    );
   }
   if (!response.ok || payload.code) {
     const providerMessage = payload.message || `HTTP ${response.status}`;
     logger.warn(
-      { operation, status: response.status, code: payload.code, providerMessage },
+      {
+        component: "alibaba-video",
+        errorCode: "VIDEO_PROVIDER_REQUEST_FAILED",
+        status: response.status,
+      },
       "Alibaba video API request failed",
     );
-    throw new AlibabaVideoError(`Alibaba video ${operation} failed: ${providerMessage}`);
+    throw new AlibabaVideoError(
+      `Alibaba video ${operation} failed: ${providerMessage}`,
+    );
   }
   return payload;
 }
@@ -286,7 +338,10 @@ export async function submitAlibabaVideoTask(
   const mediaType = request.mode === "i2v" ? "first_frame" : "reference_image";
   const input: Record<string, unknown> = { prompt: validated.prompt };
   if (validated.referenceImages.length > 0) {
-    input.media = validated.referenceImages.map((url) => ({ type: mediaType, url }));
+    input.media = validated.referenceImages.map((url) => ({
+      type: mediaType,
+      url,
+    }));
   }
   const parameters: Record<string, unknown> = {
     resolution: validated.resolution,
@@ -306,9 +361,16 @@ export async function submitAlibabaVideoTask(
     body: JSON.stringify({ model: validated.modelId, input, parameters }),
     signal: request.signal,
   });
-  const task = normalizeTaskPayload(await parseApiResponse(response, "submission"));
+  const task = normalizeTaskPayload(
+    await parseApiResponse(response, "submission"),
+  );
   logger.info(
-    { modelId: validated.modelId, mode: request.mode, taskId: task.taskId, requestId: task.requestId },
+    {
+      modelId: validated.modelId,
+      mode: request.mode,
+      taskId: task.taskId,
+      requestId: task.requestId,
+    },
     "Alibaba video task submitted",
   );
   return { ...task, modelId: validated.modelId };
@@ -337,7 +399,10 @@ export async function cancelAlibabaVideoTask(
 ): Promise<AlibabaVideoTask> {
   assertValidTaskId(taskId);
   const specialist = requireSpecialistConfig(env);
-  const endpoint = resolveAlibabaSpecialistHttpUrl(`tasks/${taskId}/cancel`, env);
+  const endpoint = resolveAlibabaSpecialistHttpUrl(
+    `tasks/${taskId}/cancel`,
+    env,
+  );
   const response = await fetch(endpoint, {
     method: "POST",
     headers: specialistHeaders(specialist.apiKey, specialist.workspaceId),
@@ -412,13 +477,28 @@ export async function downloadAlibabaVideoResult(
     throw new AlibabaVideoError("Alibaba video task has no completed result");
   }
   const url = trustedGeneratedVideoUrl(task.videoUrl);
-  const response = await fetch(url, { signal: options.signal, redirect: "error" });
+  const response = await fetch(url, {
+    signal: options.signal,
+    redirect: "error",
+  });
   if (!response.ok) {
-    throw new AlibabaVideoError(`Failed to download generated video: HTTP ${response.status}`);
+    throw new AlibabaVideoError(
+      `Failed to download generated video: HTTP ${response.status}`,
+    );
   }
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType && contentType !== "video/mp4" && contentType !== "application/octet-stream") {
-    throw new AlibabaVideoError(`Unexpected generated video content-type: ${contentType}`);
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (
+    contentType &&
+    contentType !== "video/mp4" &&
+    contentType !== "application/octet-stream"
+  ) {
+    throw new AlibabaVideoError(
+      `Unexpected generated video content-type: ${contentType}`,
+    );
   }
   const buffer = await readBoundedVideo(response);
   if (!looksLikeMp4(buffer)) {

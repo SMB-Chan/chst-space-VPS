@@ -2,16 +2,15 @@ import { spawn } from "child_process";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import type { FileFormat, GeneratedFile } from "./file-generation";
-import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
+import { elapsedMs } from "./file-diagnostics";
 
 export interface PreviewOptions {
   /** Maximum number of pages/slides to render. */
   maxPages?: number;
   diagnosticContext?: {
     requestId?: string;
-    conversationId?: number;
     attempt?: number;
     iteration?: number;
   };
@@ -38,7 +37,9 @@ export class ExternalCommandError extends Error {
   }) {
     const stderr = (args.stderr?.trim() || "(no stderr)").slice(0, 8_000);
     const exitDescription =
-      args.exitCode === null ? "failed to start" : `exited with ${args.exitCode}`;
+      args.exitCode === null
+        ? "failed to start"
+        : `exited with ${args.exitCode}`;
     super(`${args.command} ${exitDescription}: ${stderr}`, {
       cause: args.cause,
     });
@@ -281,12 +282,7 @@ export async function previewGeneratedFile(
     return images;
   } catch (error) {
     logger.warn(
-      {
-        ...diagnosticContext,
-        stage,
-        elapsedMs: elapsedMs(stageStartedAt),
-        error: getFileGenerationErrorDetails(error),
-      },
+      safeFailureFields(error, "file-preview", "FILE_PREVIEW_STAGE_FAILED"),
       "File layout preview stage failed",
     );
     throw error;

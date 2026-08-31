@@ -10,7 +10,7 @@ import {
   closeBrowserEgressProxy,
   getBrowserEgressProxy,
 } from "./browser-egress-proxy";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import { assertSafeUrl } from "./ssrf-guard";
 
 /**
@@ -204,7 +204,9 @@ function releaseBrowserSlot(): void {
  * guard remains an earlier defense that blocks unsafe requests before they
  * reach the proxy at all.
  */
-export async function isSafeBrowserRequestUrl(rawUrl: string): Promise<boolean> {
+export async function isSafeBrowserRequestUrl(
+  rawUrl: string,
+): Promise<boolean> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -213,7 +215,11 @@ export async function isSafeBrowserRequestUrl(rawUrl: string): Promise<boolean> 
   }
 
   // Internal, non-network document URLs do not open a socket themselves.
-  if (url.protocol === "about:" || url.protocol === "data:" || url.protocol === "blob:") {
+  if (
+    url.protocol === "about:" ||
+    url.protocol === "data:" ||
+    url.protocol === "blob:"
+  ) {
     return true;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
@@ -242,14 +248,20 @@ async function installRequestGuard(context: BrowserContext): Promise<void> {
       await route.continue();
       return;
     }
-    logger.warn({ url: request.url() }, "Blocked browser request (SSRF guard)");
+    logger.warn(
+      { component: "render-fetch", errorCode: "BROWSER_REQUEST_BLOCKED" },
+      "Blocked browser request (SSRF guard)",
+    );
     await route.abort("blockedbyclient");
   });
 
   // Page extraction never needs a persistent socket. Blocking all WebSockets
   // prevents ws:// / wss:// from becoming a second, unvalidated network path.
   await context.routeWebSocket("**/*", async (socket) => {
-    logger.debug({ url: socket.url() }, "Blocked browser WebSocket");
+    logger.debug(
+      { component: "render-fetch", eventCode: "BROWSER_WEBSOCKET_BLOCKED" },
+      "Blocked browser WebSocket",
+    );
     await socket.close({ code: 1008, reason: "Network policy" });
   });
 }
@@ -276,12 +288,20 @@ export function resolveSystemChromiumExecutable(
       accessSync(explicit, fsConstants.X_OK);
       return explicit;
     } catch {
-      logger.warn({ executablePath: explicit }, "Configured Chromium executable is unavailable");
+      logger.warn(
+        { executablePath: explicit },
+        "Configured Chromium executable is unavailable",
+      );
     }
   }
 
   const pathEntries = (env.PATH ?? "").split(":").filter(Boolean);
-  const names = ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"];
+  const names = [
+    "chromium",
+    "chromium-browser",
+    "google-chrome-stable",
+    "google-chrome",
+  ];
   for (const directory of pathEntries) {
     for (const name of names) {
       const candidate = join(directory, name);
@@ -326,7 +346,10 @@ async function launchBrowser(): Promise<Browser> {
     if (observedPromise) {
       void observedPromise
         .then((currentBrowser) => {
-          if (currentBrowser === browser && browserPromise === observedPromise) {
+          if (
+            currentBrowser === browser &&
+            browserPromise === observedPromise
+          ) {
             browserPromise = null;
           }
         })
@@ -373,7 +396,10 @@ async function createContext(deadlineAtMs: number): Promise<BrowserContext> {
       );
     } catch (err) {
       lastErr = err;
-      logger.warn({ err, attempt }, "Browser context creation failed; resetting browser");
+      logger.warn(
+        safeFailureFields(err, "render-fetch", "BROWSER_CONTEXT_CREATE_FAILED"),
+        "Browser context creation failed; resetting browser",
+      );
       discardBrowser();
       if (err instanceof BrowserDeadlineExceededError) throw err;
     }
@@ -395,7 +421,9 @@ async function closeContextBounded(context: BrowserContext): Promise<void> {
   ]);
   if (timer) clearTimeout(timer);
   if (!closed) {
-    logger.warn("Browser context cleanup exceeded tolerance; resetting browser");
+    logger.warn(
+      "Browser context cleanup exceeded tolerance; resetting browser",
+    );
     discardBrowser();
   }
 }
@@ -420,7 +448,13 @@ export async function fetchWithBrowser(
     slotAcquired = await acquireBrowserSlot(deadlineAtMs);
     if (!slotAcquired) {
       browserMetrics.failures += 1;
-      logger.warn({ url }, "Browser fetch deadline exceeded while waiting for a slot");
+      logger.warn(
+        {
+          component: "render-fetch",
+          errorCode: "BROWSER_SLOT_DEADLINE_EXCEEDED",
+        },
+        "Browser fetch deadline exceeded while waiting for a slot",
+      );
       return null;
     }
 
@@ -429,11 +463,18 @@ export async function fetchWithBrowser(
     } catch (err) {
       if (err instanceof BrowserDeadlineExceededError) {
         browserMetrics.failures += 1;
-        logger.warn({ err, url }, "Browser fetch deadline exceeded before navigation");
+        logger.warn(
+          safeFailureFields(
+            err,
+            "render-fetch",
+            "BROWSER_NAVIGATION_DEADLINE_EXCEEDED",
+          ),
+          "Browser fetch deadline exceeded before navigation",
+        );
       } else {
         browserMetrics.unavailable += 1;
         logger.warn(
-          { err },
+          safeFailureFields(err, "render-fetch", "BROWSER_UNAVAILABLE"),
           "Playwright browser unavailable; skipping browser fallback",
         );
       }
@@ -461,7 +502,15 @@ export async function fetchWithBrowser(
       });
       if (!response || !response.ok()) {
         browserMetrics.failures += 1;
-        logger.warn({ url, status: response?.status() }, "Browser fetch rejected");
+        logger.warn(
+          safeFailureFields(
+            undefined,
+            "render-fetch",
+            "BROWSER_FETCH_REJECTED",
+            response?.status() ?? 502,
+          ),
+          "Browser fetch rejected",
+        );
         return null;
       }
 
@@ -483,7 +532,8 @@ export async function fetchWithBrowser(
             querySelector(selector: string): { innerText?: string } | null;
             body?: { innerText?: string } | null;
           };
-          const semantic = doc.querySelector("article") ?? doc.querySelector("main");
+          const semantic =
+            doc.querySelector("article") ?? doc.querySelector("main");
           return {
             title: doc.title,
             articleText: semantic?.innerText?.trim() ?? "",
@@ -503,9 +553,19 @@ export async function fetchWithBrowser(
     } catch (err) {
       browserMetrics.failures += 1;
       if (err instanceof BrowserDeadlineExceededError) {
-        logger.warn({ err, url }, "Browser fetch deadline exceeded");
+        logger.warn(
+          safeFailureFields(
+            err,
+            "render-fetch",
+            "BROWSER_FETCH_DEADLINE_EXCEEDED",
+          ),
+          "Browser fetch deadline exceeded",
+        );
       } else {
-        logger.warn({ err, url }, "Browser fetch failed");
+        logger.warn(
+          safeFailureFields(err, "render-fetch", "BROWSER_FETCH_FAILED"),
+          "Browser fetch failed",
+        );
       }
       return null;
     }

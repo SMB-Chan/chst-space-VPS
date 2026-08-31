@@ -1,6 +1,16 @@
-import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from "node:http";
-import { isIP, connect as netConnect, type LookupFunction, type Socket } from "node:net";
-import { logger } from "./logger";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingHttpHeaders,
+  type Server,
+} from "node:http";
+import {
+  isIP,
+  connect as netConnect,
+  type LookupFunction,
+  type Socket,
+} from "node:net";
+import { logger, safeFailureFields } from "./logger";
 import { createSafeDnsLookup, isPrivateAddress } from "./ssrf-guard";
 
 const LISTEN_HOST = "127.0.0.1";
@@ -54,7 +64,8 @@ export function assertAllowedBrowserProxyTarget(hostname: string): void {
   const host = normalizeHostname(hostname);
   if (!host) throw new Error("Blocked empty proxy target");
   if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error(`Blocked private address: ${host}`);
+    if (isPrivateAddress(host))
+      throw new Error(`Blocked private address: ${host}`);
     return;
   }
   if (
@@ -69,7 +80,10 @@ export function assertAllowedBrowserProxyTarget(hostname: string): void {
 
 function isBlockedError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Blocked private address") || message.includes("Blocked host");
+  return (
+    message.includes("Blocked private address") ||
+    message.includes("Blocked host")
+  );
 }
 
 function sanitizeHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
@@ -81,9 +95,16 @@ function sanitizeHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
 }
 
 function failSocket(socket: Socket, status: 400 | 403 | 502): void {
-  const text = status === 403 ? "Forbidden" : status === 502 ? "Bad Gateway" : "Bad Request";
+  const text =
+    status === 403
+      ? "Forbidden"
+      : status === 502
+        ? "Bad Gateway"
+        : "Bad Request";
   if (!socket.destroyed) {
-    socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+    socket.end(
+      `HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+    );
   }
 }
 
@@ -93,7 +114,8 @@ function parseConnectTarget(rawAuthority: string | undefined): {
 } {
   if (!rawAuthority) throw new Error("Missing CONNECT target");
   const target = new URL(`http://${rawAuthority}`);
-  if (target.username || target.password) throw new Error("Blocked CONNECT credentials");
+  if (target.username || target.password)
+    throw new Error("Blocked CONNECT credentials");
   const port = Number(target.port || "443");
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error("Invalid CONNECT port");
@@ -128,13 +150,23 @@ export async function startBrowserEgressProxy(
     try {
       if (!req.url) throw new Error("Missing proxy request URL");
       target = new URL(req.url);
-      if (target.protocol !== "http:") throw new Error("Only HTTP absolute proxy requests are supported");
-      if (target.username || target.password) throw new Error("Blocked proxy URL credentials");
+      if (target.protocol !== "http:")
+        throw new Error("Only HTTP absolute proxy requests are supported");
+      if (target.username || target.password)
+        throw new Error("Blocked proxy URL credentials");
       connectHost = normalizeHostname(target.hostname);
       assertAllowedBrowserProxyTarget(connectHost);
     } catch (error) {
       metrics.blockedTargets += 1;
-      logger.warn({ err: error }, "Blocked browser proxy HTTP target");
+      logger.warn(
+        safeFailureFields(
+          error,
+          "browser-egress-proxy",
+          "HTTP_TARGET_BLOCKED",
+          403,
+        ),
+        "Blocked browser proxy HTTP target",
+      );
       res.statusCode = 403;
       res.end();
       return;
@@ -161,12 +193,19 @@ export async function startBrowserEgressProxy(
       },
     );
 
-    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () => upstream.destroy(new Error("Browser proxy upstream timeout")));
+    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () =>
+      upstream.destroy(new Error("Browser proxy upstream timeout")),
+    );
     upstream.on("error", (error) => {
       if (isBlockedError(error)) metrics.blockedTargets += 1;
       else metrics.upstreamErrors += 1;
       logger.warn(
-        { err: error, hostname: connectHost, port: target.port || "80" },
+        safeFailureFields(
+          error,
+          "browser-egress-proxy",
+          "HTTP_UPSTREAM_FAILED",
+          isBlockedError(error) ? 403 : 502,
+        ),
         "Browser proxy HTTP upstream failed",
       );
       if (!res.headersSent) res.statusCode = isBlockedError(error) ? 403 : 502;
@@ -184,7 +223,15 @@ export async function startBrowserEgressProxy(
       assertAllowedBrowserProxyTarget(target.hostname);
     } catch (error) {
       metrics.blockedTargets += 1;
-      logger.warn({ err: error }, "Blocked browser proxy CONNECT target");
+      logger.warn(
+        safeFailureFields(
+          error,
+          "browser-egress-proxy",
+          "CONNECT_TARGET_BLOCKED",
+          403,
+        ),
+        "Blocked browser proxy CONNECT target",
+      );
       failSocket(clientSocket as Socket, 403);
       return;
     }
@@ -194,7 +241,9 @@ export async function startBrowserEgressProxy(
       port: target.port,
       lookup: safeLookup,
     });
-    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () => upstream.destroy(new Error("Browser proxy CONNECT timeout")));
+    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () =>
+      upstream.destroy(new Error("Browser proxy CONNECT timeout")),
+    );
     upstream.once("connect", () => {
       if (clientSocket.destroyed) {
         upstream.destroy();
@@ -209,7 +258,12 @@ export async function startBrowserEgressProxy(
       if (isBlockedError(error)) metrics.blockedTargets += 1;
       else metrics.upstreamErrors += 1;
       logger.warn(
-        { err: error, hostname: target.hostname, port: target.port },
+        safeFailureFields(
+          error,
+          "browser-egress-proxy",
+          "CONNECT_UPSTREAM_FAILED",
+          isBlockedError(error) ? 403 : 502,
+        ),
         "Browser proxy CONNECT upstream failed",
       );
       failSocket(clientSocket as Socket, isBlockedError(error) ? 403 : 502);
@@ -244,7 +298,10 @@ export async function startBrowserEgressProxy(
     throw new Error("Browser egress proxy did not bind to a TCP port");
   }
   const proxyUrl = `http://${LISTEN_HOST}:${address.port}`;
-  logger.info({ proxyHost: LISTEN_HOST, proxyPort: address.port }, "Browser egress proxy started");
+  logger.info(
+    { proxyHost: LISTEN_HOST, proxyPort: address.port },
+    "Browser egress proxy started",
+  );
 
   return {
     server: proxyUrl,

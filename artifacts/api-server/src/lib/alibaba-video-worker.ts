@@ -11,7 +11,7 @@ import {
   nextAlibabaVideoPollAt,
 } from "./alibaba-video-job-state";
 import { isAlibabaSpecialistConfigured } from "./alibaba-specialist-config";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 
 const WORKER_TICK_MS = 5_000;
 const WORKER_LEASE_MS = 5 * 60_000;
@@ -85,9 +85,11 @@ async function getPool() {
 
 function generatedFileQuotaBytes(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.MAX_USER_GENERATED_FILE_BYTES;
-  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
+  if (raw === undefined || raw.trim() === "")
+    return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0) return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
+  if (!Number.isSafeInteger(value) || value < 0)
+    return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
   return value;
 }
 
@@ -98,7 +100,9 @@ function retryDelayMs(attemptCount: number): number {
 
 function asClaimedJob(row: RawVideoJobRow): ClaimedAlibabaVideoJob {
   if (row.status !== "PENDING" && row.status !== "RUNNING") {
-    throw new Error(`Worker claimed unexpected Alibaba video status: ${row.status}`);
+    throw new Error(
+      `Worker claimed unexpected Alibaba video status: ${row.status}`,
+    );
   }
   return {
     id: row.id,
@@ -175,7 +179,14 @@ async function updateProgress(
          lease_expires_at = NULL,
          updated_at = $3
      WHERE id = $5 AND lease_owner = $6`,
-    [task.status, task.requestId ?? null, new Date(), nextPollAt, job.id, job.leaseOwner],
+    [
+      task.status,
+      task.requestId ?? null,
+      new Date(),
+      nextPollAt,
+      job.id,
+      job.leaseOwner,
+    ],
   );
 }
 
@@ -201,7 +212,14 @@ async function updateTerminalFailure(
          lease_expires_at = NULL,
          updated_at = $4
      WHERE id = $5 AND lease_owner = $6`,
-    [status, code ?? null, message?.slice(0, 2_000) ?? null, now, job.id, job.leaseOwner],
+    [
+      status,
+      code ?? null,
+      message?.slice(0, 2_000) ?? null,
+      now,
+      job.id,
+      job.leaseOwner,
+    ],
   );
 }
 
@@ -244,7 +262,8 @@ async function persistSuccessfulVideo(
        FOR UPDATE`,
       [job.id],
     );
-    const current = locked.rows[0] as { id: number; status: string; lease_owner: string | null } | undefined;
+    const current = locked.rows[0] as
+      { id: number; status: string; lease_owner: string | null } | undefined;
     if (!current || current.lease_owner !== job.leaseOwner) {
       await client.query("ROLLBACK");
       return;
@@ -271,7 +290,10 @@ async function persistSuccessfulVideo(
            ), 0) AS used_bytes`,
         [job.userId],
       );
-      const usedBytes = Number((quotaResult.rows[0] as { used_bytes?: string | number } | undefined)?.used_bytes ?? 0);
+      const usedBytes = Number(
+        (quotaResult.rows[0] as { used_bytes?: string | number } | undefined)
+          ?.used_bytes ?? 0,
+      );
       if (!Number.isFinite(usedBytes) || usedBytes + video.size > quotaBytes) {
         const messageResult = await client.query(
           `INSERT INTO messages (conversation_id, role, content, model_id)
@@ -326,10 +348,10 @@ async function persistSuccessfulVideo(
       ],
     );
     const assetId = (assetResult.rows[0] as { id: number }).id;
-    await client.query(
-      `UPDATE messages SET asset_ids = $1 WHERE id = $2`,
-      [JSON.stringify([assetId]), resultMessageId],
-    );
+    await client.query(`UPDATE messages SET asset_ids = $1 WHERE id = $2`, [
+      JSON.stringify([assetId]),
+      resultMessageId,
+    ]);
     await client.query(
       `UPDATE alibaba_video_jobs
        SET status = 'SUCCEEDED',
@@ -346,7 +368,13 @@ async function persistSuccessfulVideo(
            lease_expires_at = NULL,
            updated_at = NOW()
        WHERE id = $4 AND lease_owner = $5`,
-      [task.requestId ?? video.requestId ?? null, resultMessageId, assetId, job.id, job.leaseOwner],
+      [
+        task.requestId ?? video.requestId ?? null,
+        resultMessageId,
+        assetId,
+        job.id,
+        job.leaseOwner,
+      ],
     );
     await client.query("COMMIT");
   } catch (error) {
@@ -361,7 +389,8 @@ function defaultDependencies(): AlibabaVideoWorkerDependencies {
   return {
     now: () => new Date(),
     fetchTask: (taskId) => getAlibabaVideoTask(taskId),
-    downloadResult: (task, modelId) => downloadAlibabaVideoResult(task, modelId),
+    downloadResult: (task, modelId) =>
+      downloadAlibabaVideoResult(task, modelId),
     recordProgress: updateProgress,
     recordTerminalFailure: updateTerminalFailure,
     recordRetry: updateRetry,
@@ -400,13 +429,25 @@ export async function processAlibabaVideoJob(
   assertAlibabaVideoStatusTransition(job.status, task.status);
   if (task.status === "PENDING" || task.status === "RUNNING") {
     const nextPollAt = nextAlibabaVideoPollAt(task.status, now);
-    if (!nextPollAt) throw new Error("Non-terminal Alibaba video task did not receive a next poll time");
+    if (!nextPollAt)
+      throw new Error(
+        "Non-terminal Alibaba video task did not receive a next poll time",
+      );
     await dependencies.recordProgress(job, task, nextPollAt);
     return;
   }
 
-  if (task.status === "FAILED" || task.status === "CANCELED" || task.status === "UNKNOWN") {
-    await dependencies.recordTerminalFailure(job, task.status, task.code, task.message);
+  if (
+    task.status === "FAILED" ||
+    task.status === "CANCELED" ||
+    task.status === "UNKNOWN"
+  ) {
+    await dependencies.recordTerminalFailure(
+      job,
+      task.status,
+      task.code,
+      task.message,
+    );
     return;
   }
 
@@ -430,8 +471,13 @@ export interface AlibabaVideoWorkerHandle {
 }
 
 export function startAlibabaVideoWorker(): AlibabaVideoWorkerHandle {
-  if (process.env.ALIBABA_VIDEO_WORKER_ENABLED === "0" || !isAlibabaSpecialistConfigured()) {
-    logger.info("Alibaba video worker disabled because specialist credentials are unavailable or worker is disabled");
+  if (
+    process.env.ALIBABA_VIDEO_WORKER_ENABLED === "0" ||
+    !isAlibabaSpecialistConfigured()
+  ) {
+    logger.info(
+      "Alibaba video worker disabled because specialist credentials are unavailable or worker is disabled",
+    );
     return { close: async () => undefined };
   }
 
@@ -445,7 +491,16 @@ export function startAlibabaVideoWorker(): AlibabaVideoWorkerHandle {
       const job = await claimDueJob(new Date());
       if (job) await processAlibabaVideoJob(job);
     })()
-      .catch((error) => logger.error({ error }, "Alibaba video worker tick failed"))
+      .catch((error) =>
+        logger.error(
+          safeFailureFields(
+            error,
+            "alibaba-video-worker",
+            "VIDEO_WORKER_TICK_FAILED",
+          ),
+          "Alibaba video worker tick failed",
+        ),
+      )
       .finally(() => {
         active = undefined;
       });
@@ -455,7 +510,10 @@ export function startAlibabaVideoWorker(): AlibabaVideoWorkerHandle {
   timer = setInterval(() => void tick(), WORKER_TICK_MS);
   timer.unref?.();
   void tick();
-  logger.info({ tickMs: WORKER_TICK_MS, leaseMs: WORKER_LEASE_MS }, "Alibaba video worker started");
+  logger.info(
+    { tickMs: WORKER_TICK_MS, leaseMs: WORKER_LEASE_MS },
+    "Alibaba video worker started",
+  );
 
   return {
     close: async () => {
