@@ -6,7 +6,12 @@ import {
   type FormFieldInfo,
   type FormSafetyResult,
 } from "./form-safety";
-import { fetchWithBrowser } from "./render-fetch";
+import {
+  fetchWithBrowser,
+  getBrowser,
+  getBrowserContextOptions,
+  installRequestGuard,
+} from "./render-fetch";
 import { logger, safeFailureFields } from "./logger";
 
 export interface ExtractedForm {
@@ -40,19 +45,6 @@ export async function extractFormsFromPage(
   url: string,
   timeoutMs = 15_000,
 ): Promise<ExtractedForm[]> {
-  const rendered = await fetchWithBrowser(url, timeoutMs);
-  if (!rendered) {
-    logger.warn(
-      { component: "form-fill", errorCode: "PAGE_FETCH_FAILED" },
-      "Failed to fetch page for form extraction",
-    );
-    return [];
-  }
-
-  // Parse forms from the rendered text
-  // Since we get text from Playwright, we need to use the browser
-  // to extract form elements directly. Let's use a different approach:
-  // use the browser to extract form metadata via page.evaluate.
   return extractFormsViaBrowser(url, timeoutMs);
 }
 
@@ -61,12 +53,8 @@ async function extractFormsViaBrowser(
   timeoutMs: number,
 ): Promise<ExtractedForm[]> {
   try {
-    const { getBrowser, getBrowserContextOptions, installRequestGuard } =
-      await import("./render-fetch");
-    const { getBrowser: _getBrowser } = await import("./render-fetch");
-
     // Use the shared browser infrastructure
-    const browser = await _getBrowser();
+    const browser = await getBrowser();
     const context = await browser.newContext(getBrowserContextOptions());
 
     try {
@@ -109,6 +97,8 @@ async function extractFormsViaBrowser(
             placeholder: string;
             label: string;
             required: boolean;
+            autocomplete: string;
+            maxLength: number | null;
           }[];
           submitText: string;
         }[] = [];
@@ -121,6 +111,8 @@ async function extractFormsViaBrowser(
             placeholder: string;
             label: string;
             required: boolean;
+            autocomplete: string;
+            maxLength: number | null;
           }[] = [];
 
           // Extract input fields
@@ -145,6 +137,8 @@ async function extractFormsViaBrowser(
               placeholder: input.getAttribute("placeholder") ?? "",
               label: label.trim(),
               required: input.required,
+              autocomplete: input.getAttribute("autocomplete") ?? "",
+              maxLength: input.maxLength > 0 ? input.maxLength : null,
             });
           });
 
@@ -177,7 +171,7 @@ async function extractFormsViaBrowser(
         const formInfo: Omit<FormInfo, "safety"> = {
           ...form,
           surroundingText: "",
-        };
+        } as Omit<FormInfo, "safety">;
         const safety = classifyFormSafety(formInfo);
         return { ...form, safety };
       });
@@ -212,9 +206,6 @@ export async function fillAndSubmitForm(
   timeoutMs = 20_000,
 ): Promise<FormFillResult> {
   try {
-    const { getBrowser, getBrowserContextOptions, installRequestGuard } =
-      await import("./render-fetch");
-
     const browser = await getBrowser();
     const context = await browser.newContext(getBrowserContextOptions());
 
@@ -297,6 +288,7 @@ export async function fillAndSubmitForm(
           });
         });
         return {
+          index: formIndex,
           action: form.action || window.location.href,
           method: (form.method || "GET").toUpperCase(),
           fields,

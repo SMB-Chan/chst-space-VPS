@@ -70,6 +70,9 @@ const SPECIALIST_TIMEOUT_MS = 120_000;
 const MAX_RESEARCH_STEPS = 6;
 /** Per-step timeout for a single research tool execution. */
 const RESEARCH_STEP_TIMEOUT_MS = 30_000;
+/** Minimum interval between memory maintenance runs (5 minutes). */
+const MEMORY_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
+let lastMemoryMaintenanceMs = 0;
 
 export function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -371,7 +374,7 @@ export async function streamChatReply(args: {
         content: FILE_GENERATION_SYSTEM_PROMPT,
       });
     }
-    if (!translationMode && !brokerToolCall) {
+    if (!translationMode) {
       workingMessages.push({ role: "system", content: RESEARCH_SYSTEM_PROMPT });
     }
 
@@ -498,8 +501,12 @@ export async function streamChatReply(args: {
             content: memoryPrompt,
           });
         }
-        // Run maintenance periodically (non-blocking)
-        runMemoryMaintenance();
+        // Run maintenance periodically (non-blocking, throttled to every 5 min)
+        const now = Date.now();
+        if (now - lastMemoryMaintenanceMs > MEMORY_MAINTENANCE_INTERVAL_MS) {
+          lastMemoryMaintenanceMs = now;
+          runMemoryMaintenance();
+        }
       } catch {
         // Memory store failures should not break the chat flow
       }

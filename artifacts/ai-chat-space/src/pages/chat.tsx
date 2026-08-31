@@ -332,11 +332,13 @@ async function streamMessage(
 
     while (true) {
       const { done, value } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: !done });
+      }
       if (done) {
         buffer += decoder.decode();
         break;
       }
-      buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
@@ -582,6 +584,15 @@ export function ChatPage() {
     [],
   );
 
+  // Revoke blob URLs when streaming artifacts are cleared (e.g. after done/error)
+  // to prevent memory growth during long sessions.
+  useEffect(() => {
+    if (streamingArtifacts.length === 0) {
+      artifactBlobUrlCache.current.forEach((url) => URL.revokeObjectURL(url));
+      artifactBlobUrlCache.current.clear();
+    }
+  }, [streamingArtifacts]);
+
   // Safety net: if streaming gets stuck for too long, force-reset the input.
   const STREAMING_TIMEOUT_MS = 5 * 60 * 1000;
   useEffect(() => {
@@ -592,6 +603,19 @@ export function ChatPage() {
       setIsStreaming(false);
       setSearchStatus(null);
       setResearchStep(null);
+      setStreamingContent("");
+      setStreamingSources([]);
+      setStreamingArtifacts([]);
+      setStreamingFiles([]);
+      setStreamingAudit("");
+      setSpecialistProgress(null);
+      setOptimisticUserMessage(null);
+      streamSnapshotRef.current = {
+        content: "",
+        sources: [],
+        artifacts: [],
+        audit: "",
+      };
       setStreamError(
         "応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。",
       );
@@ -753,7 +777,11 @@ export function ChatPage() {
       .reverse()
       .find((m) => m.role === "user");
     if (!lastUserMessage) return;
-    void handleSend(lastUserMessage.content);
+    handleSend(lastUserMessage.content).catch((err) => {
+      setStreamError(
+        err instanceof Error ? err.message : "再生成に失敗しました。",
+      );
+    });
   };
 
   // 戻り値: false = 送信ブロック（入力・添付は保持される）

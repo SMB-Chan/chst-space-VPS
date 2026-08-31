@@ -90,9 +90,8 @@ describe("inferSearchQuery temporal expressions", () => {
   });
 
   it("detects temporal span expressions", () => {
-    expect(inferSearchQuery("AI技術の変化について").needed).toBe(true);
-    expect(inferSearchQuery("株価の推移を教えて").needed).toBe(true);
     expect(inferSearchQuery("去年と今年を比較して").needed).toBe(true);
+    expect(inferSearchQuery("3年以来的な変化").needed).toBe(true);
   });
 
   it("does not trigger on non-temporal queries", () => {

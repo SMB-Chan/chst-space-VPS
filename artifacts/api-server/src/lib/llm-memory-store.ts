@@ -65,7 +65,8 @@ const MAX_CONTENT_CHARS = 4000;
 const MAX_TOPIC_CHARS = 200;
 
 function resolveDbPath(): string {
-  const dataDir = join(process.cwd(), "data", "llm-memory");
+  const dataDir =
+    process.env.LLM_MEMORY_DIR ?? join(process.cwd(), "data", "llm-memory");
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
@@ -148,12 +149,19 @@ export function storeMemory(input: StoreMemoryInput): MemoryEntry {
 }
 
 /**
+ * Escape SQL LIKE wildcard characters so they are treated as literals.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
  * Recall memories matching keywords in topic or content.
  * Only returns active (non-superseded, non-expired) memories.
  */
 export function recallMemories(query: string, limit = 10): MemoryEntry[] {
   const db = getDb();
-  const pattern = `%${query}%`;
+  const pattern = `%${escapeLikePattern(query)}%`;
   const rows = db
     .prepare(
       `SELECT * FROM memories
@@ -198,7 +206,8 @@ export function updateMemory(
   if (!existing) return null;
 
   const sets: string[] = [];
-  const values: unknown[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const values: any[] = [];
 
   if (input.topic !== undefined) {
     sets.push("topic = ?");
@@ -289,10 +298,11 @@ export function findRelevantMemories(
   const conditions = keywords
     .slice(0, 5)
     .map(() => "(topic LIKE ? OR content LIKE ? OR tags LIKE ?)");
-  const params = keywords
-    .slice(0, 5)
-    .flatMap((kw) => [`%${kw}%`, `%${kw}%`, `%${kw}%`]);
-  params.push(limit);
+  const params: string[] = keywords.slice(0, 5).flatMap((kw) => {
+    const escaped = escapeLikePattern(kw);
+    return [`%${escaped}%`, `%${escaped}%`, `%${escaped}%`];
+  });
+  params.push(String(limit));
 
   const rows = db
     .prepare(

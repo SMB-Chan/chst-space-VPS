@@ -1,6 +1,7 @@
 import { pool } from "@workspace/db";
 import app from "./app";
 import { closeBrowser } from "./lib/render-fetch";
+import { closeMemoryStore } from "./lib/llm-memory-store";
 import {
   ensureAiUsageSchema,
   ensureAlibabaVideoJobsSchema,
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
       { name: "alibaba-video-worker", close: videoWorker.close },
       { name: "alibaba-realtime-websocket", close: realtimeSocket.close },
       { name: "browser-egress", close: closeBrowser },
+      { name: "llm-memory-store", close: async () => closeMemoryStore() },
       { name: "postgres", close: async () => pool.end() },
     ],
     logger,
