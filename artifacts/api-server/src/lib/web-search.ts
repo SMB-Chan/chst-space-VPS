@@ -1,6 +1,6 @@
 import { Agent, fetch as undiciFetch, type Response as UndiciResponse } from "undici";
 import type OpenAI from "openai";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import { readResponseTextLimited } from "./bounded-body";
 import {
   assertSafeUrl,
@@ -241,7 +241,10 @@ async function fetchViaRenderProxy(url: string, signal?: AbortSignal): Promise<s
       cancel();
     }
   } catch (err) {
-    logger.warn({ err, url }, "Render-proxy fetch failed");
+    logger.warn(
+      safeFailureFields(err, "web-search", "RENDER_PROXY_FETCH_FAILED"),
+      "Render-proxy fetch failed",
+    );
     return null;
   }
 }
@@ -341,7 +344,10 @@ export async function fetchPageText(
     const { response: res, cancel } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS, { signal });
     try {
       if (!res.ok) {
-        logger.warn({ status: res.status, url }, "Page fetch rejected");
+        logger.warn(
+          safeFailureFields(undefined, "web-search", "PAGE_FETCH_REJECTED", res.status),
+          "Page fetch rejected",
+        );
         await discardResponseBody(res);
         // Bot-protection commonly answers with 401/403/429/503; the fallback
         // chain (browser, then proxy) may still be able to read the page.
@@ -368,7 +374,10 @@ export async function fetchPageText(
       if (isBotChallengePage(html)) {
         const fallback = await fetchViaFallbacks(url, signal);
         if (fallback) return fallback;
-        logger.warn({ url }, "Bot challenge page; no usable content");
+        logger.warn(
+          { component: "web-search", errorCode: "BOT_CHALLENGE_PAGE" },
+          "Bot challenge page; no usable content",
+        );
         return null;
       }
 
@@ -397,7 +406,7 @@ export async function fetchPageText(
           };
         }
         logger.warn(
-          { url },
+          { component: "web-search", errorCode: "PAGE_CONTENT_UNREADABLE" },
           "Page content unreadable (JS-rendered or bot-blocked)",
         );
         return null;
@@ -411,7 +420,10 @@ export async function fetchPageText(
       cancel(); // disarm only after body has been fully consumed
     }
   } catch (err) {
-    logger.warn({ err, url }, "Failed to fetch page");
+    logger.warn(
+      safeFailureFields(err, "web-search", "PAGE_FETCH_FAILED"),
+      "Failed to fetch page",
+    );
     return null;
   }
 }
@@ -420,7 +432,10 @@ async function searchWebOnce(url: string, signal?: AbortSignal): Promise<SearchR
   const { response: res, cancel } = await fetchWithTimeout(url, SEARCH_FETCH_TIMEOUT_MS, { signal });
   try {
     if (!res.ok) {
-      logger.warn({ status: res.status, url }, "Search endpoint failed");
+      logger.warn(
+        safeFailureFields(undefined, "web-search", "SEARCH_ENDPOINT_FAILED", res.status),
+        "Search endpoint failed",
+      );
       await discardResponseBody(res);
       return [];
     }
@@ -434,7 +449,10 @@ async function searchWebOnce(url: string, signal?: AbortSignal): Promise<SearchR
 export async function searchWeb(query: string, signal?: AbortSignal): Promise<ScoredSearchResult[]> {
   const cached = getCachedResults(query);
   if (cached) {
-    logger.debug({ query }, "Search cache hit");
+    logger.debug(
+      { component: "web-search", eventCode: "SEARCH_CACHE_HIT" },
+      "Search cache hit",
+    );
     return cached.map((r) => ({ ...r, score: 0 }));
   }
 
@@ -463,7 +481,10 @@ export async function searchWeb(query: string, signal?: AbortSignal): Promise<Sc
       const url = `${base}${encodeURIComponent(q)}`;
       searchCalls.push(
         searchWebOnce(url, signal).catch((err) => {
-          logger.warn({ err, query: q, endpoint: base }, "Web search endpoint error");
+          logger.warn(
+            safeFailureFields(err, "web-search", "SEARCH_ENDPOINT_ERROR"),
+            "Web search endpoint error",
+          );
           return [];
         }),
       );
@@ -568,9 +589,15 @@ export async function decideSearch(
       controller.signal.aborted ||
       (err as Error)?.message?.includes("aborted");
     if (isAbort) {
-      logger.warn({ model }, "Search decision timed out; using heuristic fallback");
+      logger.warn(
+        { component: "web-search", errorCode: "SEARCH_DECISION_TIMEOUT" },
+        "Search decision timed out; using heuristic fallback",
+      );
     } else {
-      logger.warn({ err, model }, "Search decision failed; using heuristic fallback");
+      logger.warn(
+        safeFailureFields(err, "web-search", "SEARCH_DECISION_FAILED"),
+        "Search decision failed; using heuristic fallback",
+      );
     }
     if (inferred.query) {
       return { search: true, query: inferred.query, usedFallback: true };
@@ -654,7 +681,10 @@ export async function decideFollowUpSearch(
     }
     return { search: false, query: "" };
   } catch (err) {
-    logger.warn({ err, model }, "Follow-up search decision failed; skipping");
+    logger.warn(
+      safeFailureFields(err, "web-search", "FOLLOWUP_SEARCH_DECISION_FAILED"),
+      "Follow-up search decision failed; skipping",
+    );
     return { search: false, query: "" };
   } finally {
     clearTimeout(timer);
@@ -711,7 +741,10 @@ export async function buildWebContext(
       parts.push(`【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`);
     } else if (urls[i]) {
       urlFetchFailed = true;
-      logger.warn({ url: urls[i] }, "URL fetch failed; continuing without it");
+      logger.warn(
+        { component: "web-search", errorCode: "USER_URL_FETCH_FAILED" },
+        "URL fetch failed; continuing without it",
+      );
     }
   });
 

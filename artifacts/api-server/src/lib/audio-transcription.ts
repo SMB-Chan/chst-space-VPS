@@ -5,7 +5,7 @@ import {
   isAlibabaSpecialistConfigured,
   isAlibabaTokenPlanKey,
 } from "./alibaba-specialist-config";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 
 /**
  * Speech-to-text for audio attachments. Runs on the providers already
@@ -85,7 +85,10 @@ export async function transcribeDashScopeAudio(args: {
       if (error instanceof AlibabaAsrError && !error.retryable) {
         throw new TranscriptionError(error.publicMessage);
       }
-      logger.warn({ filename: args.filename, error: errorMessage(error) }, "Qwen ASR failed; trying Paraformer fallback");
+    logger.warn(
+      safeFailureFields(error, "audio-transcription", "QWEN_ASR_FAILED"),
+      "Qwen ASR failed; trying Paraformer fallback",
+    );
     }
   }
   const dashscopeKey = process.env.DASHSCOPE_API_KEY?.trim();
@@ -143,7 +146,10 @@ export async function transcribeAudio(args: {
     }
   }
 
-  logger.warn({ failures, filename: args.filename }, "Audio transcription failed on all providers");
+  logger.warn(
+    { component: "audio-transcription", errorCode: "AUDIO_TRANSCRIPTION_FAILED" },
+    "Audio transcription failed on all providers",
+  );
   throw new TranscriptionError(
     "音声の文字起こしに失敗しました。ファイルが破損しているか、文字起こし機能が一時的に利用できません。",
   );

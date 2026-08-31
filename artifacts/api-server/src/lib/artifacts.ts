@@ -77,7 +77,10 @@ export function extractArtifacts(answer: string): {
     const content = body.replace(/^\n+/, "").replace(/\n+$/, "\n");
     const size = Buffer.byteLength(content, "utf8");
     if (size === 0 || size > MAX_ARTIFACT_BYTES) {
-      logger.warn({ filename, size }, "Skipping oversized or empty artifact");
+      logger.warn(
+        { component: "artifact-parser", errorCode: "ARTIFACT_EMPTY_OR_TOO_LARGE" },
+        "Skipping oversized or empty artifact",
+      );
       return "";
     }
     artifacts.push({ filename, mime, content, size });

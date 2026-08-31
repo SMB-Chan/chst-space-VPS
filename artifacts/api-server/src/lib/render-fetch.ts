@@ -10,7 +10,7 @@ import {
   closeBrowserEgressProxy,
   getBrowserEgressProxy,
 } from "./browser-egress-proxy";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import { assertSafeUrl } from "./ssrf-guard";
 
 /**
@@ -242,14 +242,20 @@ async function installRequestGuard(context: BrowserContext): Promise<void> {
       await route.continue();
       return;
     }
-    logger.warn({ url: request.url() }, "Blocked browser request (SSRF guard)");
+    logger.warn(
+      { component: "render-fetch", errorCode: "BROWSER_REQUEST_BLOCKED" },
+      "Blocked browser request (SSRF guard)",
+    );
     await route.abort("blockedbyclient");
   });
 
   // Page extraction never needs a persistent socket. Blocking all WebSockets
   // prevents ws:// / wss:// from becoming a second, unvalidated network path.
   await context.routeWebSocket("**/*", async (socket) => {
-    logger.debug({ url: socket.url() }, "Blocked browser WebSocket");
+    logger.debug(
+      { component: "render-fetch", eventCode: "BROWSER_WEBSOCKET_BLOCKED" },
+      "Blocked browser WebSocket",
+    );
     await socket.close({ code: 1008, reason: "Network policy" });
   });
 }
@@ -373,7 +379,10 @@ async function createContext(deadlineAtMs: number): Promise<BrowserContext> {
       );
     } catch (err) {
       lastErr = err;
-      logger.warn({ err, attempt }, "Browser context creation failed; resetting browser");
+      logger.warn(
+        safeFailureFields(err, "render-fetch", "BROWSER_CONTEXT_CREATE_FAILED"),
+        "Browser context creation failed; resetting browser",
+      );
       discardBrowser();
       if (err instanceof BrowserDeadlineExceededError) throw err;
     }
@@ -420,7 +429,10 @@ export async function fetchWithBrowser(
     slotAcquired = await acquireBrowserSlot(deadlineAtMs);
     if (!slotAcquired) {
       browserMetrics.failures += 1;
-      logger.warn({ url }, "Browser fetch deadline exceeded while waiting for a slot");
+      logger.warn(
+        { component: "render-fetch", errorCode: "BROWSER_SLOT_DEADLINE_EXCEEDED" },
+        "Browser fetch deadline exceeded while waiting for a slot",
+      );
       return null;
     }
 
@@ -429,11 +441,14 @@ export async function fetchWithBrowser(
     } catch (err) {
       if (err instanceof BrowserDeadlineExceededError) {
         browserMetrics.failures += 1;
-        logger.warn({ err, url }, "Browser fetch deadline exceeded before navigation");
+        logger.warn(
+          safeFailureFields(err, "render-fetch", "BROWSER_NAVIGATION_DEADLINE_EXCEEDED"),
+          "Browser fetch deadline exceeded before navigation",
+        );
       } else {
         browserMetrics.unavailable += 1;
         logger.warn(
-          { err },
+          safeFailureFields(err, "render-fetch", "BROWSER_UNAVAILABLE"),
           "Playwright browser unavailable; skipping browser fallback",
         );
       }
@@ -461,7 +476,15 @@ export async function fetchWithBrowser(
       });
       if (!response || !response.ok()) {
         browserMetrics.failures += 1;
-        logger.warn({ url, status: response?.status() }, "Browser fetch rejected");
+        logger.warn(
+          safeFailureFields(
+            undefined,
+            "render-fetch",
+            "BROWSER_FETCH_REJECTED",
+            response?.status() ?? 502,
+          ),
+          "Browser fetch rejected",
+        );
         return null;
       }
 
@@ -503,9 +526,15 @@ export async function fetchWithBrowser(
     } catch (err) {
       browserMetrics.failures += 1;
       if (err instanceof BrowserDeadlineExceededError) {
-        logger.warn({ err, url }, "Browser fetch deadline exceeded");
+        logger.warn(
+          safeFailureFields(err, "render-fetch", "BROWSER_FETCH_DEADLINE_EXCEEDED"),
+          "Browser fetch deadline exceeded",
+        );
       } else {
-        logger.warn({ err, url }, "Browser fetch failed");
+        logger.warn(
+          safeFailureFields(err, "render-fetch", "BROWSER_FETCH_FAILED"),
+          "Browser fetch failed",
+        );
       }
       return null;
     }

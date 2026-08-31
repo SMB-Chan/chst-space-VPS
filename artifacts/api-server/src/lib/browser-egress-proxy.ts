@@ -1,6 +1,6 @@
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from "node:http";
 import { isIP, connect as netConnect, type LookupFunction, type Socket } from "node:net";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import { createSafeDnsLookup, isPrivateAddress } from "./ssrf-guard";
 
 const LISTEN_HOST = "127.0.0.1";
@@ -134,7 +134,10 @@ export async function startBrowserEgressProxy(
       assertAllowedBrowserProxyTarget(connectHost);
     } catch (error) {
       metrics.blockedTargets += 1;
-      logger.warn({ err: error }, "Blocked browser proxy HTTP target");
+      logger.warn(
+        safeFailureFields(error, "browser-egress-proxy", "HTTP_TARGET_BLOCKED", 403),
+        "Blocked browser proxy HTTP target",
+      );
       res.statusCode = 403;
       res.end();
       return;
@@ -166,7 +169,12 @@ export async function startBrowserEgressProxy(
       if (isBlockedError(error)) metrics.blockedTargets += 1;
       else metrics.upstreamErrors += 1;
       logger.warn(
-        { err: error, hostname: connectHost, port: target.port || "80" },
+        safeFailureFields(
+          error,
+          "browser-egress-proxy",
+          "HTTP_UPSTREAM_FAILED",
+          isBlockedError(error) ? 403 : 502,
+        ),
         "Browser proxy HTTP upstream failed",
       );
       if (!res.headersSent) res.statusCode = isBlockedError(error) ? 403 : 502;
@@ -184,7 +192,10 @@ export async function startBrowserEgressProxy(
       assertAllowedBrowserProxyTarget(target.hostname);
     } catch (error) {
       metrics.blockedTargets += 1;
-      logger.warn({ err: error }, "Blocked browser proxy CONNECT target");
+      logger.warn(
+        safeFailureFields(error, "browser-egress-proxy", "CONNECT_TARGET_BLOCKED", 403),
+        "Blocked browser proxy CONNECT target",
+      );
       failSocket(clientSocket as Socket, 403);
       return;
     }
@@ -209,7 +220,12 @@ export async function startBrowserEgressProxy(
       if (isBlockedError(error)) metrics.blockedTargets += 1;
       else metrics.upstreamErrors += 1;
       logger.warn(
-        { err: error, hostname: target.hostname, port: target.port },
+        safeFailureFields(
+          error,
+          "browser-egress-proxy",
+          "CONNECT_UPSTREAM_FAILED",
+          isBlockedError(error) ? 403 : 502,
+        ),
         "Browser proxy CONNECT upstream failed",
       );
       failSocket(clientSocket as Socket, isBlockedError(error) ? 403 : 502);

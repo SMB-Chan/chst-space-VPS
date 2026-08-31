@@ -1,5 +1,5 @@
 import { fetch as undiciFetch } from "undici";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import { readResponseTextLimited } from "./bounded-body";
 import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
 
@@ -269,7 +269,13 @@ async function runProvider(
     }
     return results;
   } catch (err) {
-    logger.warn({ err, provider: provider.name }, "Search API provider failed");
+    logger.warn(
+      {
+        ...safeFailureFields(err, "search-provider", "SEARCH_API_PROVIDER_FAILED"),
+        provider: provider.name,
+      },
+      "Search API provider failed",
+    );
     return [];
   }
 }

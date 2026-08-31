@@ -7,7 +7,7 @@ import {
   getAlibabaSpecialistConfig,
   resolveAlibabaRealtimeWebSocketUrl,
 } from "./alibaba-specialist-config";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 
 const SESSION_TTL_MS = 60_000;
 const MAX_SESSION_MS = 5 * 60_000;
@@ -405,7 +405,10 @@ export function attachAlibabaRealtimeWebSocket(
         },
       });
     } catch (error) {
-      logger.warn({ err: error, modelId: ticket.modelId }, "Failed to create Alibaba realtime WebSocket");
+      logger.warn(
+        safeFailureFields(error, "alibaba-realtime", "REALTIME_WEBSOCKET_CREATE_FAILED"),
+        "Failed to create Alibaba realtime WebSocket",
+      );
       sendJson(client, { type: "error", message: "音声サービスへ接続できませんでした。", retryable: true });
       cleanup();
       return;
@@ -449,7 +452,10 @@ export function attachAlibabaRealtimeWebSocket(
     });
 
     provider.on("error", (error) => {
-      logger.warn({ err: error, modelId: ticket.modelId }, "Alibaba realtime provider socket error");
+      logger.warn(
+        safeFailureFields(error, "alibaba-realtime", "REALTIME_PROVIDER_SOCKET_ERROR"),
+        "Alibaba realtime provider socket error",
+      );
       sendJson(client, { type: "error", message: "音声サービスとの接続に問題が発生しました。", retryable: true });
       finishSession();
     });

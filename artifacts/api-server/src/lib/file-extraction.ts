@@ -10,7 +10,7 @@ import {
   ZipFormatError,
   type ZipDirectoryInfo,
 } from "./binary-detection";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import {
   parseUserMessageContent,
   type BinaryAttachment,
@@ -771,19 +771,17 @@ export async function resolveBinaryAttachments(
         throw signal.reason ?? new Error("Attachment extraction cancelled");
       }
       logger.info(
-        {
-          name: attachment.name,
-          family: attachment.family,
-          elapsedMs: Date.now() - startedAt,
-          extractedChars: text.length,
-        },
+        { component: "file-extraction", eventCode: "BINARY_ATTACHMENT_EXTRACTED" },
         "Binary attachment extracted",
       );
       incoming.push({ kind: "file", name: attachment.name, content: text, isBase64: false });
     } catch (err) {
       if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
       if (err instanceof FileExtractionError || err instanceof TranscriptionError) throw err;
-      logger.warn({ err, name: attachment.name, family: attachment.family }, "Unexpected extraction failure");
+      logger.warn(
+        safeFailureFields(err, "file-extraction", "BINARY_ATTACHMENT_EXTRACTION_FAILED"),
+        "Unexpected extraction failure",
+      );
       throw new FileExtractionError(
         `${attachment.name} の解析に失敗しました。ファイルが破損している可能性があります。`,
       );
