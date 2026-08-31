@@ -12,7 +12,8 @@ const REQUEST_TIMEOUT_MS = 90_000;
 const MAX_LANGUAGE_HINTS = 4;
 const MAX_LANGUAGE_HINT_LENGTH = 16;
 
-export type QwenAudioFormat = "mp3" | "wav" | "m4a" | "ogg" | "flac" | "webm" | "aac" | "amr";
+export type QwenAudioFormat =
+  "mp3" | "wav" | "m4a" | "ogg" | "flac" | "webm" | "aac" | "amr";
 
 export class AlibabaAsrError extends Error {
   readonly publicMessage: string;
@@ -79,14 +80,23 @@ function extensionFormat(filename: string): QwenAudioFormat | undefined {
 }
 
 function detectedFormat(buffer: Buffer): QwenAudioFormat | undefined {
-  if (buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WAVE") {
+  if (
+    buffer.length >= 12 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WAVE"
+  ) {
     return "wav";
   }
-  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "fLaC") return "flac";
-  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "OggS") return "ogg";
-  if (buffer.length >= 4 && buffer.readUInt32BE(0) === 0x1a45dfa3) return "webm";
-  if (buffer.length >= 12 && buffer.toString("ascii", 4, 8) === "ftyp") return "m4a";
-  if (buffer.length >= 6 && buffer.toString("ascii", 0, 6) === "#!AMR\n") return "amr";
+  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "fLaC")
+    return "flac";
+  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "OggS")
+    return "ogg";
+  if (buffer.length >= 4 && buffer.readUInt32BE(0) === 0x1a45dfa3)
+    return "webm";
+  if (buffer.length >= 12 && buffer.toString("ascii", 4, 8) === "ftyp")
+    return "m4a";
+  if (buffer.length >= 6 && buffer.toString("ascii", 0, 6) === "#!AMR\n")
+    return "amr";
   if (
     (buffer.length >= 3 && buffer.toString("ascii", 0, 3) === "ID3") ||
     (buffer.length >= 2 &&
@@ -97,7 +107,8 @@ function detectedFormat(buffer: Buffer): QwenAudioFormat | undefined {
   ) {
     return "mp3";
   }
-  if (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0) return "aac";
+  if (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0)
+    return "aac";
   return undefined;
 }
 
@@ -142,7 +153,9 @@ function wavSampleRate(buffer: Buffer): number | undefined {
     const chunkSize = buffer.readUInt32LE(offset + 4);
     if (chunkId === "fmt " && offset + 16 <= buffer.length) {
       const sampleRate = buffer.readUInt32LE(offset + 12);
-      return sampleRate >= 8_000 && sampleRate <= 192_000 ? sampleRate : undefined;
+      return sampleRate >= 8_000 && sampleRate <= 192_000
+        ? sampleRate
+        : undefined;
     }
     offset += 8 + chunkSize + (chunkSize % 2);
   }
@@ -193,7 +206,8 @@ async function readBoundedResponse(response: Response): Promise<Buffer> {
   }
   if (!response.body) {
     const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > MAX_RESPONSE_BYTES) throw new AlibabaAsrError("Qwen ASR response exceeds size limit");
+    if (body.length > MAX_RESPONSE_BYTES)
+      throw new AlibabaAsrError("Qwen ASR response exceeds size limit");
     return body;
   }
   const reader = response.body.getReader();
@@ -235,7 +249,11 @@ function normalizeLanguageHints(languageHints: string[] | undefined): string[] {
         !/^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/.test(hint),
     )
   ) {
-    throw new AlibabaAsrError("Invalid ASR language hint", "音声認識の言語ヒントが不正です。", false);
+    throw new AlibabaAsrError(
+      "Invalid ASR language hint",
+      "音声認識の言語ヒントが不正です。",
+      false,
+    );
   }
   return [...new Set(normalized)];
 }
@@ -257,15 +275,18 @@ function extractTranscript(payload: unknown): string {
   return typeof outputRecord.text === "string" ? outputRecord.text.trim() : "";
 }
 
-export async function transcribeQwenAudio(args: {
-  buffer: Buffer;
-  filename: string;
-  mime: string;
-  languageHints?: string[];
-  signal?: AbortSignal;
-  /** Used by deterministic tests; production callers let ffprobe inspect the bytes. */
-  durationSeconds?: number;
-}, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+export async function transcribeQwenAudio(
+  args: {
+    buffer: Buffer;
+    filename: string;
+    mime: string;
+    languageHints?: string[];
+    signal?: AbortSignal;
+    /** Used by deterministic tests; production callers let ffprobe inspect the bytes. */
+    durationSeconds?: number;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
   const specialist = getAlibabaSpecialistConfig(env);
   if (!specialist) {
     throw new AlibabaAsrError(
@@ -275,7 +296,11 @@ export async function transcribeQwenAudio(args: {
     );
   }
   if (!Buffer.isBuffer(args.buffer) || args.buffer.length === 0) {
-    throw new AlibabaAsrError("Audio buffer is empty", "音声ファイルが空です。", false);
+    throw new AlibabaAsrError(
+      "Audio buffer is empty",
+      "音声ファイルが空です。",
+      false,
+    );
   }
 
   const format = resolveAudioFormat(args.filename, args.mime, args.buffer);
@@ -308,7 +333,10 @@ export async function transcribeQwenAudio(args: {
 
   const languageHints = normalizeLanguageHints(args.languageHints);
   const controller = new AbortController();
-  const onAbort = () => controller.abort(args.signal?.reason ?? new Error("Audio transcription aborted"));
+  const onAbort = () =>
+    controller.abort(
+      args.signal?.reason ?? new Error("Audio transcription aborted"),
+    );
   if (args.signal?.aborted) onAbort();
   else args.signal?.addEventListener("abort", onAbort, { once: true });
   const timeout = setTimeout(
@@ -332,7 +360,9 @@ export async function transcribeQwenAudio(args: {
         Authorization: `Bearer ${specialist.apiKey}`,
         "Content-Type": "application/json",
         "X-DashScope-SSE": "disable",
-        ...(specialist.workspaceId ? { "X-DashScope-WorkSpace": specialist.workspaceId } : {}),
+        ...(specialist.workspaceId
+          ? { "X-DashScope-WorkSpace": specialist.workspaceId }
+          : {}),
       },
       body: JSON.stringify({
         model: "qwen-audio-3.0-asr-flash",
@@ -340,7 +370,9 @@ export async function transcribeQwenAudio(args: {
           messages: [
             {
               role: "user",
-              content: [{ type: "input_audio", input_audio: { data: dataUrl } }],
+              content: [
+                { type: "input_audio", input_audio: { data: dataUrl } },
+              ],
             },
           ],
         },
@@ -356,7 +388,10 @@ export async function transcribeQwenAudio(args: {
     } catch {
       throw new AlibabaAsrError("Qwen ASR returned invalid JSON");
     }
-    const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+    const record =
+      payload && typeof payload === "object"
+        ? (payload as Record<string, unknown>)
+        : {};
     if (!response.ok || typeof record.code === "string") {
       const providerMessage =
         typeof record.message === "string"
@@ -367,7 +402,11 @@ export async function transcribeQwenAudio(args: {
     const text = extractTranscript(payload);
     if (!text) throw new AlibabaAsrError("Qwen ASR returned no transcript");
     logger.info(
-      { component: "alibaba-asr", provider: "qwen", eventCode: "TRANSCRIPTION_COMPLETED" },
+      {
+        component: "alibaba-asr",
+        provider: "qwen",
+        eventCode: "TRANSCRIPTION_COMPLETED",
+      },
       "Audio transcription completed via Qwen ASR",
     );
     return text;
@@ -375,7 +414,10 @@ export async function transcribeQwenAudio(args: {
     if (args.signal?.aborted) throw args.signal.reason ?? error;
     if (error instanceof AlibabaAsrError) throw error;
     if (controller.signal.aborted) {
-      throw new AlibabaAsrError("Qwen ASR request timed out", "音声認識がタイムアウトしました。");
+      throw new AlibabaAsrError(
+        "Qwen ASR request timed out",
+        "音声認識がタイムアウトしました。",
+      );
     }
     throw new AlibabaAsrError(`Qwen ASR transport failed: ${String(error)}`);
   } finally {

@@ -31,7 +31,8 @@ describe("safe HTTP error observability", () => {
         headers: {
           authorization: secret,
           cookie: `session=${secret}`,
-          traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+          traceparent:
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
         },
       }),
       500,
@@ -75,7 +76,10 @@ describe("safe HTTP error observability", () => {
 
   it("falls back to fixed values for unsafe request IDs and malformed methods", () => {
     const fields = createSafeHttpLogFields(
-      request({ id: "request id with spaces and secrets", method: "get /private" }),
+      request({
+        id: "request id with spaces and secrets",
+        method: "get /private",
+      }),
       500,
       new Error("internal"),
     );
@@ -104,8 +108,12 @@ describe("safe HTTP error observability", () => {
     const req = request();
     const error = new Error("raw message must not be passed to the logger");
 
-    expect(logSafeHttpError(req, 500, error, "HTTP_INTERNAL", target)).toBe(true);
-    expect(logSafeHttpError(req, 500, error, "HTTP_INTERNAL", target)).toBe(false);
+    expect(logSafeHttpError(req, 500, error, "HTTP_INTERNAL", target)).toBe(
+      true,
+    );
+    expect(logSafeHttpError(req, 500, error, "HTTP_INTERNAL", target)).toBe(
+      false,
+    );
 
     expect(target.error).toHaveBeenCalledTimes(1);
     expect(target.error).toHaveBeenCalledWith(
@@ -117,14 +125,19 @@ describe("safe HTTP error observability", () => {
       }),
       "HTTP request failed",
     );
-    expect(JSON.stringify(target.error.mock.calls[0])).not.toContain("raw message");
+    expect(JSON.stringify(target.error.mock.calls[0])).not.toContain(
+      "raw message",
+    );
   });
 
   it("preserves public error mapping while keeping its raw cause out of logs", () => {
-    const error = Object.assign(new Error("select secret_table where token = 'private'"), {
-      status: 413,
-      type: "entity.too.large",
-    });
+    const error = Object.assign(
+      new Error("select secret_table where token = 'private'"),
+      {
+        status: 413,
+        type: "entity.too.large",
+      },
+    );
     const publicError = publicHttpError(error);
 
     expect(publicError).toEqual({
@@ -134,7 +147,9 @@ describe("safe HTTP error observability", () => {
 
     const target = { error: vi.fn() };
     logSafeHttpError(request(), publicError.status, error, undefined, target);
-    expect(JSON.stringify(target.error.mock.calls[0])).not.toContain("select secret_table");
+    expect(JSON.stringify(target.error.mock.calls[0])).not.toContain(
+      "select secret_table",
+    );
     expect(JSON.stringify(target.error.mock.calls[0])).not.toContain("private");
   });
 
@@ -146,7 +161,9 @@ describe("safe HTTP error observability", () => {
 
     expect(safeErrorSerializer(error)).toEqual({ name: "UnknownError" });
     expect(JSON.stringify(safeErrorSerializer(error))).not.toContain(secret);
-    expect(safeErrorSerializer({ error, message: secret, stack: secret })).toEqual({
+    expect(
+      safeErrorSerializer({ error, message: secret, stack: secret }),
+    ).toEqual({
       name: "UnknownError",
     });
   });

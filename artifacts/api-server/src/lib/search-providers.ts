@@ -43,7 +43,10 @@ async function fetchJson(
       await res.body?.cancel().catch(() => undefined);
       throw new Error("Search API returned a non-JSON response");
     }
-    const text = await readResponseTextLimited(res, MAX_PROVIDER_RESPONSE_BYTES);
+    const text = await readResponseTextLimited(
+      res,
+      MAX_PROVIDER_RESPONSE_BYTES,
+    );
     try {
       return JSON.parse(text);
     } catch {
@@ -81,7 +84,11 @@ export function parseBraveResults(json: unknown): SearchResult[] {
   const results = (json as { web?: { results?: unknown[] } })?.web?.results;
   if (!Array.isArray(results)) return [];
   return results.flatMap((raw): SearchResult[] => {
-    const item = raw as { title?: unknown; url?: unknown; description?: unknown };
+    const item = raw as {
+      title?: unknown;
+      url?: unknown;
+      description?: unknown;
+    };
     const result = safeResult(item.title, item.url, item.description);
     return result ? [result] : [];
   });
@@ -265,13 +272,20 @@ async function runProvider(
         "Search API provider used",
       );
     } else {
-      logger.warn({ provider: provider.name }, "Search API returned no results");
+      logger.warn(
+        { provider: provider.name },
+        "Search API returned no results",
+      );
     }
     return results;
   } catch (err) {
     logger.warn(
       {
-        ...safeFailureFields(err, "search-provider", "SEARCH_API_PROVIDER_FAILED"),
+        ...safeFailureFields(
+          err,
+          "search-provider",
+          "SEARCH_API_PROVIDER_FAILED",
+        ),
         provider: provider.name,
       },
       "Search API provider failed",
@@ -296,10 +310,7 @@ export async function searchWithProviders(
   if (providers.length === 0) return [];
 
   const primaryResults = await runProvider(providers[0]!, query);
-  if (
-    providers.length === 1 ||
-    hasSufficientPrimaryCoverage(primaryResults)
-  ) {
+  if (providers.length === 1 || hasSufficientPrimaryCoverage(primaryResults)) {
     return primaryResults.slice(0, MAX_MERGED_API_RESULTS);
   }
 
@@ -312,6 +323,8 @@ export async function searchWithProviders(
   );
 }
 
-export async function searchWithApiProviders(query: string): Promise<SearchResult[]> {
+export async function searchWithApiProviders(
+  query: string,
+): Promise<SearchResult[]> {
   return searchWithProviders(query, getConfiguredApiProviders());
 }

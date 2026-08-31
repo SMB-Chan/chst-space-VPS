@@ -52,15 +52,64 @@ const MAX_XLSX_ROWS = 2000;
 const MAX_XLSX_COLS = 50;
 
 const TEXT_EXTENSIONS = new Set([
-  "txt", "md", "markdown", "csv", "tsv", "json", "xml", "html", "htm", "log",
-  "yaml", "yml", "ini", "toml", "srt", "vtt",
-  "js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "rb", "go", "rs", "java",
-  "c", "h", "cpp", "hpp", "cs", "sh", "css", "sql",
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "json",
+  "xml",
+  "html",
+  "htm",
+  "log",
+  "yaml",
+  "yml",
+  "ini",
+  "toml",
+  "srt",
+  "vtt",
+  "js",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "jsx",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cs",
+  "sh",
+  "css",
+  "sql",
 ]);
 
 const ARCHIVE_EXTENSIONS = new Set([
-  "zip", "7z", "rar", "gz", "tar", "bz2", "xz", "zst", "cab", "iso",
-  "jar", "war", "epub", "apk", "odt", "ods", "odp", "docx", "xlsx", "pptx",
+  "zip",
+  "7z",
+  "rar",
+  "gz",
+  "tar",
+  "bz2",
+  "xz",
+  "zst",
+  "cab",
+  "iso",
+  "jar",
+  "war",
+  "epub",
+  "apk",
+  "odt",
+  "ods",
+  "odp",
+  "docx",
+  "xlsx",
+  "pptx",
 ]);
 
 function capText(text: string, cap: number): string {
@@ -94,26 +143,35 @@ function isSafeZipPath(name: string): boolean {
 }
 
 function decodeXmlEntities(text: string): string {
-  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, body: string) => {
-    if (body.startsWith("#")) {
-      const hex = body[1] === "x" || body[1] === "X";
-      const code = parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
-      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return match;
-      try {
-        return String.fromCodePoint(code);
-      } catch {
-        return match;
+  return text.replace(
+    /&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g,
+    (match, body: string) => {
+      if (body.startsWith("#")) {
+        const hex = body[1] === "x" || body[1] === "X";
+        const code = parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+        if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return match;
+        try {
+          return String.fromCodePoint(code);
+        } catch {
+          return match;
+        }
       }
-    }
-    switch (body) {
-      case "amp": return "&";
-      case "lt": return "<";
-      case "gt": return ">";
-      case "quot": return "\"";
-      case "apos": return "'";
-      default: return match;
-    }
-  });
+      switch (body) {
+        case "amp":
+          return "&";
+        case "lt":
+          return "<";
+        case "gt":
+          return ">";
+        case "quot":
+          return '"';
+        case "apos":
+          return "'";
+        default:
+          return match;
+      }
+    },
+  );
 }
 
 function decodeAsText(bytes: Uint8Array): string | null {
@@ -128,7 +186,9 @@ function assertZipReadable(buffer: Buffer): ZipDirectoryInfo {
     directory = readZipCentralDirectory(buffer);
   } catch (err) {
     if (err instanceof ZipFormatError) {
-      throw new FileExtractionError(`ZIP構造を読み取れませんでした。${err.message}`);
+      throw new FileExtractionError(
+        `ZIP構造を読み取れませんでした。${err.message}`,
+      );
     }
     throw new FileExtractionError("ZIP構造を読み取れませんでした。");
   }
@@ -176,7 +236,10 @@ function streamZipEntries(
       if (err) throw err;
       entryBytes += chunk.length;
       decompressedTotal += chunk.length;
-      if (entryBytes > budget.perEntryBytes || decompressedTotal > budget.totalBytes) {
+      if (
+        entryBytes > budget.perEntryBytes ||
+        decompressedTotal > budget.totalBytes
+      ) {
         aborted = true;
         throw new ZipBudgetExceededError();
       }
@@ -198,10 +261,15 @@ function streamZipEntries(
   unzipper.register(UnzipInflate);
 
   try {
-    unzipper.push(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), true);
+    unzipper.push(
+      new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+      true,
+    );
   } catch (err) {
     if (!(err instanceof ZipBudgetExceededError)) {
-      throw new FileExtractionError("ZIP構造を読み取れませんでした。ファイルが破損している可能性があります。");
+      throw new FileExtractionError(
+        "ZIP構造を読み取れませんでした。ファイルが破損している可能性があります。",
+      );
     }
   }
   return { contents, aborted };
@@ -231,19 +299,27 @@ function assertZipExpandedBudget(buffer: Buffer): ZipDirectoryInfo {
   const { aborted } = streamZipEntries(
     buffer,
     () => true,
-    { perEntryBytes: MAX_ZIP_ENTRY_BYTES, totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED },
+    {
+      perEntryBytes: MAX_ZIP_ENTRY_BYTES,
+      totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED,
+    },
     true,
   );
   if (aborted) throw zipExpandedBudgetError();
   return directory;
 }
 
-type IsolatedExtractionResult = { ok: true; text: string } | {
-  ok: false;
-  message: string;
-};
+type IsolatedExtractionResult =
+  | { ok: true; text: string }
+  | {
+      ok: false;
+      message: string;
+    };
 
-const ISOLATED_WORKER_URL = new URL("./file-extraction-worker.mjs", import.meta.url);
+const ISOLATED_WORKER_URL = new URL(
+  "./file-extraction-worker.mjs",
+  import.meta.url,
+);
 
 function extractionWorkerAvailable(): boolean {
   return existsSync(fileURLToPath(ISOLATED_WORKER_URL));
@@ -259,7 +335,8 @@ export async function runIsolatedBinaryExtraction(
   signal?: AbortSignal,
   workerUrl: URL = ISOLATED_WORKER_URL,
 ): Promise<string> {
-  if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
+  if (signal?.aborted)
+    throw signal.reason ?? new Error("Attachment extraction cancelled");
   if (!extractionWorkerAvailable() && workerUrl === ISOLATED_WORKER_URL) {
     return extractSynchronousBinaryText(attachment);
   }
@@ -278,7 +355,8 @@ export async function runIsolatedBinaryExtraction(
       callback();
     };
     const onAbort = () => {
-      const reason = signal?.reason ?? new Error("Attachment extraction cancelled");
+      const reason =
+        signal?.reason ?? new Error("Attachment extraction cancelled");
       void worker.terminate();
       finish(() => reject(reason));
     };
@@ -323,7 +401,10 @@ export async function runIsolatedBinaryExtraction(
 function isPasswordError(err: unknown): boolean {
   const name = (err as { name?: unknown } | null)?.name;
   const message = err instanceof Error ? err.message : String(err);
-  return name === "PasswordException" || /password|no password|incorrect password/i.test(message);
+  return (
+    name === "PasswordException" ||
+    /password|no password|incorrect password/i.test(message)
+  );
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<string> {
@@ -338,7 +419,9 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
         "このPDFはパスワードで保護されているため読み取れません。パスワードを解除してから添付してください。",
       );
     }
-    throw new FileExtractionError("PDFを読み取れませんでした。ファイルが破損している可能性があります。");
+    throw new FileExtractionError(
+      "PDFを読み取れませんでした。ファイルが破損している可能性があります。",
+    );
   }
 
   let output = "";
@@ -368,11 +451,15 @@ export async function extractDocxText(buffer: Buffer): Promise<string> {
     const result = await mammoth.extractRawText({ buffer });
     value = result.value;
   } catch {
-    throw new FileExtractionError("Wordファイルを読み取れませんでした。ファイルが破損している可能性があります。");
+    throw new FileExtractionError(
+      "Wordファイルを読み取れませんでした。ファイルが破損している可能性があります。",
+    );
   }
   const text = value.trim();
   if (!text) {
-    throw new FileExtractionError("Wordファイルから抽出できるテキストが見つかりませんでした。");
+    throw new FileExtractionError(
+      "Wordファイルから抽出できるテキストが見つかりませんでした。",
+    );
   }
   return capText(text, MAX_EXTRACTED_CHARS);
 }
@@ -386,10 +473,13 @@ export async function extractDocxText(buffer: Buffer): Promise<string> {
 const MAX_XLSX_SHARED_STRINGS = 200_000;
 
 function toCsvCell(value: string): string {
-  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, "\"\"")}"` : value;
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-function xmlAttrFromFragment(fragment: string, name: string): string | undefined {
+function xmlAttrFromFragment(
+  fragment: string,
+  name: string,
+): string | undefined {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = fragment.match(new RegExp(`${escaped}\\s*=\\s*"([^"]*)"`));
   return match ? decodeXmlEntities(match[1]) : undefined;
@@ -409,9 +499,13 @@ function columnRefToIndex(ref: string): number {
 
 function parseXlsxSharedStrings(xml: string): string[] {
   const shared: string[] = [];
-  for (const si of xml.matchAll(/<(?:[A-Za-z0-9]+:)?si\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?si>/g)) {
+  for (const si of xml.matchAll(
+    /<(?:[A-Za-z0-9]+:)?si\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?si>/g,
+  )) {
     let value = "";
-    for (const t of si[1].matchAll(/<(?:[A-Za-z0-9]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?t>/g)) {
+    for (const t of si[1].matchAll(
+      /<(?:[A-Za-z0-9]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?t>/g,
+    )) {
       value += decodeXmlEntities(t[1]);
     }
     shared.push(value);
@@ -428,14 +522,18 @@ function parseXlsxSheetRows(
   let rowLimited = false;
   let colLimited = false;
 
-  for (const row of xml.matchAll(/<(?:[A-Za-z0-9]+:)?row\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?row>/g)) {
+  for (const row of xml.matchAll(
+    /<(?:[A-Za-z0-9]+:)?row\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?row>/g,
+  )) {
     if (rows.length >= MAX_XLSX_ROWS) {
       rowLimited = true;
       break;
     }
     const cells: string[] = [];
     let nextColumn = 0;
-    for (const cell of row[1].matchAll(/<(?:[A-Za-z0-9]+:)?c\b([^>]*)>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?c>/g)) {
+    for (const cell of row[1].matchAll(
+      /<(?:[A-Za-z0-9]+:)?c\b([^>]*)>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?c>/g,
+    )) {
       const attrs = cell[1];
       const inner = cell[2];
       const ref = xmlAttrFromFragment(attrs, "r");
@@ -450,16 +548,22 @@ function parseXlsxSheetRows(
       const type = xmlAttrFromFragment(attrs, "t") ?? "";
       let value = "";
       if (type === "inlineStr") {
-        for (const t of inner.matchAll(/<(?:[A-Za-z0-9]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?t>/g)) {
+        for (const t of inner.matchAll(
+          /<(?:[A-Za-z0-9]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?t>/g,
+        )) {
           value += decodeXmlEntities(t[1]);
         }
       } else {
-        const v = inner.match(/<(?:[A-Za-z0-9]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?v>/);
+        const v = inner.match(
+          /<(?:[A-Za-z0-9]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9]+:)?v>/,
+        );
         const raw = v ? decodeXmlEntities(v[1]) : "";
         if (type === "s") {
           const sharedIndex = Number.parseInt(raw, 10);
           value =
-            Number.isInteger(sharedIndex) && sharedIndex >= 0 && sharedIndex < shared.length
+            Number.isInteger(sharedIndex) &&
+            sharedIndex >= 0 &&
+            sharedIndex < shared.length
               ? shared[sharedIndex]
               : "";
         } else if (type === "b") {
@@ -483,16 +587,23 @@ interface XlsxSheetRef {
   target: string;
 }
 
-function parseXlsxWorkbookSheets(workbookXml: string, relsXml: string): XlsxSheetRef[] {
+function parseXlsxWorkbookSheets(
+  workbookXml: string,
+  relsXml: string,
+): XlsxSheetRef[] {
   const relTargets = new Map<string, string>();
-  for (const rel of relsXml.matchAll(/<(?:[A-Za-z0-9]+:)?Relationship\b[^>]*>/g)) {
+  for (const rel of relsXml.matchAll(
+    /<(?:[A-Za-z0-9]+:)?Relationship\b[^>]*>/g,
+  )) {
     const id = xmlAttrFromFragment(rel[0], "Id");
     const target = xmlAttrFromFragment(rel[0], "Target");
     if (id && target) relTargets.set(id, target);
   }
 
   const sheets: XlsxSheetRef[] = [];
-  for (const sheet of workbookXml.matchAll(/<(?:[A-Za-z0-9]+:)?sheet\b[^>]*>/g)) {
+  for (const sheet of workbookXml.matchAll(
+    /<(?:[A-Za-z0-9]+:)?sheet\b[^>]*>/g,
+  )) {
     const name = xmlAttrFromFragment(sheet[0], "name");
     const rid =
       xmlAttrFromFragment(sheet[0], "r:id") ??
@@ -520,8 +631,12 @@ export function extractXlsxText(buffer: Buffer): string {
   ]);
   const { contents } = streamZipEntries(
     buffer,
-    (name) => fixedEntries.has(name) || /^xl\/worksheets\/sheet\d+\.xml$/.test(name),
-    { perEntryBytes: MAX_ZIP_ENTRY_BYTES, totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED },
+    (name) =>
+      fixedEntries.has(name) || /^xl\/worksheets\/sheet\d+\.xml$/.test(name),
+    {
+      perEntryBytes: MAX_ZIP_ENTRY_BYTES,
+      totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED,
+    },
     true,
   );
 
@@ -529,20 +644,32 @@ export function extractXlsxText(buffer: Buffer): string {
   const workbookXml = contents.get("xl/workbook.xml");
   const relsXml = contents.get("xl/_rels/workbook.xml.rels");
   if (!workbookXml || !relsXml) {
-    throw new FileExtractionError("Excelファイルの構造を読み取れませんでした。");
+    throw new FileExtractionError(
+      "Excelファイルの構造を読み取れませんでした。",
+    );
   }
-  const sheets = parseXlsxWorkbookSheets(decoder.decode(workbookXml), decoder.decode(relsXml));
+  const sheets = parseXlsxWorkbookSheets(
+    decoder.decode(workbookXml),
+    decoder.decode(relsXml),
+  );
   if (sheets.length === 0) {
-    throw new FileExtractionError("Excelファイルにシートが見つかりませんでした。");
+    throw new FileExtractionError(
+      "Excelファイルにシートが見つかりませんでした。",
+    );
   }
   const sharedStringsXml = contents.get("xl/sharedStrings.xml");
-  const shared = sharedStringsXml ? parseXlsxSharedStrings(decoder.decode(sharedStringsXml)) : [];
+  const shared = sharedStringsXml
+    ? parseXlsxSharedStrings(decoder.decode(sharedStringsXml))
+    : [];
 
   const sections: string[] = [];
   for (const sheet of sheets.slice(0, MAX_XLSX_SHEETS)) {
     const sheetXml = contents.get(normalizeXlsxSheetTarget(sheet.target));
     if (!sheetXml) continue;
-    const { rows, rowLimited, colLimited } = parseXlsxSheetRows(decoder.decode(sheetXml), shared);
+    const { rows, rowLimited, colLimited } = parseXlsxSheetRows(
+      decoder.decode(sheetXml),
+      shared,
+    );
     const csv = rows
       .map((row) => row.map(toCsvCell).join(","))
       .join("\n")
@@ -555,12 +682,16 @@ export function extractXlsxText(buffer: Buffer): string {
     sections.push(`[シート: ${sheet.name}]${note}\n${csv}`);
   }
   if (sections.length === 0) {
-    throw new FileExtractionError("Excelファイルから抽出できるデータが見つかりませんでした。");
+    throw new FileExtractionError(
+      "Excelファイルから抽出できるデータが見つかりませんでした。",
+    );
   }
 
   const header =
     `[Excelブック: 全${sheets.length}シート` +
-    (sheets.length > MAX_XLSX_SHEETS ? `、先頭${MAX_XLSX_SHEETS}シートのみ抽出` : "") +
+    (sheets.length > MAX_XLSX_SHEETS
+      ? `、先頭${MAX_XLSX_SHEETS}シートのみ抽出`
+      : "") +
     "]";
   return capText([header, ...sections].join("\n\n"), MAX_EXTRACTED_CHARS);
 }
@@ -568,8 +699,8 @@ export function extractXlsxText(buffer: Buffer): string {
 function extractSlideText(xml: string): string {
   const lines: string[] = [];
   for (const paragraph of xml.split("</a:p>")) {
-    const runs = [...paragraph.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((match) =>
-      decodeXmlEntities(match[1]),
+    const runs = [...paragraph.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(
+      (match) => decodeXmlEntities(match[1]),
     );
     if (runs.length > 0) lines.push(runs.join(""));
   }
@@ -582,7 +713,10 @@ export function extractPptxText(buffer: Buffer): string {
   const { contents, aborted } = streamZipEntries(
     buffer,
     (name) => slideNameRegex.test(name),
-    { perEntryBytes: MAX_ZIP_ENTRY_BYTES, totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED },
+    {
+      perEntryBytes: MAX_ZIP_ENTRY_BYTES,
+      totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED,
+    },
     true,
   );
   if (aborted) throw zipExpandedBudgetError();
@@ -590,7 +724,9 @@ export function extractPptxText(buffer: Buffer): string {
   const slides = [...contents.entries()]
     .map(([name, bytes]) => ({
       number: Number(name.match(slideNameRegex)?.[1] ?? "0"),
-      text: extractSlideText(new TextDecoder("utf-8", { fatal: false }).decode(bytes)),
+      text: extractSlideText(
+        new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+      ),
     }))
     .sort((a, b) => a.number - b.number);
 
@@ -599,11 +735,14 @@ export function extractPptxText(buffer: Buffer): string {
     .filter((slide) => slide.text)
     .map((slide) => `[スライド ${slide.number}]\n${slide.text}`);
   if (sections.length === 0) {
-    throw new FileExtractionError("PowerPointファイルから抽出できるテキストが見つかりませんでした。");
+    throw new FileExtractionError(
+      "PowerPointファイルから抽出できるテキストが見つかりませんでした。",
+    );
   }
 
   const notes: string[] = [];
-  if (slides.length > MAX_PPTX_SLIDES) notes.push(`先頭${MAX_PPTX_SLIDES}スライドのみ抽出`);
+  if (slides.length > MAX_PPTX_SLIDES)
+    notes.push(`先頭${MAX_PPTX_SLIDES}スライドのみ抽出`);
   if (aborted) notes.push("展開サイズ上限に達したため一部スライドを省略");
   const header = `[PowerPoint: 全${slides.length}スライド${notes.length > 0 ? `（${notes.join("・")}）` : ""}]`;
   return capText([header, ...sections].join("\n\n"), MAX_EXTRACTED_CHARS);
@@ -615,7 +754,9 @@ export function extractZipText(buffer: Buffer): string {
 
   const listingLines: string[] = [];
   for (const entry of entries.slice(0, MAX_ZIP_LISTING_LINES)) {
-    const label = entry.name.endsWith("/") ? `${entry.name}（フォルダ）` : entry.name;
+    const label = entry.name.endsWith("/")
+      ? `${entry.name}（フォルダ）`
+      : entry.name;
     listingLines.push(`- ${label}（${formatBytes(entry.uncompressedSize)}）`);
   }
   if (entries.length > MAX_ZIP_LISTING_LINES) {
@@ -642,10 +783,14 @@ export function extractZipText(buffer: Buffer): string {
     if (targets.size < MAX_ZIP_TEXT_ENTRIES) targets.add(name);
   }
 
-  const { contents, aborted } = streamZipEntries(buffer, (name) => targets.has(name), {
-    perEntryBytes: MAX_ZIP_ENTRY_BYTES,
-    totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED,
-  });
+  const { contents, aborted } = streamZipEntries(
+    buffer,
+    (name) => targets.has(name),
+    {
+      perEntryBytes: MAX_ZIP_ENTRY_BYTES,
+      totalBytes: MAX_ZIP_TOTAL_UNCOMPRESSED,
+    },
+  );
 
   const sections: string[] = [];
   for (const name of targets) {
@@ -662,16 +807,21 @@ export function extractZipText(buffer: Buffer): string {
     `[ZIPエントリ一覧: 全${entries.length}件]\n${listingLines.join("\n")}`,
   ];
   if (sections.length > 0) {
-    parts.push(`[テキスト抽出: ${sections.length}件]\n${sections.join("\n\n")}`);
+    parts.push(
+      `[テキスト抽出: ${sections.length}件]\n${sections.join("\n\n")}`,
+    );
   }
   const notes: string[] = [];
   if (entries.length === 0) notes.push("アーカイブは空です。");
-  if (aborted) notes.push("展開サイズ上限に達したため、以降の抽出を中断しました。");
+  if (aborted)
+    notes.push("展開サイズ上限に達したため、以降の抽出を中断しました。");
   if (targets.size === MAX_ZIP_TEXT_ENTRIES) {
     notes.push(`テキスト抽出は先頭${MAX_ZIP_TEXT_ENTRIES}件のみです。`);
   }
   if (oversizeCount > 0) {
-    notes.push(`${formatBytes(MAX_ZIP_ENTRY_BYTES)}を超える${oversizeCount}件は抽出していません。`);
+    notes.push(
+      `${formatBytes(MAX_ZIP_ENTRY_BYTES)}を超える${oversizeCount}件は抽出していません。`,
+    );
   }
   if (unsafeNames.length > 0) {
     notes.push(`安全でないパスの${unsafeNames.length}件は抽出していません。`);
@@ -703,7 +853,9 @@ async function extractSynchronousBinaryText(
       throw new FileExtractionError("音声ファイルは同期文書解析の対象外です。");
     default: {
       const exhaustive: never = attachment.family;
-      throw new FileExtractionError(`未対応の添付種別です: ${String(exhaustive)}`);
+      throw new FileExtractionError(
+        `未対応の添付種別です: ${String(exhaustive)}`,
+      );
     }
   }
 }
@@ -721,7 +873,9 @@ export async function extractBinaryText(
         signal,
       });
       if (!text) {
-        throw new FileExtractionError("音声から認識できる内容が見つかりませんでした。");
+        throw new FileExtractionError(
+          "音声から認識できる内容が見つかりませんでした。",
+        );
       }
       return capText(`[音声の文字起こし結果]\n${text}`, MAX_EXTRACTED_CHARS);
     }
@@ -733,7 +887,9 @@ export async function extractBinaryText(
       return runIsolatedBinaryExtraction(attachment, signal);
     default: {
       const exhaustive: never = attachment.family;
-      throw new FileExtractionError(`未対応の添付種別です: ${String(exhaustive)}`);
+      throw new FileExtractionError(
+        `未対応の添付種別です: ${String(exhaustive)}`,
+      );
     }
   }
 }
@@ -753,13 +909,24 @@ export async function resolveBinaryAttachments(
 
   const incoming: IncomingAttachment[] = [];
   for (const attachment of parsed.attachments) {
-    if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
+    if (signal?.aborted)
+      throw signal.reason ?? new Error("Attachment extraction cancelled");
     if (attachment.kind === "image") {
-      incoming.push({ kind: "image", name: attachment.name, content: attachment.content, isBase64: true });
+      incoming.push({
+        kind: "image",
+        name: attachment.name,
+        content: attachment.content,
+        isBase64: true,
+      });
       continue;
     }
     if (attachment.kind === "file") {
-      incoming.push({ kind: "file", name: attachment.name, content: attachment.content, isBase64: false });
+      incoming.push({
+        kind: "file",
+        name: attachment.name,
+        content: attachment.content,
+        isBase64: false,
+      });
       continue;
     }
 
@@ -771,15 +938,32 @@ export async function resolveBinaryAttachments(
         throw signal.reason ?? new Error("Attachment extraction cancelled");
       }
       logger.info(
-        { component: "file-extraction", eventCode: "BINARY_ATTACHMENT_EXTRACTED" },
+        {
+          component: "file-extraction",
+          eventCode: "BINARY_ATTACHMENT_EXTRACTED",
+        },
         "Binary attachment extracted",
       );
-      incoming.push({ kind: "file", name: attachment.name, content: text, isBase64: false });
+      incoming.push({
+        kind: "file",
+        name: attachment.name,
+        content: text,
+        isBase64: false,
+      });
     } catch (err) {
-      if (signal?.aborted) throw signal.reason ?? new Error("Attachment extraction cancelled");
-      if (err instanceof FileExtractionError || err instanceof TranscriptionError) throw err;
+      if (signal?.aborted)
+        throw signal.reason ?? new Error("Attachment extraction cancelled");
+      if (
+        err instanceof FileExtractionError ||
+        err instanceof TranscriptionError
+      )
+        throw err;
       logger.warn(
-        safeFailureFields(err, "file-extraction", "BINARY_ATTACHMENT_EXTRACTION_FAILED"),
+        safeFailureFields(
+          err,
+          "file-extraction",
+          "BINARY_ATTACHMENT_EXTRACTION_FAILED",
+        ),
         "Unexpected extraction failure",
       );
       throw new FileExtractionError(

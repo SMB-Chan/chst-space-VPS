@@ -15,10 +15,7 @@ import {
   type StreamDelta,
 } from "./stream-delta";
 import { getClientForModel, modelSupportsVision } from "./ai-clients";
-import {
-  AUDIT_SYSTEM_PROMPT,
-  buildAuditUserMessage,
-} from "./audit";
+import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
@@ -34,9 +31,16 @@ import {
   type ParsedFileData,
 } from "./file-generation";
 import { getPreviewToolStatus, previewGeneratedFile } from "./file-preview";
-import { getVisionClient, hasActionableFeedback, reviewLayout } from "./file-review";
+import {
+  getVisionClient,
+  hasActionableFeedback,
+  reviewLayout,
+} from "./file-review";
 import { describeImagesForTextModel } from "./vision-bridge";
-import { buildTranslationSystemPrompt, type TranslationMode } from "./translation";
+import {
+  buildTranslationSystemPrompt,
+  type TranslationMode,
+} from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
 import {
@@ -63,7 +67,8 @@ export function withTimeout<T>(
   parentSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
-  const abortFromParent = () => controller.abort(parentSignal?.reason ?? new Error("Operation cancelled"));
+  const abortFromParent = () =>
+    controller.abort(parentSignal?.reason ?? new Error("Operation cancelled"));
   if (parentSignal?.aborted) abortFromParent();
   else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
   const timeout = setTimeout(
@@ -97,7 +102,9 @@ export interface ResponseCancellation {
  * extraction happens first), so routes create this context at the beginning of
  * the SSE phase and pass the same signal through the whole turn.
  */
-export function createResponseCancellation(res: Response): ResponseCancellation {
+export function createResponseCancellation(
+  res: Response,
+): ResponseCancellation {
   let clientGone = false;
   const controller = new AbortController();
   const onClose = () => {
@@ -150,14 +157,20 @@ const FILE_GENERATION_SYSTEM_PROMPT = `ユーザーが PDF / Word / Excel / Powe
 - 作成するファイルの概要（タイトルや主なセクション）を短く述べ、後はファイルの自動生成に任せる。`;
 
 function wantsArtifact(userText: string): boolean {
-  return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html)/i.test(userText);
+  return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html)/i.test(
+    userText,
+  );
 }
 
 function wantsGeneratedFile(userText: string): boolean {
-  return /(pdf|docx|xlsx|pptx|word|excel|powerpoint|エクセル|パワーポイント|ワード)/i.test(userText);
+  return /(pdf|docx|xlsx|pptx|word|excel|powerpoint|エクセル|パワーポイント|ワード)/i.test(
+    userText,
+  );
 }
 
-function specialistCallFromPlan(plan: CapabilityToolPlan): SpecialistToolCall | undefined {
+function specialistCallFromPlan(
+  plan: CapabilityToolPlan,
+): SpecialistToolCall | undefined {
   if (plan.tool === "none") return undefined;
   // Async video generation has a separate authenticated, confirmed job API.
   // Never downgrade a video request into an image tool call.
@@ -236,13 +249,24 @@ export async function streamChatReply(args: {
   cancellation?: ResponseCancellation;
   onComplete?: (result: {
     content: string;
-    sources: { title: string; url: string; publishedAt?: string | null; fetchedAt?: string | null }[];
+    sources: {
+      title: string;
+      url: string;
+      publishedAt?: string | null;
+      fetchedAt?: string | null;
+    }[];
     audit?: { content: string; modelId: string };
     artifacts?: ExtractedArtifact[];
     generatedFiles?: GeneratedFile[];
     generatedAssets?: GeneratedAsset[];
   }) => Promise<{
-    artifacts?: { sourceIndex: number; id: number; filename: string; mime: string; size: number }[];
+    artifacts?: {
+      sourceIndex: number;
+      id: number;
+      filename: string;
+      mime: string;
+      size: number;
+    }[];
     assets?: { id: number; filename: string; mimeType: string; size: number }[];
     quotaExceeded?: boolean;
   } | void>;
@@ -300,8 +324,14 @@ export async function streamChatReply(args: {
     if (!translationMode && wantsArtifact(userText)) {
       workingMessages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
     }
-    if (!translationMode && (wantsGeneratedFile(userText) || requestedFileFormat)) {
-      workingMessages.push({ role: "system", content: FILE_GENERATION_SYSTEM_PROMPT });
+    if (
+      !translationMode &&
+      (wantsGeneratedFile(userText) || requestedFileFormat)
+    ) {
+      workingMessages.push({
+        role: "system",
+        content: FILE_GENERATION_SYSTEM_PROMPT,
+      });
     }
 
     const skills = translationMode ? [] : matchSkills(userText);
@@ -365,7 +395,8 @@ export async function streamChatReply(args: {
           res.write(
             `data: ${JSON.stringify({
               status: "search_warning",
-              message: "画像の読み取りに失敗しました。画像の内容を除いて回答します。",
+              message:
+                "画像の読み取りに失敗しました。画像の内容を除いて回答します。",
             })}\n\n`,
           );
         }
@@ -384,7 +415,10 @@ export async function streamChatReply(args: {
           (event) => {
             if (!clientGone()) res.write(`data: ${JSON.stringify(event)}\n\n`);
           },
-          { forceQuery: composeSkillSearchQuery(userText, skills), signal: clientAbort.signal },
+          {
+            forceQuery: composeSkillSearchQuery(userText, skills),
+            signal: clientAbort.signal,
+          },
         );
 
     if (webContext.contextText) {
@@ -403,7 +437,9 @@ export async function streamChatReply(args: {
           `<web_data>\n${webContext.contextText}\n</web_data>`,
       });
       if (webContext.sources.length > 0 && !clientGone()) {
-        res.write(`data: ${JSON.stringify({ sources: webContext.sources })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ sources: webContext.sources })}\n\n`,
+        );
       }
     }
 
@@ -415,8 +451,12 @@ export async function streamChatReply(args: {
         modelId,
         userText,
         hasReferenceImages: (imageAttachmentsForTools?.length ?? 0) > 0,
-        referenceImageNames: imageAttachmentsForTools?.map((image) => image.name),
-        audioAttachmentNames: audioAttachmentsForTools?.map((audio) => audio.name),
+        referenceImageNames: imageAttachmentsForTools?.map(
+          (image) => image.name,
+        ),
+        audioAttachmentNames: audioAttachmentsForTools?.map(
+          (audio) => audio.name,
+        ),
         signal: clientAbort.signal,
       });
       brokerToolCall = specialistCallFromPlan(plan);
@@ -432,12 +472,13 @@ export async function streamChatReply(args: {
     }
 
     const specialistToolCalls: SpecialistToolCall[] = [];
-    const specialistTools = translationMode || brokerToolCall
-      ? []
-      : getSpecialistTools({
-          imageAttachments: imageAttachmentsForTools,
-          audioAttachments: audioAttachmentsForTools,
-        });
+    const specialistTools =
+      translationMode || brokerToolCall
+        ? []
+        : getSpecialistTools({
+            imageAttachments: imageAttachmentsForTools,
+            audioAttachments: audioAttachmentsForTools,
+          });
 
     fullResponse = await streamModelText({
       client,
@@ -456,7 +497,9 @@ export async function streamChatReply(args: {
             res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
           }
         } else {
-          res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
+          res.write(
+            `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+          );
         }
       },
       shouldStop: () => clientGone() || clientAbort.signal.aborted,
@@ -467,13 +510,18 @@ export async function streamChatReply(args: {
     const effectiveToolCalls = brokerToolCall
       ? [brokerToolCall]
       : specialistToolCalls;
-    if (effectiveToolCalls.length > 0 && !clientAbort.signal.aborted && !translationMode) {
+    if (
+      effectiveToolCalls.length > 0 &&
+      !clientAbort.signal.aborted &&
+      !translationMode
+    ) {
       const [toolCall] = effectiveToolCalls;
       if (effectiveToolCalls.length > 1 && !clientGone()) {
         res.write(
           `data: ${JSON.stringify({
             status: "specialist_warning",
-            message: "安全上の上限により、同じターンでは専門能力を1回だけ実行しました。",
+            message:
+              "安全上の上限により、同じターンでは専門能力を1回だけ実行しました。",
           })}\n\n`,
         );
       }
@@ -557,7 +605,9 @@ export async function streamChatReply(args: {
               res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
             }
           } else {
-            res.write(`data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`);
+            res.write(
+              `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+            );
           }
         },
         shouldStop: () => clientGone() || clientAbort.signal.aborted,
@@ -580,7 +630,11 @@ export async function streamChatReply(args: {
       let audit: { content: string; modelId: string } | undefined;
       // A user stop aborts the shared signal, so no audit or revision work
       // starts after the client explicitly cancels the turn.
-      if (auditModelId && auditModelId !== modelId && !clientAbort.signal.aborted) {
+      if (
+        auditModelId &&
+        auditModelId !== modelId &&
+        !clientAbort.signal.aborted
+      ) {
         try {
           const auditor = getClientForModel(auditModelId);
           if (!clientGone()) {
@@ -611,9 +665,10 @@ export async function streamChatReply(args: {
                   type: "text",
                   text: "以下は質問者が添付した画像です。回答が画像の内容と矛盾していないかも監査対象に含めてください。",
                 },
-                ...auditImageUrls.map(
-                  (url): ChatContentPart => ({ type: "image_url", image_url: { url } }),
-                ),
+                ...auditImageUrls.map((url): ChatContentPart => ({
+                  type: "image_url",
+                  image_url: { url },
+                })),
               ];
             } else {
               if (imageTranscript === undefined) {
@@ -632,7 +687,11 @@ export async function streamChatReply(args: {
                 } catch (err) {
                   if (clientAbort.signal.aborted) throw err;
                   logger.warn(
-                    safeFailureFields(err, "chat-stream", "AUDIT_VISION_BRIDGE_FAILED"),
+                    safeFailureFields(
+                      err,
+                      "chat-stream",
+                      "AUDIT_VISION_BRIDGE_FAILED",
+                    ),
                     "Vision bridge for audit failed",
                   );
                   imageTranscript = "";
@@ -644,7 +703,7 @@ export async function streamChatReply(args: {
             }
           }
           const auditText = await withTimeout(
-              (signal) =>
+            (signal) =>
               streamModelText({
                 client: auditor.client,
                 provider: auditor.provider,
@@ -657,23 +716,25 @@ export async function streamChatReply(args: {
                     content: auditUserContent,
                   },
                 ],
-                 onDelta: () => {
-                   // Audit JSON is intentionally kept server-side until it has
-                   // passed validation; partial model output must never leak.
-                 },
-                    shouldStop: () => clientGone() || clientAbort.signal.aborted,
+                onDelta: () => {
+                  // Audit JSON is intentionally kept server-side until it has
+                  // passed validation; partial model output must never leak.
+                },
+                shouldStop: () => clientGone() || clientAbort.signal.aborted,
                 signal,
               }),
             AUDIT_TIMEOUT_MS,
             "Audit pass",
-                    clientAbort.signal,
+            clientAbort.signal,
           );
           if (auditText.trim()) {
             const patched = applyValidatedAuditPatch(fullResponse, auditText);
             if (patched.note) {
               audit = { content: patched.note, modelId: auditModelId };
               if (!clientGone()) {
-                res.write(`data: ${JSON.stringify({ audit: patched.note })}\n\n`);
+                res.write(
+                  `data: ${JSON.stringify({ audit: patched.note })}\n\n`,
+                );
               }
             }
             if (patched.applied) {
@@ -701,7 +762,8 @@ export async function streamChatReply(args: {
             res.write(
               `data: ${JSON.stringify({
                 status: "search_warning",
-                message: "監査モデルの実行に失敗しました。本文の回答のみ表示します。",
+                message:
+                  "監査モデルの実行に失敗しました。本文の回答のみ表示します。",
               })}\n\n`,
             );
           }
@@ -772,8 +834,19 @@ export async function streamChatReply(args: {
 
       let completion:
         | {
-            artifacts?: { sourceIndex: number; id: number; filename: string; mime: string; size: number }[];
-            assets?: { id: number; filename: string; mimeType: string; size: number }[];
+            artifacts?: {
+              sourceIndex: number;
+              id: number;
+              filename: string;
+              mime: string;
+              size: number;
+            }[];
+            assets?: {
+              id: number;
+              filename: string;
+              mimeType: string;
+              size: number;
+            }[];
             quotaExceeded?: boolean;
           }
         | void
@@ -785,13 +858,18 @@ export async function streamChatReply(args: {
               sources: webContext.sources,
               audit,
               artifacts: extracted.artifacts,
-               generatedFiles: generatedFile ? [generatedFile] : undefined,
-               generatedAssets: generatedAssets.length > 0 ? generatedAssets : undefined,
+              generatedFiles: generatedFile ? [generatedFile] : undefined,
+              generatedAssets:
+                generatedAssets.length > 0 ? generatedAssets : undefined,
             })
           : undefined;
       } catch (err) {
         logger.error(
-          safeFailureFields(err, "chat-stream", "CHAT_COMPLETION_PERSIST_FAILED"),
+          safeFailureFields(
+            err,
+            "chat-stream",
+            "CHAT_COMPLETION_PERSIST_FAILED",
+          ),
           "Failed to persist chat completion",
         );
         if (!clientGone()) {
@@ -808,7 +886,8 @@ export async function streamChatReply(args: {
         res.write(
           `data: ${JSON.stringify({
             status: "file_warning",
-            message: "保存容量の上限により、一部の生成ファイルを保存できませんでした。",
+            message:
+              "保存容量の上限により、一部の生成ファイルを保存できませんでした。",
           })}\n\n`,
         );
       }
@@ -828,7 +907,11 @@ export async function streamChatReply(args: {
         }
       }
 
-      if (generatedAssets.length > 0 && !completion?.assets?.length && !clientGone()) {
+      if (
+        generatedAssets.length > 0 &&
+        !completion?.assets?.length &&
+        !clientGone()
+      ) {
         const inlineAssets = generatedAssets.map((asset) => ({
           filename: asset.filename,
           mime: asset.mimeType,
@@ -840,18 +923,22 @@ export async function streamChatReply(args: {
 
       if (extracted.artifacts.length > 0 && !clientGone()) {
         const saved = completion?.artifacts ?? [];
-        const payload: ArtifactSsePayload[] = extracted.artifacts.map((artifact, index) => {
-          const persisted = saved.find((item) => item.sourceIndex === index);
-          const base: ArtifactSsePayload = {
-            id: persisted?.id,
-            filename: persisted?.filename ?? artifact.filename,
-            mime: persisted?.mime ?? artifact.mime,
-            size: persisted?.size ?? artifact.size,
-            downloadUrl: persisted ? `/api/openai/artifacts/${persisted.id}` : undefined,
-          };
-          if (includeArtifactContent) base.content = artifact.content;
-          return base;
-        });
+        const payload: ArtifactSsePayload[] = extracted.artifacts.map(
+          (artifact, index) => {
+            const persisted = saved.find((item) => item.sourceIndex === index);
+            const base: ArtifactSsePayload = {
+              id: persisted?.id,
+              filename: persisted?.filename ?? artifact.filename,
+              mime: persisted?.mime ?? artifact.mime,
+              size: persisted?.size ?? artifact.size,
+              downloadUrl: persisted
+                ? `/api/openai/artifacts/${persisted.id}`
+                : undefined,
+            };
+            if (includeArtifactContent) base.content = artifact.content;
+            return base;
+          },
+        );
         res.write(`data: ${JSON.stringify({ artifacts: payload })}\n\n`);
       }
 
@@ -894,7 +981,9 @@ async function streamModelText(args: {
   shouldStop: () => boolean;
   signal?: AbortSignal;
 }): Promise<string> {
-  const streamOptions: Parameters<typeof args.client.chat.completions.create>[0] = {
+  const streamOptions: Parameters<
+    typeof args.client.chat.completions.create
+  >[0] = {
     model: args.modelId,
     messages: args.messages,
     stream: true,
@@ -921,7 +1010,10 @@ async function streamModelText(args: {
       safeFailureFields(err, "chat-stream", "GENERATION_PARAMS_RETRY"),
       "Retrying stream without extra generation params",
     );
-    applySafeGenerationParams(streamOptions as unknown as Record<string, unknown>, args.provider);
+    applySafeGenerationParams(
+      streamOptions as unknown as Record<string, unknown>,
+      args.provider,
+    );
     stream = (await args.client.chat.completions.create(streamOptions, {
       signal: args.signal,
     })) as AsyncIterable<{
@@ -936,13 +1028,27 @@ async function streamModelText(args: {
     for await (const chunk of stream) {
       if (args.shouldStop()) break;
       const delta = chunk.choices?.[0]?.delta;
-      const rawToolCalls = (delta as unknown as {
-        tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[];
-      } | undefined)?.tool_calls;
+      const rawToolCalls = (
+        delta as unknown as
+          | {
+              tool_calls?: {
+                index?: number;
+                id?: string;
+                function?: { name?: string; arguments?: string };
+              }[];
+            }
+          | undefined
+      )?.tool_calls;
       if (rawToolCalls) {
         for (const raw of rawToolCalls) {
-          const index = Number.isSafeInteger(raw.index) ? raw.index! : toolCalls.size;
-          const previous = toolCalls.get(index) ?? { id: "", name: "", arguments: "" };
+          const index = Number.isSafeInteger(raw.index)
+            ? raw.index!
+            : toolCalls.size;
+          const previous = toolCalls.get(index) ?? {
+            id: "",
+            name: "",
+            arguments: "",
+          };
           toolCalls.set(index, {
             id: raw.id ?? previous.id,
             name: raw.function?.name ?? previous.name,
@@ -969,7 +1075,11 @@ async function streamModelText(args: {
     if (!args.signal?.aborted) throw err;
   }
   if (toolCalls.size > 0) {
-    args.onToolCalls?.([...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call));
+    args.onToolCalls?.(
+      [...toolCalls.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, call]) => call),
+    );
   }
   return splitThinkTags(full).content;
 }
@@ -1054,9 +1164,15 @@ function buildFileGenerationSummary(
   ].join("\n");
 }
 
-function buildFileGenerationFilename(format: import("./file-generation").FileFormat, userText: string): string {
+function buildFileGenerationFilename(
+  format: import("./file-generation").FileFormat,
+  userText: string,
+): string {
   const clean = userText
-    .replace(/(pdf|docx|xlsx|pptx|word|excel|powerpoint|pdfファイル|エクセル|パワーポイント|wordファイル)/gi, "")
+    .replace(
+      /(pdf|docx|xlsx|pptx|word|excel|powerpoint|pdfファイル|エクセル|パワーポイント|wordファイル)/gi,
+      "",
+    )
     .replace(/[\\/:*?"<>|]/g, "_")
     .trim()
     .slice(0, 40);
@@ -1081,7 +1197,9 @@ interface GenerateAndReviewFileContext {
   signal?: AbortSignal;
 }
 
-export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): Promise<GeneratedFile | undefined> {
+export async function generateAndReviewFile(
+  ctx: GenerateAndReviewFileContext,
+): Promise<GeneratedFile | undefined> {
   const {
     res,
     client,
@@ -1105,11 +1223,20 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
 
     if (isCancelled()) return undefined;
     if (!clientGone()) {
-      res.write(`data: ${JSON.stringify({ status: "generating-file", format: fileFormat })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ status: "generating-file", format: fileFormat })}\n\n`,
+      );
     }
 
-    const fileSummary = buildFileGenerationSummary(userText, chatMessages, fullResponse);
-    const generate = async (options?: { previousData?: ParsedFileData; feedback?: string }): Promise<{
+    const fileSummary = buildFileGenerationSummary(
+      userText,
+      chatMessages,
+      fullResponse,
+    );
+    const generate = async (options?: {
+      previousData?: ParsedFileData;
+      feedback?: string;
+    }): Promise<{
       file: import("./file-generation").GeneratedFile;
       parsed: ParsedFileData;
       rawOutput: string;
@@ -1236,11 +1363,17 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
     if (previewToolStatus.available && !isCancelled()) {
       const vision = getVisionClient(modelId);
 
-      for (let iteration = 0; iteration < MAX_LAYOUT_REVIEW_ITERATIONS; iteration++) {
+      for (
+        let iteration = 0;
+        iteration < MAX_LAYOUT_REVIEW_ITERATIONS;
+        iteration++
+      ) {
         try {
           if (isCancelled()) return undefined;
           if (!clientGone()) {
-            res.write(`data: ${JSON.stringify({ status: "reviewing-layout", iteration })}\n\n`);
+            res.write(
+              `data: ${JSON.stringify({ status: "reviewing-layout", iteration })}\n\n`,
+            );
           }
           currentStage = "layout-preview";
           const images = await previewGeneratedFile(attempt.file, {
@@ -1296,7 +1429,9 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
           );
 
           if (!clientGone()) {
-            res.write(`data: ${JSON.stringify({ status: "revising-layout", iteration })}\n\n`);
+            res.write(
+              `data: ${JSON.stringify({ status: "revising-layout", iteration })}\n\n`,
+            );
           }
           attempt = await generate({ previousData, feedback });
           previousData = attempt.parsed;
@@ -1304,7 +1439,11 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
         } catch (error) {
           if (isCancelled()) return undefined;
           logger.warn(
-            safeFailureFields(error, "chat-stream", "LAYOUT_REVIEW_ITERATION_FAILED"),
+            safeFailureFields(
+              error,
+              "chat-stream",
+              "LAYOUT_REVIEW_ITERATION_FAILED",
+            ),
             "Layout review iteration failed; keeping rendered file",
           );
           break;

@@ -28,7 +28,11 @@ const MIME_TO_EXT: Record<string, string> = {
 };
 
 function sanitizeFilename(raw: string): string | null {
-  const name = raw.trim().replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+/, "").slice(0, 120);
+  const name = raw
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/^\.+/, "")
+    .slice(0, 120);
   if (!name) return null;
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   if (!EXT_TO_MIME[ext]) return null;
@@ -78,7 +82,10 @@ export function extractArtifacts(answer: string): {
     const size = Buffer.byteLength(content, "utf8");
     if (size === 0 || size > MAX_ARTIFACT_BYTES) {
       logger.warn(
-        { component: "artifact-parser", errorCode: "ARTIFACT_EMPTY_OR_TOO_LARGE" },
+        {
+          component: "artifact-parser",
+          errorCode: "ARTIFACT_EMPTY_OR_TOO_LARGE",
+        },
         "Skipping oversized or empty artifact",
       );
       return "";
@@ -87,9 +94,7 @@ export function extractArtifacts(answer: string): {
     return "";
   });
 
-  cleaned = cleaned
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd();
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trimEnd();
   if (!cleaned.trim()) {
     cleaned = "ファイルを作成しました。下のカードからダウンロードできます。";
   }

@@ -77,13 +77,15 @@ function asString(value: unknown): string {
 }
 
 function firstHeader(value: HeaderValue): string {
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
 function normalizeRequestId(value: unknown): string {
   const candidate =
     typeof value === "string" || typeof value === "number" ? String(value) : "";
-  return SAFE_REQUEST_ID_PATTERN.test(candidate) ? candidate : "request_unknown";
+  return SAFE_REQUEST_ID_PATTERN.test(candidate)
+    ? candidate
+    : "request_unknown";
 }
 
 function normalizeMethod(value: unknown): string {
@@ -121,7 +123,10 @@ function extractTraceId(request: SafeHttpRequest): string | undefined {
 }
 
 function normalizeStatus(status: number | undefined): number {
-  return Number.isInteger(status) && status !== undefined && status >= 100 && status <= 599
+  return Number.isInteger(status) &&
+    status !== undefined &&
+    status >= 100 &&
+    status <= 599
     ? status
     : 500;
 }
@@ -137,16 +142,23 @@ function inferredErrorCode(
 ): SafeHttpErrorCode {
   if (override) return override;
   if (status >= 200 && status < 300) return "HTTP_OK";
-  if (status === 401 || status === 403 || /unauthorized|forbidden|invalid[_ ]api[_ ]key/i.test(errorMessage(error))) {
+  if (
+    status === 401 ||
+    status === 403 ||
+    /unauthorized|forbidden|invalid[_ ]api[_ ]key/i.test(errorMessage(error))
+  ) {
     return "HTTP_AUTHENTICATION";
   }
   if (status === 404) return "HTTP_NOT_FOUND";
   if (status === 413) return "HTTP_PAYLOAD_TOO_LARGE";
   if (status === 400) return "HTTP_VALIDATION";
   if (isDatabaseError(error)) return "HTTP_DATABASE";
-  if (/timeout|timed out|etimedout|aborted/i.test(errorMessage(error))) return "HTTP_TIMEOUT";
-  if (/provider|api[_ ]key|upstream|gateway/i.test(errorMessage(error))) return "HTTP_PROVIDER";
-  if (status === 502 || status === 503 || status === 504) return "HTTP_UPSTREAM";
+  if (/timeout|timed out|etimedout|aborted/i.test(errorMessage(error)))
+    return "HTTP_TIMEOUT";
+  if (/provider|api[_ ]key|upstream|gateway/i.test(errorMessage(error)))
+    return "HTTP_PROVIDER";
+  if (status === 502 || status === 503 || status === 504)
+    return "HTTP_UPSTREAM";
   if (status >= 400 && status < 500) return "HTTP_CLIENT_ERROR";
   if (status >= 500) return "HTTP_INTERNAL";
   return "HTTP_UNKNOWN";
@@ -174,11 +186,17 @@ export function createSafeHttpAccessFields(
   request: SafeHttpRequest,
   status: number | undefined,
 ): Omit<SafeHttpLogFields, "requestId"> {
-  const { requestId: _requestId, ...fields } = createSafeHttpLogFields(request, status);
+  const { requestId: _requestId, ...fields } = createSafeHttpLogFields(
+    request,
+    status,
+  );
   return fields;
 }
 
-export function httpLogLevel(status: number, error?: unknown): "error" | "warn" | "info" {
+export function httpLogLevel(
+  status: number,
+  error?: unknown,
+): "error" | "warn" | "info" {
   if (error || status >= 500) return "error";
   if (status >= 400) return "warn";
   return "info";
@@ -194,6 +212,9 @@ export function logSafeHttpError(
   const requestWithState = request as SafeHttpRequestWithState;
   if (requestWithState[SAFE_ERROR_LOGGED]) return false;
   requestWithState[SAFE_ERROR_LOGGED] = true;
-  target.error(createSafeHttpLogFields(request, status, error, errorCode), SAFE_HTTP_ERROR_MESSAGE);
+  target.error(
+    createSafeHttpLogFields(request, status, error, errorCode),
+    SAFE_HTTP_ERROR_MESSAGE,
+  );
   return true;
 }

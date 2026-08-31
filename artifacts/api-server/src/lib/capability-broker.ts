@@ -101,7 +101,10 @@ function optionalBoundedNumber(
   min: number,
   max: number,
 ): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= min &&
+    value <= max
     ? value
     : undefined;
 }
@@ -147,7 +150,9 @@ function parseToolPlan(
           /^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/i.test(hint.trim()),
       );
       if (hints.length !== obj.languageHints.length) return { tool: "none" };
-      const uniqueHints = [...new Set(hints.map((hint) => hint.trim().toLowerCase()))];
+      const uniqueHints = [
+        ...new Set(hints.map((hint) => hint.trim().toLowerCase())),
+      ];
       if (uniqueHints.length > 0) languageHints = uniqueHints;
     }
     return {
@@ -159,7 +164,8 @@ function parseToolPlan(
   }
 
   if (obj.tool === "audio.synthesize") {
-    const text = typeof obj.text === "string" ? obj.text.trim().slice(0, 10_000) : "";
+    const text =
+      typeof obj.text === "string" ? obj.text.trim().slice(0, 10_000) : "";
     if (!text) return { tool: "none" };
     if (
       obj.languageHint !== undefined &&
@@ -169,20 +175,23 @@ function parseToolPlan(
       return { tool: "none" };
     }
     const modelId =
-      typeof obj.modelId === "string" && modelHasAlibabaCapability(obj.modelId, "audio.tts")
+      typeof obj.modelId === "string" &&
+      modelHasAlibabaCapability(obj.modelId, "audio.tts")
         ? obj.modelId
         : undefined;
     const voice =
       typeof obj.voice === "string" &&
       (QWEN_AUDIO_TTS_PLUS_VOICES as readonly string[]).includes(obj.voice)
-        ? obj.voice as (typeof QWEN_AUDIO_TTS_PLUS_VOICES)[number]
+        ? (obj.voice as (typeof QWEN_AUDIO_TTS_PLUS_VOICES)[number])
         : undefined;
-    const instruction = typeof obj.instruction === "string"
-      ? obj.instruction.trim().slice(0, 1_000)
-      : undefined;
-    const languageHint = obj.languageHint === "zh" || obj.languageHint === "en"
-      ? obj.languageHint
-      : undefined;
+    const instruction =
+      typeof obj.instruction === "string"
+        ? obj.instruction.trim().slice(0, 1_000)
+        : undefined;
+    const languageHint =
+      obj.languageHint === "zh" || obj.languageHint === "en"
+        ? obj.languageHint
+        : undefined;
     return {
       tool: "audio.synthesize",
       text,
@@ -203,11 +212,17 @@ function parseToolPlan(
   }
 
   if (obj.tool === "video.generate") {
-    const prompt = typeof obj.prompt === "string" ? obj.prompt.trim().slice(0, 5_000) : "";
-    const mode = obj.mode === "t2v" || obj.mode === "i2v" || obj.mode === "r2v" ? obj.mode : null;
+    const prompt =
+      typeof obj.prompt === "string" ? obj.prompt.trim().slice(0, 5_000) : "";
+    const mode =
+      obj.mode === "t2v" || obj.mode === "i2v" || obj.mode === "r2v"
+        ? obj.mode
+        : null;
     if (!prompt || !mode) return { tool: "none" };
     const names = Array.isArray(obj.referenceImageNames)
-      ? obj.referenceImageNames.filter((name): name is string => typeof name === "string")
+      ? obj.referenceImageNames.filter(
+          (name): name is string => typeof name === "string",
+        )
       : [];
     if (
       (mode === "t2v" && names.length !== 0) ||
@@ -219,11 +234,20 @@ function parseToolPlan(
     }
     const modelId =
       typeof obj.modelId === "string" &&
-      modelHasAlibabaCapability(obj.modelId, `video.${mode}` as "video.t2v" | "video.i2v" | "video.r2v")
+      modelHasAlibabaCapability(
+        obj.modelId,
+        `video.${mode}` as "video.t2v" | "video.i2v" | "video.r2v",
+      )
         ? obj.modelId
         : undefined;
-    const resolution = obj.resolution === "720P" || obj.resolution === "1080P" ? obj.resolution : undefined;
-    const ratio = typeof obj.ratio === "string" && /^\d{1,2}:\d{1,2}$/.test(obj.ratio) ? obj.ratio : undefined;
+    const resolution =
+      obj.resolution === "720P" || obj.resolution === "1080P"
+        ? obj.resolution
+        : undefined;
+    const ratio =
+      typeof obj.ratio === "string" && /^\d{1,2}:\d{1,2}$/.test(obj.ratio)
+        ? obj.ratio
+        : undefined;
     const duration = optionalBoundedNumber(obj.duration, 3, 15);
     return {
       tool: "video.generate",
@@ -234,8 +258,13 @@ function parseToolPlan(
       ...(resolution ? { resolution } : {}),
       ...(ratio ? { ratio } : {}),
       ...(duration !== undefined ? { duration: Math.floor(duration) } : {}),
-      ...(typeof obj.watermark === "boolean" ? { watermark: obj.watermark } : {}),
-      ...(typeof obj.seed === "number" && Number.isSafeInteger(obj.seed) && obj.seed >= 0 && obj.seed <= 2_147_483_647
+      ...(typeof obj.watermark === "boolean"
+        ? { watermark: obj.watermark }
+        : {}),
+      ...(typeof obj.seed === "number" &&
+      Number.isSafeInteger(obj.seed) &&
+      obj.seed >= 0 &&
+      obj.seed <= 2_147_483_647
         ? { seed: obj.seed }
         : {}),
     };
@@ -245,15 +274,21 @@ function parseToolPlan(
     return { tool: "none" };
   }
   if (obj.tool === "image.edit") {
-    const imageName = typeof obj.imageName === "string" ? obj.imageName.trim() : "";
-    if (!imageName || !referenceImageNames.includes(imageName)) return { tool: "none" };
+    const imageName =
+      typeof obj.imageName === "string" ? obj.imageName.trim() : "";
+    if (!imageName || !referenceImageNames.includes(imageName))
+      return { tool: "none" };
   }
 
-  const prompt = typeof obj.prompt === "string" ? obj.prompt.trim().slice(0, 16_000) : "";
+  const prompt =
+    typeof obj.prompt === "string" ? obj.prompt.trim().slice(0, 16_000) : "";
   if (!prompt) return { tool: "none" };
   const modelId =
     typeof obj.modelId === "string" &&
-    modelHasAlibabaCapability(obj.modelId, obj.tool === "image.edit" ? "image.edit" : "image.generate")
+    modelHasAlibabaCapability(
+      obj.modelId,
+      obj.tool === "image.edit" ? "image.edit" : "image.generate",
+    )
       ? obj.modelId
       : undefined;
   const size =
@@ -272,7 +307,9 @@ function parseToolPlan(
     tool: obj.tool,
     prompt,
     ...(modelId ? { modelId } : {}),
-    ...(obj.tool === "image.edit" ? { imageName: String(obj.imageName).trim() } : {}),
+    ...(obj.tool === "image.edit"
+      ? { imageName: String(obj.imageName).trim() }
+      : {}),
     ...(size ? { size } : {}),
     ...(n ? { n } : {}),
   };
@@ -326,10 +363,17 @@ async function runRouterCall(args: {
   } catch (error) {
     if (args.signal?.aborted) throw args.signal.reason ?? error;
     if (!isUnsupportedGenerationParam(error)) throw error;
-    logger.warn({ modelId: args.modelId }, "Capability router retrying with safe generation params");
-    applySafeGenerationParams(options as unknown as Record<string, unknown>, args.provider);
+    logger.warn(
+      { modelId: args.modelId },
+      "Capability router retrying with safe generation params",
+    );
+    applySafeGenerationParams(
+      options as unknown as Record<string, unknown>,
+      args.provider,
+    );
     if (args.provider === "openai") {
-      (options as unknown as Record<string, unknown>).max_completion_tokens = 800;
+      (options as unknown as Record<string, unknown>).max_completion_tokens =
+        800;
     } else {
       (options as unknown as Record<string, unknown>).max_tokens = 800;
     }
@@ -360,7 +404,10 @@ export async function planCapabilityTool(args: {
   const referenceImageNames = args.referenceImageNames ?? [];
   const audioAttachmentNames = args.audioAttachmentNames ?? [];
   if (!couldNeedCapabilityTool(args.userText)) return { tool: "none" };
-  if (TRANSCRIBE_INTENT.test(args.userText) && audioAttachmentNames.length === 0) {
+  if (
+    TRANSCRIBE_INTENT.test(args.userText) &&
+    audioAttachmentNames.length === 0
+  ) {
     return { tool: "none" };
   }
   try {
@@ -370,12 +417,19 @@ export async function planCapabilityTool(args: {
       audioAttachmentNames,
     });
     const plan = parseToolPlan(raw, referenceImageNames, audioAttachmentNames);
-    logger.info({ modelId: args.modelId, tool: plan.tool }, "Capability broker planned tool use");
+    logger.info(
+      { modelId: args.modelId, tool: plan.tool },
+      "Capability broker planned tool use",
+    );
     return plan;
   } catch (error) {
     if (args.signal?.aborted) throw error;
     logger.warn(
-      safeFailureFields(error, "capability-broker", "CAPABILITY_PREFLIGHT_FAILED"),
+      safeFailureFields(
+        error,
+        "capability-broker",
+        "CAPABILITY_PREFLIGHT_FAILED",
+      ),
       "Capability broker preflight failed; continuing without specialist tool",
     );
     return { tool: "none" };

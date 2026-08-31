@@ -1,6 +1,11 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { assets, artifacts, conversations, messages } from "@workspace/db/schema";
+import {
+  assets,
+  artifacts,
+  conversations,
+  messages,
+} from "@workspace/db/schema";
 import type { ExtractedArtifact } from "./artifacts";
 import type { GeneratedFile } from "./file-generation";
 import type { GeneratedAsset } from "./specialist-capabilities";
@@ -45,9 +50,11 @@ export interface PersistChatCompletionInput {
 }
 
 function parseQuotaBytes(raw: string | undefined): number {
-  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
+  if (raw === undefined || raw.trim() === "")
+    return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0) return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
+  if (!Number.isSafeInteger(value) || value < 0)
+    return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
   return value;
 }
 
@@ -63,7 +70,11 @@ export function getGeneratedFileQuotaBytes(
 }
 
 function validateGeneratedFile(file: GeneratedFile): void {
-  if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.buffer.length !== file.size) {
+  if (
+    !Number.isSafeInteger(file.size) ||
+    file.size <= 0 ||
+    file.buffer.length !== file.size
+  ) {
     throw new Error("Generated file metadata does not match its buffer");
   }
 }
@@ -141,13 +152,19 @@ export async function persistChatCompletion(
         .select({ size: artifacts.size })
         .from(artifacts)
         .where(eq(artifacts.userId, input.userId));
-      usedBytes = [...binaryRows, ...textRows].reduce((sum, row) => sum + row.size, 0);
+      usedBytes = [...binaryRows, ...textRows].reduce(
+        (sum, row) => sum + row.size,
+        0,
+      );
     }
 
     let quotaExceeded = false;
     const acceptedGeneratedFiles: GeneratedFile[] = [];
     const acceptedGeneratedAssets: GeneratedAsset[] = [];
-    const acceptedArtifacts: Array<{ sourceIndex: number; artifact: ExtractedArtifact }> = [];
+    const acceptedArtifacts: Array<{
+      sourceIndex: number;
+      artifact: ExtractedArtifact;
+    }> = [];
 
     const acceptIfWithinQuota = (size: number): boolean => {
       if (quotaBytes === 0 || usedBytes + size <= quotaBytes) {
@@ -187,31 +204,41 @@ export async function persistChatCompletion(
           role: "assistant",
           content: input.assistantContent,
           modelId: input.modelId,
-          sources: input.sources.length > 0 ? JSON.stringify(input.sources) : undefined,
+          sources:
+            input.sources.length > 0
+              ? JSON.stringify(input.sources)
+              : undefined,
           auditContent: input.audit?.content,
           auditModelId: input.audit?.modelId,
         },
       ])
       .returning();
 
-    const assistantMessage = insertedMessages.find((message) => message.role === "assistant");
+    const assistantMessage = insertedMessages.find(
+      (message) => message.role === "assistant",
+    );
     if (!assistantMessage) {
       throw new Error("Assistant message was not returned from persistence");
     }
 
     let persistedAssets: PersistedGeneratedAsset[] = [];
-    if (acceptedGeneratedFiles.length > 0 || acceptedGeneratedAssets.length > 0) {
+    if (
+      acceptedGeneratedFiles.length > 0 ||
+      acceptedGeneratedAssets.length > 0
+    ) {
       persistedAssets = await tx
         .insert(assets)
         .values(
-          [...acceptedGeneratedFiles, ...acceptedGeneratedAssets].map((file) => ({
-            conversationId: input.conversationId,
-            messageId: assistantMessage.id,
-            filename: file.filename,
-            mimeType: file.mimeType,
-            size: file.size,
-            data: file.buffer.toString("base64"),
-          })),
+          [...acceptedGeneratedFiles, ...acceptedGeneratedAssets].map(
+            (file) => ({
+              conversationId: input.conversationId,
+              messageId: assistantMessage.id,
+              filename: file.filename,
+              mimeType: file.mimeType,
+              size: file.size,
+              data: file.buffer.toString("base64"),
+            }),
+          ),
         )
         .returning({
           id: assets.id,
@@ -223,7 +250,9 @@ export async function persistChatCompletion(
       if (persistedAssets.length > 0) {
         await tx
           .update(messages)
-          .set({ assetIds: JSON.stringify(persistedAssets.map((asset) => asset.id)) })
+          .set({
+            assetIds: JSON.stringify(persistedAssets.map((asset) => asset.id)),
+          })
           .where(eq(messages.id, assistantMessage.id));
       }
     }
@@ -286,7 +315,12 @@ export async function deleteOwnedMessagesAndAssets(
       .select({ id: messages.id })
       .from(messages)
       .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-      .where(and(inArray(messages.id, requestedIds), eq(conversations.userId, userId)));
+      .where(
+        and(
+          inArray(messages.id, requestedIds),
+          eq(conversations.userId, userId),
+        ),
+      );
     const ownedIds = owned.map((row) => row.id);
     if (ownedIds.length === 0) return [];
 

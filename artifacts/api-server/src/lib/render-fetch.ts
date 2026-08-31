@@ -204,7 +204,9 @@ function releaseBrowserSlot(): void {
  * guard remains an earlier defense that blocks unsafe requests before they
  * reach the proxy at all.
  */
-export async function isSafeBrowserRequestUrl(rawUrl: string): Promise<boolean> {
+export async function isSafeBrowserRequestUrl(
+  rawUrl: string,
+): Promise<boolean> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -213,7 +215,11 @@ export async function isSafeBrowserRequestUrl(rawUrl: string): Promise<boolean> 
   }
 
   // Internal, non-network document URLs do not open a socket themselves.
-  if (url.protocol === "about:" || url.protocol === "data:" || url.protocol === "blob:") {
+  if (
+    url.protocol === "about:" ||
+    url.protocol === "data:" ||
+    url.protocol === "blob:"
+  ) {
     return true;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
@@ -282,12 +288,20 @@ export function resolveSystemChromiumExecutable(
       accessSync(explicit, fsConstants.X_OK);
       return explicit;
     } catch {
-      logger.warn({ executablePath: explicit }, "Configured Chromium executable is unavailable");
+      logger.warn(
+        { executablePath: explicit },
+        "Configured Chromium executable is unavailable",
+      );
     }
   }
 
   const pathEntries = (env.PATH ?? "").split(":").filter(Boolean);
-  const names = ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"];
+  const names = [
+    "chromium",
+    "chromium-browser",
+    "google-chrome-stable",
+    "google-chrome",
+  ];
   for (const directory of pathEntries) {
     for (const name of names) {
       const candidate = join(directory, name);
@@ -332,7 +346,10 @@ async function launchBrowser(): Promise<Browser> {
     if (observedPromise) {
       void observedPromise
         .then((currentBrowser) => {
-          if (currentBrowser === browser && browserPromise === observedPromise) {
+          if (
+            currentBrowser === browser &&
+            browserPromise === observedPromise
+          ) {
             browserPromise = null;
           }
         })
@@ -404,7 +421,9 @@ async function closeContextBounded(context: BrowserContext): Promise<void> {
   ]);
   if (timer) clearTimeout(timer);
   if (!closed) {
-    logger.warn("Browser context cleanup exceeded tolerance; resetting browser");
+    logger.warn(
+      "Browser context cleanup exceeded tolerance; resetting browser",
+    );
     discardBrowser();
   }
 }
@@ -430,7 +449,10 @@ export async function fetchWithBrowser(
     if (!slotAcquired) {
       browserMetrics.failures += 1;
       logger.warn(
-        { component: "render-fetch", errorCode: "BROWSER_SLOT_DEADLINE_EXCEEDED" },
+        {
+          component: "render-fetch",
+          errorCode: "BROWSER_SLOT_DEADLINE_EXCEEDED",
+        },
         "Browser fetch deadline exceeded while waiting for a slot",
       );
       return null;
@@ -442,7 +464,11 @@ export async function fetchWithBrowser(
       if (err instanceof BrowserDeadlineExceededError) {
         browserMetrics.failures += 1;
         logger.warn(
-          safeFailureFields(err, "render-fetch", "BROWSER_NAVIGATION_DEADLINE_EXCEEDED"),
+          safeFailureFields(
+            err,
+            "render-fetch",
+            "BROWSER_NAVIGATION_DEADLINE_EXCEEDED",
+          ),
           "Browser fetch deadline exceeded before navigation",
         );
       } else {
@@ -506,7 +532,8 @@ export async function fetchWithBrowser(
             querySelector(selector: string): { innerText?: string } | null;
             body?: { innerText?: string } | null;
           };
-          const semantic = doc.querySelector("article") ?? doc.querySelector("main");
+          const semantic =
+            doc.querySelector("article") ?? doc.querySelector("main");
           return {
             title: doc.title,
             articleText: semantic?.innerText?.trim() ?? "",
@@ -527,7 +554,11 @@ export async function fetchWithBrowser(
       browserMetrics.failures += 1;
       if (err instanceof BrowserDeadlineExceededError) {
         logger.warn(
-          safeFailureFields(err, "render-fetch", "BROWSER_FETCH_DEADLINE_EXCEEDED"),
+          safeFailureFields(
+            err,
+            "render-fetch",
+            "BROWSER_FETCH_DEADLINE_EXCEEDED",
+          ),
           "Browser fetch deadline exceeded",
         );
       } else {

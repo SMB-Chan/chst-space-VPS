@@ -32,10 +32,16 @@ let cachedOpenAiModel: string | null = null;
 function openAiCandidateModels(): string[] {
   const override = process.env.TRANSCRIBE_MODEL?.trim();
   const candidates = override
-    ? [override, ...OPENAI_FALLBACK_MODELS.filter((model) => model !== override)]
+    ? [
+        override,
+        ...OPENAI_FALLBACK_MODELS.filter((model) => model !== override),
+      ]
     : [...OPENAI_FALLBACK_MODELS];
   if (cachedOpenAiModel) {
-    return [cachedOpenAiModel, ...candidates.filter((model) => model !== cachedOpenAiModel)];
+    return [
+      cachedOpenAiModel,
+      ...candidates.filter((model) => model !== cachedOpenAiModel),
+    ];
   }
   return candidates;
 }
@@ -45,7 +51,9 @@ function isModelUnavailable(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (
     status === 404 ||
-    /model[^\n]*(not found|does not exist)|invalid[^\n]*model|unknown model/i.test(message)
+    /model[^\n]*(not found|does not exist)|invalid[^\n]*model|unknown model/i.test(
+      message,
+    )
   );
 }
 
@@ -56,7 +64,12 @@ function errorMessage(err: unknown): string {
 async function callTranscription(
   client: OpenAI,
   model: string,
-  args: { buffer: Buffer; filename: string; mime: string; signal?: AbortSignal },
+  args: {
+    buffer: Buffer;
+    filename: string;
+    mime: string;
+    signal?: AbortSignal;
+  },
 ): Promise<string> {
   const file = new File([new Uint8Array(args.buffer)], args.filename, {
     type: args.mime || "application/octet-stream",
@@ -65,17 +78,23 @@ async function callTranscription(
     { file, model },
     { signal: args.signal },
   );
-  const text = typeof result === "string" ? result : ((result as { text?: string } | null)?.text ?? "");
+  const text =
+    typeof result === "string"
+      ? result
+      : ((result as { text?: string } | null)?.text ?? "");
   return text.trim();
 }
 
-export async function transcribeDashScopeAudio(args: {
-  buffer: Buffer;
-  filename: string;
-  mime: string;
-  languageHints?: string[];
-  signal?: AbortSignal;
-}, model = QWEN_TRANSCRIBE_MODEL): Promise<string> {
+export async function transcribeDashScopeAudio(
+  args: {
+    buffer: Buffer;
+    filename: string;
+    mime: string;
+    languageHints?: string[];
+    signal?: AbortSignal;
+  },
+  model = QWEN_TRANSCRIBE_MODEL,
+): Promise<string> {
   if (model === QWEN_TRANSCRIBE_MODEL) {
     try {
       const text = await transcribeQwenAudio(args);
@@ -85,20 +104,32 @@ export async function transcribeDashScopeAudio(args: {
       if (error instanceof AlibabaAsrError && !error.retryable) {
         throw new TranscriptionError(error.publicMessage);
       }
-    logger.warn(
-      safeFailureFields(error, "audio-transcription", "QWEN_ASR_FAILED"),
-      "Qwen ASR failed; trying Paraformer fallback",
-    );
+      logger.warn(
+        safeFailureFields(error, "audio-transcription", "QWEN_ASR_FAILED"),
+        "Qwen ASR failed; trying Paraformer fallback",
+      );
     }
   }
   const dashscopeKey = process.env.DASHSCOPE_API_KEY?.trim();
-  if (!dashscopeClient || !dashscopeKey || isAlibabaTokenPlanKey(dashscopeKey)) {
+  if (
+    !dashscopeClient ||
+    !dashscopeKey ||
+    isAlibabaTokenPlanKey(dashscopeKey)
+  ) {
     throw new TranscriptionError("Alibaba Model Studioが設定されていません。");
   }
   try {
-    const text = await callTranscription(dashscopeClient, model === QWEN_TRANSCRIBE_MODEL ? PARAFormer_FALLBACK_MODEL : model, args);
+    const text = await callTranscription(
+      dashscopeClient,
+      model === QWEN_TRANSCRIBE_MODEL ? PARAFormer_FALLBACK_MODEL : model,
+      args,
+    );
     logger.info(
-      { component: "audio-transcription", provider: "dashscope", eventCode: "TRANSCRIPTION_COMPLETED" },
+      {
+        component: "audio-transcription",
+        provider: "dashscope",
+        eventCode: "TRANSCRIPTION_COMPLETED",
+      },
       "Audio transcription completed via DashScope",
     );
     return text;
@@ -123,12 +154,17 @@ export async function transcribeAudio(args: {
       const text = await callTranscription(openaiClient, model, args);
       cachedOpenAiModel = model;
       logger.info(
-        { component: "audio-transcription", provider: "openai", eventCode: "TRANSCRIPTION_COMPLETED" },
+        {
+          component: "audio-transcription",
+          provider: "openai",
+          eventCode: "TRANSCRIPTION_COMPLETED",
+        },
         "Audio transcription completed",
       );
       return text;
     } catch (err) {
-      if (args.signal?.aborted) throw args.signal.reason ?? new Error("aborted");
+      if (args.signal?.aborted)
+        throw args.signal.reason ?? new Error("aborted");
       failures.push(`openai/${model}: ${errorMessage(err)}`);
       // Wrong model name → try the next candidate. Any other failure
       // (auth, quota, network) would repeat on sibling models.
@@ -141,13 +177,17 @@ export async function transcribeAudio(args: {
       const text = await transcribeDashScopeAudio(args);
       return text;
     } catch (err) {
-      if (args.signal?.aborted) throw args.signal.reason ?? new Error("aborted");
+      if (args.signal?.aborted)
+        throw args.signal.reason ?? new Error("aborted");
       failures.push(`dashscope/${QWEN_TRANSCRIBE_MODEL}: ${errorMessage(err)}`);
     }
   }
 
   logger.warn(
-    { component: "audio-transcription", errorCode: "AUDIO_TRANSCRIPTION_FAILED" },
+    {
+      component: "audio-transcription",
+      errorCode: "AUDIO_TRANSCRIPTION_FAILED",
+    },
     "Audio transcription failed on all providers",
   );
   throw new TranscriptionError(
