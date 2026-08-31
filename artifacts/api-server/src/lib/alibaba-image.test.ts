@@ -7,6 +7,17 @@ afterEach(() => {
 
 const specialistEnv = { ALIBABA_SPECIALIST_API_KEY: "test-credential" } as NodeJS.ProcessEnv;
 
+async function expectReferenceImageRejectedBeforeNetwork(referenceImage: string): Promise<void> {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(generateAlibabaImage({
+    prompt: "make the sky blue",
+    modelId: "wan2.7-image-pro",
+    referenceImages: [referenceImage],
+  }, specialistEnv)).rejects.toThrow(AlibabaImageError);
+  expect(fetchMock).not.toHaveBeenCalled();
+}
+
 describe("generateAlibabaImage", () => {
   it("calls the regular Model Studio image endpoint and downloads the expiring result", async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -60,6 +71,108 @@ describe("generateAlibabaImage", () => {
       { image: "data:image/png;base64,aGVsbG8=" },
       { text: "make the sky blue" },
     ]);
+  });
+
+  it("keeps accepting a public HTTPS reference image URL", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output: { choices: [{ message: { content: [{ image: "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/edited.png" }] } }] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(Buffer.from("png"), {
+        status: 200, headers: { "content-type": "image/png" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateAlibabaImage({
+      prompt: "make the sky blue",
+      modelId: "wan2.7-image-pro",
+      referenceImages: ["https://assets.example.com/reference.png"],
+    }, specialistEnv);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("downloads only one URL when n is one and the provider returns multiple URLs", async () => {
+    const urls = [
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/one.png",
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/two.png",
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/three.png",
+    ];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output: { results: urls.map((url) => ({ url })) },
+      }), { status: 200 }))
+      .mockResolvedValue(new Response(Buffer.from("png"), {
+        status: 200, headers: { "content-type": "image/png" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateAlibabaImage({ prompt: "draw a cat", n: 1 }, specialistEnv);
+
+    expect(result).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not download URLs when n is one and an inline image is present", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      data: [{ b64_json: Buffer.from("inline").toString("base64") }],
+      output: {
+        results: [
+          { url: "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/one.png" },
+          { url: "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/two.png" },
+        ],
+      },
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateAlibabaImage({ prompt: "draw a cat", n: 1 }, specialistEnv);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].buffer.equals(Buffer.from("inline"))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads only the remaining URLs when n is greater than one and an inline image is present", async () => {
+    const urls = [
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/one.png",
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/two.png",
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/three.png",
+      "https://dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com/four.png",
+    ];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from("inline").toString("base64") }],
+        output: { results: urls.map((url) => ({ url })) },
+      }), { status: 200 }))
+      .mockResolvedValue(new Response(Buffer.from("png"), {
+        status: 200, headers: { "content-type": "image/png" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateAlibabaImage({ prompt: "draw a cat", n: 3 }, specialistEnv);
+
+    expect(result).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["a data URL prefix without payload", "data:image/"],
+    ["an empty data URL", "data:image/png;base64,"],
+    ["an unsupported image MIME type", "data:image/gif;base64,R0lGODlh"],
+    ["malformed base64 characters", "data:image/png;base64,not-base64!"],
+    ["incomplete base64 padding", "data:image/png;base64,AAA"],
+    ["a credential-bearing HTTPS URL", "https://user:password@assets.example.com/image.png"],
+    ["localhost", "https://localhost/image.png"],
+    ["a .local hostname", "https://assets.local/image.png"],
+    ["an IPv4 literal", "https://127.0.0.1/image.png"],
+    ["an IPv6 literal", "https://[::1]/image.png"],
+  ])("rejects %s before making a network call", async (_name, referenceImage) => {
+    await expectReferenceImageRejectedBeforeNetwork(referenceImage);
+  });
+
+  it("rejects a reference image whose decoded data exceeds the limit before networking", async () => {
+    const oversized = `data:image/png;base64,${Buffer.alloc(12 * 1024 * 1024 + 1).toString("base64")}`;
+    await expectReferenceImageRejectedBeforeNetwork(oversized);
   });
 
   it("rejects specialist model mismatches before making a network call", async () => {

@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import {
   ALIBABA_CAPABILITY_DEFAULTS,
   modelHasAlibabaCapability,
@@ -10,7 +11,8 @@ import { logger } from "./logger";
 
 const MAX_PROMPT_CHARS = 16_000;
 const MAX_REFERENCE_IMAGES = 3;
-const MAX_REFERENCE_DATA_URL_CHARS = 16 * 1024 * 1024;
+const MAX_REFERENCE_IMAGE_BYTES = 12 * 1024 * 1024;
+const MAX_REFERENCE_DATA_URL_CHARS = Math.ceil(MAX_REFERENCE_IMAGE_BYTES * 4 / 3) + 128;
 const MAX_GENERATED_IMAGE_BYTES = 32 * 1024 * 1024;
 
 export interface AlibabaImageRequest {
@@ -79,12 +81,55 @@ function validateReferenceImage(value: string): void {
   if (value.length > MAX_REFERENCE_DATA_URL_CHARS) {
     throw new AlibabaImageError("Reference image is too large", "参照画像が大きすぎます。");
   }
-  if (value.startsWith("data:image/")) return;
-  if (/^https:\/\//i.test(value)) return;
-  throw new AlibabaImageError(
-    "Reference image must be a data URL or HTTPS URL",
-    "参照画像の形式に対応していません。",
+
+  const dataMatch = value.match(
+    /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/i,
   );
+  if (dataMatch) {
+    const encoded = dataMatch[1];
+    if (encoded.length % 4 !== 0) {
+      throw new AlibabaImageError(
+        "Reference image has invalid base64 padding",
+        "参照画像の形式に対応していません。",
+      );
+    }
+    const decoded = Buffer.from(encoded, "base64");
+    if (decoded.length === 0 || decoded.length > MAX_REFERENCE_IMAGE_BYTES) {
+      throw new AlibabaImageError("Reference image is too large", "参照画像が大きすぎます。");
+    }
+    if (decoded.toString("base64") !== encoded) {
+      throw new AlibabaImageError(
+        "Reference image has invalid base64 encoding",
+        "参照画像の形式に対応していません。",
+      );
+    }
+    return;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new AlibabaImageError("Invalid reference image URL", "参照画像の形式に対応していません。");
+  }
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  const ipHostname =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    hostname === "localhost" ||
+    hostname.endsWith(".local") ||
+    isIP(ipHostname) !== 0
+  ) {
+    throw new AlibabaImageError(
+      "Reference image must use a public HTTPS hostname",
+      "参照画像の形式に対応していません。",
+    );
+  }
 }
 
 function validateSize(value: string | undefined): void {
@@ -308,7 +353,8 @@ export async function generateAlibabaImage(
       requestId: payload.request_id,
     });
   }
-  for (const [index, url] of urls.entries()) {
+  const remainingUrlCount = Math.max(0, n - generated.length);
+  for (const [index, url] of urls.slice(0, remainingUrlCount).entries()) {
     const buffer = await downloadGeneratedImage(url, request.signal);
     generated.push({
       buffer,

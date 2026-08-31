@@ -91,6 +91,59 @@ describe("Qwen Audio ASR transport", () => {
     ).resolves.toBe("fallback transcript");
   });
 
+  it("rejects unrelated 0xE0-prefixed bytes before external fetch", async () => {
+    await expect(
+      transcribeQwenAudio(
+        {
+          buffer: Buffer.from([0xe0, 0xfb, 0x90, 0x00]),
+          filename: "random.bin",
+          mime: "application/octet-stream",
+          durationSeconds: 1,
+        },
+        env,
+      ),
+    ).rejects.toMatchObject({ publicMessage: "対応していない音声形式です。MP3、WAV、M4A、OGG、FLAC、WebMなどを使用してください。" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid MP3 frame header with a non-reserved version and layer", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ output: { text: "mp3 transcript" } }), { status: 200 }),
+    );
+    await expect(
+      transcribeQwenAudio(
+        {
+          buffer: Buffer.from([0xff, 0xfb, 0x90, 0x00]),
+          filename: "frame.bin",
+          mime: "application/octet-stream",
+          durationSeconds: 1,
+        },
+        env,
+      ),
+    ).resolves.toBe("mp3 transcript");
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.parameters.format).toBe("mp3");
+  });
+
+  it("continues treating an AAC ADTS frame as AAC", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ output: { text: "aac transcript" } }), { status: 200 }),
+    );
+    await expect(
+      transcribeQwenAudio(
+        {
+          buffer: Buffer.from([0xff, 0xf1, 0x50, 0x80, 0x00, 0x1f, 0xfc]),
+          filename: "frame.bin",
+          mime: "application/octet-stream",
+          durationSeconds: 1,
+        },
+        env,
+      ),
+    ).resolves.toBe("aac transcript");
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.parameters.format).toBe("aac");
+  });
+
   it("rejects clips over five minutes and more than four language hints before network access", async () => {
     await expect(
       transcribeQwenAudio(

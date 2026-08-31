@@ -89,7 +89,11 @@ function detectedFormat(buffer: Buffer): QwenAudioFormat | undefined {
   if (buffer.length >= 6 && buffer.toString("ascii", 0, 6) === "#!AMR\n") return "amr";
   if (
     (buffer.length >= 3 && buffer.toString("ascii", 0, 3) === "ID3") ||
-    (buffer.length >= 2 && (buffer[0] & 0xe0) === 0xe0 && (buffer[1] & 0x06) !== 0)
+    (buffer.length >= 2 &&
+      buffer[0] === 0xff &&
+      (buffer[1] & 0xe0) === 0xe0 &&
+      (buffer[1] & 0x18) !== 0 &&
+      (buffer[1] & 0x06) !== 0)
   ) {
     return "mp3";
   }
