@@ -83,31 +83,9 @@ import {
   canCancelAlibabaVideoStatus,
 } from "../../lib/alibaba-video-job-state";
 import { logSafeHttpError } from "../../lib/http-error-observability";
+import { publicAiError } from "../../lib/public-error";
 
 const router = Router();
-
-function publicAiError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  const message = raw.toLowerCase();
-  if (
-    message.includes("429") ||
-    message.includes("quota") ||
-    message.includes("rate limit")
-  ) {
-    return "AIの利用上限に達しました。しばらく待ってから再試行してください。";
-  }
-  if (message.includes("timeout") || message.includes("timed out")) {
-    return "AIの応答がタイムアウトしました。再試行してください。";
-  }
-  if (
-    message.includes("api key") ||
-    message.includes("unauthorized") ||
-    message.includes("authentication")
-  ) {
-    return "AI APIキーが無効です。Secretsを確認してください。";
-  }
-  return "AIの応答中にエラーが発生しました。";
-}
 
 function parsePositiveInt(
   raw: string | number | string[] | undefined,

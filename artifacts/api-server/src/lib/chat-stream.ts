@@ -21,6 +21,7 @@ import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
 import { logger, safeFailureFields } from "./logger";
+import { isTransientAiError } from "./public-error";
 import {
   detectFileFormat,
   buildFileGenerationPrompt,
@@ -1416,83 +1417,105 @@ async function streamModelText(args: {
     args.reasoningLevel,
   );
 
-  let stream: AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
-  try {
-    stream = (await args.client.chat.completions.create(streamOptions, {
-      signal: args.signal,
-    })) as AsyncIterable<{
-      choices?: { delta?: StreamDelta }[];
-    }>;
-  } catch (err) {
-    if (args.signal?.aborted) throw args.signal.reason;
-    if (!isUnsupportedGenerationParam(err)) throw err;
-    logger.warn(
-      safeFailureFields(err, "chat-stream", "GENERATION_PARAMS_RETRY"),
-      "Retrying stream without extra generation params",
-    );
-    applySafeGenerationParams(
-      streamOptions as unknown as Record<string, unknown>,
-      args.provider,
-    );
-    stream = (await args.client.chat.completions.create(streamOptions, {
-      signal: args.signal,
-    })) as AsyncIterable<{
-      choices?: { delta?: StreamDelta }[];
-    }>;
-  }
-
   let full = "";
   let reasoning = "";
   const toolCalls = new Map<number, SpecialistToolCall>();
-  try {
-    for await (const chunk of stream) {
-      if (args.shouldStop()) break;
-      const delta = chunk.choices?.[0]?.delta;
-      const rawToolCalls = (
-        delta as unknown as
-          | {
-              tool_calls?: {
-                index?: number;
-                id?: string;
-                function?: { name?: string; arguments?: string };
-              }[];
-            }
-          | undefined
-      )?.tool_calls;
-      if (rawToolCalls) {
-        for (const raw of rawToolCalls) {
-          const index = Number.isSafeInteger(raw.index)
-            ? raw.index!
-            : toolCalls.size;
-          const previous = toolCalls.get(index) ?? {
-            id: "",
-            name: "",
-            arguments: "",
-          };
-          toolCalls.set(index, {
-            id: raw.id ?? previous.id,
-            name: raw.function?.name ?? previous.name,
-            arguments: previous.arguments + (raw.function?.arguments ?? ""),
-          });
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let stream: AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
+    try {
+      try {
+        stream = (await args.client.chat.completions.create(streamOptions, {
+          signal: args.signal,
+        })) as AsyncIterable<{
+          choices?: { delta?: StreamDelta }[];
+        }>;
+      } catch (err) {
+        if (args.signal?.aborted) throw args.signal.reason;
+        if (!isUnsupportedGenerationParam(err)) throw err;
+        logger.warn(
+          safeFailureFields(err, "chat-stream", "GENERATION_PARAMS_RETRY"),
+          "Retrying stream without extra generation params",
+        );
+        applySafeGenerationParams(
+          streamOptions as unknown as Record<string, unknown>,
+          args.provider,
+        );
+        stream = (await args.client.chat.completions.create(streamOptions, {
+          signal: args.signal,
+        })) as AsyncIterable<{
+          choices?: { delta?: StreamDelta }[];
+        }>;
+      }
+
+      for await (const chunk of stream) {
+        if (args.shouldStop()) break;
+        const delta = chunk.choices?.[0]?.delta;
+        const rawToolCalls = (
+          delta as unknown as
+            | {
+                tool_calls?: {
+                  index?: number;
+                  id?: string;
+                  function?: { name?: string; arguments?: string };
+                }[];
+              }
+            | undefined
+        )?.tool_calls;
+        if (rawToolCalls) {
+          for (const raw of rawToolCalls) {
+            const index = Number.isSafeInteger(raw.index)
+              ? raw.index!
+              : toolCalls.size;
+            const previous = toolCalls.get(index) ?? {
+              id: "",
+              name: "",
+              arguments: "",
+            };
+            toolCalls.set(index, {
+              id: raw.id ?? previous.id,
+              name: raw.function?.name ?? previous.name,
+              arguments: previous.arguments + (raw.function?.arguments ?? ""),
+            });
+          }
+        }
+        const reasoningDelta = readReasoningDelta(delta);
+        if (reasoningDelta) {
+          const merged = mergeStreamDelta(reasoning, reasoningDelta);
+          const added = merged.slice(reasoning.length);
+          reasoning = merged;
+          // Only the phase is exposed by the caller; reasoning text remains
+          // server-side. Emitting the phase also keeps long reasoning streams
+          // alive through idle proxies.
+          if (added) args.onDelta(added, "reasoning");
+        }
+        const contentDelta = readContentDelta(delta);
+        if (contentDelta) {
+          const merged = mergeStreamDelta(full, contentDelta);
+          const added = merged.slice(full.length);
+          full = merged;
+          if (added) args.onDelta(added, "content");
         }
       }
-      const reasoningDelta = readReasoningDelta(delta);
-      if (reasoningDelta) {
-        const merged = mergeStreamDelta(reasoning, reasoningDelta);
-        const added = merged.slice(reasoning.length);
-        reasoning = merged;
-        // Reasoning is intentionally never sent to the browser.
-      }
-      const contentDelta = readContentDelta(delta);
-      if (contentDelta) {
-        const merged = mergeStreamDelta(full, contentDelta);
-        const added = merged.slice(full.length);
-        full = merged;
-        if (added) args.onDelta(added, "content");
-      }
+      break;
+    } catch (err) {
+      if (args.signal?.aborted) break;
+      const canRetry =
+        attempt < maxAttempts && !full && isTransientAiError(err);
+      if (!canRetry) throw err;
+      reasoning = "";
+      // Tool calls are only handed to the executor after the stream finishes,
+      // so incomplete fragments are safe to discard before a retry.
+      toolCalls.clear();
+      logger.warn(
+        {
+          ...safeFailureFields(err, "chat-stream", "MODEL_STREAM_RETRY"),
+          attempt,
+        },
+        "Retrying interrupted model stream before visible output",
+      );
     }
-  } catch (err) {
-    if (!args.signal?.aborted) throw err;
   }
   if (toolCalls.size > 0) {
     args.onToolCalls?.(

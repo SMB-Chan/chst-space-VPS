@@ -6,6 +6,71 @@ function errorMessage(err: unknown): string {
       : "";
 }
 
+function errorChain(err: unknown): unknown[] {
+  const chain: unknown[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && !seen.has(current) && chain.length < 4) {
+    chain.push(current);
+    seen.add(current);
+    current =
+      typeof current === "object" && "cause" in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return chain;
+}
+
+/**
+ * Failures that are safe to retry before a streamed response has emitted any
+ * user-visible text. Authentication, validation, and quota failures are
+ * intentionally excluded because another request cannot repair them.
+ */
+export function isTransientAiError(err: unknown): boolean {
+  const retryableStatuses = new Set([408, 409, 425, 500, 502, 503, 504]);
+  const retryableCodes = new Set([
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "EHOSTUNREACH",
+    "ENETUNREACH",
+    "ETIMEDOUT",
+    "EPIPE",
+    "EAI_AGAIN",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_SOCKET",
+  ]);
+
+  return errorChain(err).some((item) => {
+    const typed = item as {
+      status?: unknown;
+      statusCode?: unknown;
+      code?: unknown;
+    };
+    if (
+      typeof typed.status === "number" &&
+      retryableStatuses.has(typed.status)
+    ) {
+      return true;
+    }
+    if (
+      typeof typed.statusCode === "number" &&
+      retryableStatuses.has(typed.statusCode)
+    ) {
+      return true;
+    }
+    if (
+      typeof typed.code === "string" &&
+      retryableCodes.has(typed.code.toUpperCase())
+    ) {
+      return true;
+    }
+    return /connection (?:error|reset|refused|terminated)|fetch failed|network error|socket hang up|other side closed|bad gateway|service unavailable|gateway timeout|temporarily unavailable|timed out/i.test(
+      errorMessage(item),
+    );
+  });
+}
+
 export function isDatabaseError(err: unknown): boolean {
   const msg = errorMessage(err);
   return /Failed query|insert into|update "|delete from|relation ["']?\w+["']? does not exist|column .* does not exist|duplicate key value|violates (not-null|foreign key|unique|check) constraint|ECONNREFUSED|connection terminated|too many clients|password authentication failed/i.test(
@@ -29,6 +94,9 @@ export function publicAiError(err: unknown): string {
   }
   if (/unsupported parameter|unknown parameter|invalid.?request/i.test(msg)) {
     return "このモデルでは使えない設定がありました。別のモデルか推論オフで再試行してください。";
+  }
+  if (isTransientAiError(err)) {
+    return "AIサービスへの接続が一時的に不安定です。もう一度お試しください。";
   }
   return "応答の生成に失敗しました。もう一度お試しください。";
 }
