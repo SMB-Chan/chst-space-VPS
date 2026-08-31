@@ -22,7 +22,7 @@ import {
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
 import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 import {
   detectFileFormat,
   buildFileGenerationPrompt,
@@ -357,7 +357,10 @@ export async function streamChatReply(args: {
           }
         }
       } catch (err) {
-        logger.warn({ err }, "Vision bridge failed; answering without image content");
+        logger.warn(
+          safeFailureFields(err, "chat-stream", "VISION_BRIDGE_FAILED"),
+          "Vision bridge failed; answering without image content",
+        );
         if (!clientGone()) {
           res.write(
             `data: ${JSON.stringify({
@@ -628,7 +631,10 @@ export async function streamChatReply(args: {
                   );
                 } catch (err) {
                   if (clientAbort.signal.aborted) throw err;
-                  logger.warn({ err, auditModelId }, "Vision bridge for audit failed");
+                  logger.warn(
+                    safeFailureFields(err, "chat-stream", "AUDIT_VISION_BRIDGE_FAILED"),
+                    "Vision bridge for audit failed",
+                  );
                   imageTranscript = "";
                 }
               }
@@ -687,7 +693,10 @@ export async function streamChatReply(args: {
             }
           }
         } catch (err) {
-          logger.warn({ err, auditModelId }, "Audit pass failed; returning main answer only");
+          logger.warn(
+            safeFailureFields(err, "chat-stream", "AUDIT_PASS_FAILED"),
+            "Audit pass failed; returning main answer only",
+          );
           if (!clientGone()) {
             res.write(
               `data: ${JSON.stringify({
@@ -722,7 +731,6 @@ export async function streamChatReply(args: {
           {
             stage: "file-format-detection",
             requestId,
-            conversationId,
             fileFormat,
             explicitFormat: requestedFileFormat ?? undefined,
             elapsedMs: elapsedMs(formatDetectionStartedAt),
@@ -782,7 +790,10 @@ export async function streamChatReply(args: {
             })
           : undefined;
       } catch (err) {
-        logger.error({ err, modelId, conversationId }, "Failed to persist chat completion");
+        logger.error(
+          safeFailureFields(err, "chat-stream", "CHAT_COMPLETION_PERSIST_FAILED"),
+          "Failed to persist chat completion",
+        );
         if (!clientGone()) {
           res.write(
             `data: ${JSON.stringify({
@@ -849,7 +860,10 @@ export async function streamChatReply(args: {
       }
     }
   } catch (err) {
-    logger.error({ err, modelId }, "Error streaming AI response");
+    logger.error(
+      safeFailureFields(err, "chat-stream", "AI_RESPONSE_STREAM_FAILED"),
+      "Error streaming AI response",
+    );
     if (!clientGone()) {
       res.write(`data: ${JSON.stringify({ error: publicAiError(err) })}\n\n`);
     }
@@ -904,10 +918,7 @@ async function streamModelText(args: {
     if (args.signal?.aborted) throw args.signal.reason;
     if (!isUnsupportedGenerationParam(err)) throw err;
     logger.warn(
-      {
-        error: getFileGenerationErrorDetails(err),
-        modelId: args.modelId,
-      },
+      safeFailureFields(err, "chat-stream", "GENERATION_PARAMS_RETRY"),
       "Retrying stream without extra generation params",
     );
     applySafeGenerationParams(streamOptions as unknown as Record<string, unknown>, args.provider);
@@ -1085,7 +1096,7 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
     requestId,
     signal,
   } = ctx;
-  const baseDiagnostic = { requestId, conversationId, fileFormat };
+  const baseDiagnostic = { requestId, fileFormat };
   let currentStage = "file-generation";
   let generationAttempt = 0;
 
@@ -1236,7 +1247,6 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
             maxPages: 3,
             diagnosticContext: {
               requestId,
-              conversationId,
               attempt: generationAttempt,
               iteration,
             },
@@ -1294,13 +1304,7 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
         } catch (error) {
           if (isCancelled()) return undefined;
           logger.warn(
-            {
-              ...baseDiagnostic,
-              stage: currentStage,
-              attempt: generationAttempt,
-              iteration,
-              error: getFileGenerationErrorDetails(error),
-            },
+            safeFailureFields(error, "chat-stream", "LAYOUT_REVIEW_ITERATION_FAILED"),
             "Layout review iteration failed; keeping rendered file",
           );
           break;
@@ -1325,12 +1329,7 @@ export async function generateAndReviewFile(ctx: GenerateAndReviewFileContext): 
     if (clientGone() || signal?.aborted) return undefined;
     const errorDetails = getFileGenerationErrorDetails(error);
     logger.error(
-      {
-        ...baseDiagnostic,
-        stage: currentStage,
-        attempt: generationAttempt || undefined,
-        error: errorDetails,
-      },
+      safeFailureFields(error, "chat-stream", "FILE_GENERATION_STAGE_FAILED"),
       "File generation stage failed",
     );
     if (!clientGone()) {

@@ -98,7 +98,7 @@ export async function transcribeDashScopeAudio(args: {
   try {
     const text = await callTranscription(dashscopeClient, model === QWEN_TRANSCRIBE_MODEL ? PARAFormer_FALLBACK_MODEL : model, args);
     logger.info(
-      { model: model === QWEN_TRANSCRIBE_MODEL ? PARAFormer_FALLBACK_MODEL : model, filename: args.filename, outputCharacters: text.length },
+      { component: "audio-transcription", provider: "dashscope", eventCode: "TRANSCRIPTION_COMPLETED" },
       "Audio transcription completed via DashScope",
     );
     return text;
@@ -123,7 +123,7 @@ export async function transcribeAudio(args: {
       const text = await callTranscription(openaiClient, model, args);
       cachedOpenAiModel = model;
       logger.info(
-        { model, filename: args.filename, outputCharacters: text.length },
+        { component: "audio-transcription", provider: "openai", eventCode: "TRANSCRIPTION_COMPLETED" },
         "Audio transcription completed",
       );
       return text;

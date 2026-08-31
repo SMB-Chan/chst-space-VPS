@@ -10,7 +10,7 @@ import {
   modelHasAlibabaCapability,
 } from "./alibaba-capabilities";
 import { QWEN_AUDIO_TTS_PLUS_VOICES } from "./alibaba-tts";
-import { logger } from "./logger";
+import { logger, safeFailureFields } from "./logger";
 
 export type CapabilityToolPlan =
   | { tool: "none" }
@@ -375,7 +375,7 @@ export async function planCapabilityTool(args: {
   } catch (error) {
     if (args.signal?.aborted) throw error;
     logger.warn(
-      { err: error, modelId: args.modelId },
+      safeFailureFields(error, "capability-broker", "CAPABILITY_PREFLIGHT_FAILED"),
       "Capability broker preflight failed; continuing without specialist tool",
     );
     return { tool: "none" };

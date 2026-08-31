@@ -5,6 +5,7 @@ import {
   httpLogLevel,
   logSafeHttpError,
 } from "./http-error-observability";
+import { safeErrorSerializer } from "./logger";
 import { publicHttpError } from "./public-error";
 
 function request(overrides: Record<string, unknown> = {}) {
@@ -135,5 +136,18 @@ describe("safe HTTP error observability", () => {
     logSafeHttpError(request(), publicError.status, error, undefined, target);
     expect(JSON.stringify(target.error.mock.calls[0])).not.toContain("select secret_table");
     expect(JSON.stringify(target.error.mock.calls[0])).not.toContain("private");
+  });
+
+  it("serializes both err and error values to a bounded exception name only", () => {
+    const secret = "api-key-and-stack-secret";
+    const error = new Error(`raw message ${secret}`);
+    error.name = "BearerSecret";
+    error.stack = `Error: ${secret}\n at ${secret}`;
+
+    expect(safeErrorSerializer(error)).toEqual({ name: "UnknownError" });
+    expect(JSON.stringify(safeErrorSerializer(error))).not.toContain(secret);
+    expect(safeErrorSerializer({ error, message: secret, stack: secret })).toEqual({
+      name: "UnknownError",
+    });
   });
 });

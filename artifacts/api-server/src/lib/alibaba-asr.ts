@@ -367,7 +367,7 @@ export async function transcribeQwenAudio(args: {
     const text = extractTranscript(payload);
     if (!text) throw new AlibabaAsrError("Qwen ASR returned no transcript");
     logger.info(
-      { model: "qwen-audio-3.0-asr-flash", filename: args.filename, format, outputCharacters: text.length },
+      { component: "alibaba-asr", provider: "qwen", eventCode: "TRANSCRIPTION_COMPLETED" },
       "Audio transcription completed via Qwen ASR",
     );
     return text;

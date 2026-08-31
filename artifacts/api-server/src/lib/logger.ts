@@ -37,7 +37,7 @@ export function safeFailureFields(
   };
 }
 
-const safeErrorSerializer = (error: unknown) => ({
+export const safeErrorSerializer = (error: unknown) => ({
   name: safeExceptionName(error),
 });
 

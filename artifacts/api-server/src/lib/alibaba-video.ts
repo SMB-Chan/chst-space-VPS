@@ -258,7 +258,11 @@ async function parseApiResponse(response: Response, operation: string): Promise<
   if (!response.ok || payload.code) {
     const providerMessage = payload.message || `HTTP ${response.status}`;
     logger.warn(
-      { operation, status: response.status, code: payload.code, providerMessage },
+      {
+        component: "alibaba-video",
+        errorCode: "VIDEO_PROVIDER_REQUEST_FAILED",
+        status: response.status,
+      },
       "Alibaba video API request failed",
     );
     throw new AlibabaVideoError(`Alibaba video ${operation} failed: ${providerMessage}`);

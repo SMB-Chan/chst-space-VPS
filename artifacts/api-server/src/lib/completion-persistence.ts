@@ -253,7 +253,8 @@ export async function persistChatCompletion(
     if (quotaExceeded) {
       logger.warn(
         {
-          userId: input.userId,
+          component: "completion-persistence",
+          errorCode: "GENERATED_FILE_QUOTA_EXCEEDED",
           quotaBytes,
           usedBytes,
           generatedFiles: generatedFiles.length,
