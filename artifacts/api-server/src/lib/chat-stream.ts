@@ -4,6 +4,7 @@ import {
   applyGenerationParams,
   applySafeGenerationParams,
   isUnsupportedGenerationParam,
+  type ChatModel,
   type ModelProvider,
   type ReasoningLevel,
 } from "./ai-clients";
@@ -14,7 +15,7 @@ import {
   readContentDelta,
   type StreamDelta,
 } from "./stream-delta";
-import { getClientForModel, modelSupportsVision } from "./ai-clients";
+import { getClientForModel } from "./ai-clients";
 import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
 import { buildWebContext } from "./web-search";
 import { composeSkillSearchQuery, matchSkills } from "./skills";
@@ -225,7 +226,7 @@ export async function streamChatReply(args: {
   auditReasoningLevel?: ReasoningLevel;
   userText: string;
   chatMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-  auditModelId?: string;
+  auditModel?: Pick<ChatModel, "id" | "provider" | "supportsVision">;
   /** Attachments of the current user message, forwarded to the audit model. */
   attachmentsForAudit?: {
     textFiles: { name: string; content: string }[];
@@ -282,7 +283,7 @@ export async function streamChatReply(args: {
     auditReasoningLevel = "off",
     userText,
     chatMessages,
-    auditModelId,
+    auditModel,
     attachmentsForAudit,
     visionBridgeImages,
     imageAttachmentsForTools,
@@ -631,15 +632,15 @@ export async function streamChatReply(args: {
       // A user stop aborts the shared signal, so no audit or revision work
       // starts after the client explicitly cancels the turn.
       if (
-        auditModelId &&
-        auditModelId !== modelId &&
+        auditModel &&
+        auditModel.id !== modelId &&
         !clientAbort.signal.aborted
       ) {
         try {
-          const auditor = getClientForModel(auditModelId);
+          const auditor = getClientForModel(auditModel.id, auditModel.provider);
           if (!clientGone()) {
             res.write(
-              `data: ${JSON.stringify({ status: "auditing", model: auditModelId })}\n\n`,
+              `data: ${JSON.stringify({ status: "auditing", model: auditModel.id })}\n\n`,
             );
           }
           const auditUserText = buildAuditUserMessage({
@@ -658,7 +659,7 @@ export async function streamChatReply(args: {
           // the audit still covers image content.
           let auditUserContent: string | ChatContentPart[] = auditUserText;
           if (auditImageUrls.length > 0) {
-            if (modelSupportsVision(auditModelId)) {
+            if (auditModel.supportsVision) {
               auditUserContent = [
                 { type: "text", text: auditUserText },
                 {
@@ -707,7 +708,7 @@ export async function streamChatReply(args: {
               streamModelText({
                 client: auditor.client,
                 provider: auditor.provider,
-                modelId: auditModelId,
+                modelId: auditModel.id,
                 reasoningLevel: auditReasoningLevel,
                 messages: [
                   { role: "system", content: AUDIT_SYSTEM_PROMPT },
@@ -730,7 +731,7 @@ export async function streamChatReply(args: {
           if (auditText.trim()) {
             const patched = applyValidatedAuditPatch(fullResponse, auditText);
             if (patched.note) {
-              audit = { content: patched.note, modelId: auditModelId };
+              audit = { content: patched.note, modelId: auditModel.id };
               if (!clientGone()) {
                 res.write(
                   `data: ${JSON.stringify({ audit: patched.note })}\n\n`,

@@ -54,25 +54,131 @@ export type ModelProvider = "openai" | "dashscope";
 export type ReasoningKind = "none" | "openai" | "dashscope";
 export type ReasoningLevel = "off" | "low" | "medium" | "high";
 
+export interface ChatModel {
+  id: string;
+  label: string;
+  provider: ModelProvider;
+  description: string;
+  supportsVision: boolean;
+  supportsReasoning: boolean;
+  reasoning: ReasoningKind;
+}
+
 export const AVAILABLE_MODELS = [
   // OpenAI models (via Replit AI Integrations)
-  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" as ModelProvider, description: "高性能・汎用", supportsVision: true, supportsReasoning: true, reasoning: "openai" as ReasoningKind },
-  { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",  provider: "openai" as ModelProvider, description: "高速・低コスト", supportsVision: true, supportsReasoning: true, reasoning: "openai" as ReasoningKind },
-  { id: "o4-mini",       label: "o4-mini",        provider: "openai" as ModelProvider, description: "高度な推論", supportsVision: true, supportsReasoning: true, reasoning: "openai" as ReasoningKind },
+  {
+    id: "gpt-5.6-terra",
+    label: "GPT-5.6 Terra",
+    provider: "openai" as ModelProvider,
+    description: "高性能・汎用",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openai" as ReasoningKind,
+  },
+  {
+    id: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    provider: "openai" as ModelProvider,
+    description: "高速・低コスト",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openai" as ReasoningKind,
+  },
+  {
+    id: "o4-mini",
+    label: "o4-mini",
+    provider: "openai" as ModelProvider,
+    description: "高度な推論",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openai" as ReasoningKind,
+  },
   // Alibaba Cloud Model Studio (Token Plan endpoint)
   // Qwen 3.6/3.7 and GLM 5.2 enable thinking by default — always send enable_thinking explicitly.
-  { id: "qwen3.8-max",             label: "Qwen3.8 Max",             provider: "dashscope" as ModelProvider, description: "Alibaba最高性能", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "qwen3.8-flash",           label: "Qwen3.8 Flash",           provider: "dashscope" as ModelProvider, description: "高速・画像理解", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "qwen3.7-plus",            label: "Qwen3.7 Plus",            provider: "dashscope" as ModelProvider, description: "高速・バランス", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "qwen3.7-max",             label: "Qwen3.7 Max",             provider: "dashscope" as ModelProvider, description: "高性能テキスト推論", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "qwen3.6-flash",           label: "Qwen3.6 Flash",           provider: "dashscope" as ModelProvider, description: "最速・低コスト", supportsVision: true,  supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "deepseek-v4-pro-0813",    label: "DeepSeek V4 Pro 0813",   provider: "dashscope" as ModelProvider, description: "推論特化スナップショット", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "deepseek-v4-pro",         label: "DeepSeek V4 Pro",         provider: "dashscope" as ModelProvider, description: "推論特化", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "deepseek-v4-flash-0731",  label: "DeepSeek V4 Flash 0731",  provider: "dashscope" as ModelProvider, description: "高速推論スナップショット", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-  { id: "glm-5.2",                 label: "GLM-5.2",                 provider: "dashscope" as ModelProvider, description: "汎用", supportsVision: false, supportsReasoning: true, reasoning: "dashscope" as ReasoningKind },
-] as const;
+  {
+    id: "qwen3.8-max",
+    label: "Qwen3.8 Max",
+    provider: "dashscope" as ModelProvider,
+    description: "Alibaba最高性能",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "qwen3.8-flash",
+    label: "Qwen3.8 Flash",
+    provider: "dashscope" as ModelProvider,
+    description: "高速・画像理解",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "qwen3.7-plus",
+    label: "Qwen3.7 Plus",
+    provider: "dashscope" as ModelProvider,
+    description: "高速・バランス",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "qwen3.7-max",
+    label: "Qwen3.7 Max",
+    provider: "dashscope" as ModelProvider,
+    description: "高性能テキスト推論",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "qwen3.6-flash",
+    label: "Qwen3.6 Flash",
+    provider: "dashscope" as ModelProvider,
+    description: "最速・低コスト",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "deepseek-v4-pro-0813",
+    label: "DeepSeek V4 Pro 0813",
+    provider: "dashscope" as ModelProvider,
+    description: "推論特化スナップショット",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    provider: "dashscope" as ModelProvider,
+    description: "推論特化",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "deepseek-v4-flash-0731",
+    label: "DeepSeek V4 Flash 0731",
+    provider: "dashscope" as ModelProvider,
+    description: "高速推論スナップショット",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+  {
+    id: "glm-5.2",
+    label: "GLM-5.2",
+    provider: "dashscope" as ModelProvider,
+    description: "汎用",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "dashscope" as ReasoningKind,
+  },
+] as const satisfies readonly ChatModel[];
 
-export type ModelId = typeof AVAILABLE_MODELS[number]["id"];
+export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
 
 export const DEFAULT_MODEL: ModelId = AVAILABLE_MODELS[0].id;
 
@@ -90,7 +196,8 @@ export function getModelLabel(modelId: string): string {
 }
 
 export function parseReasoningLevel(raw: unknown): ReasoningLevel {
-  if (raw === "off" || raw === "low" || raw === "medium" || raw === "high") return raw;
+  if (raw === "off" || raw === "low" || raw === "medium" || raw === "high")
+    return raw;
   return "medium";
 }
 
@@ -110,7 +217,9 @@ export function applyGenerationParams(
   provider: ModelProvider,
   level: ReasoningLevel,
 ): void {
-  const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+  const model = AVAILABLE_MODELS.find(
+    (m) => m.id === modelId && m.provider === provider,
+  );
   if (provider === "openai") {
     opts.max_completion_tokens = 8192;
     // Only o-series reliably accepts reasoning_effort on the Replit proxy.
@@ -161,24 +270,38 @@ export function isUnsupportedGenerationParam(err: unknown): boolean {
   );
 }
 
-export function getClientForModel(modelId: string): { client: OpenAI; provider: ModelProvider } {
+export function getClientForModel(
+  modelId: string,
+  explicitProvider?: ModelProvider,
+): { client: OpenAI; provider: ModelProvider } {
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
-  if (!model) {
+  const provider = explicitProvider ?? model?.provider;
+  if (!provider) {
     throw new Error(`未対応のモデルです: ${modelId}`);
   }
-  if (model.provider === "dashscope") {
+  if (provider === "dashscope") {
     if (!dashscopeClient) {
-      throw new Error("DashScope APIキーが設定されていません。DASHSCOPE_API_KEY を確認してください。");
+      throw new Error(
+        "DashScope APIキーが設定されていません。DASHSCOPE_API_KEY を確認してください。",
+      );
     }
     return { client: dashscopeClient, provider: "dashscope" };
   }
   return { client: openaiClient, provider: "openai" };
 }
 
-const openaiCircuit = getOrCreateCircuitBreaker("openai", { failureThreshold: 5, resetTimeoutMs: 30_000 });
-const dashscopeCircuit = getOrCreateCircuitBreaker("dashscope", { failureThreshold: 5, resetTimeoutMs: 30_000 });
+const openaiCircuit = getOrCreateCircuitBreaker("openai", {
+  failureThreshold: 5,
+  resetTimeoutMs: 30_000,
+});
+const dashscopeCircuit = getOrCreateCircuitBreaker("dashscope", {
+  failureThreshold: 5,
+  resetTimeoutMs: 30_000,
+});
 
-export function getCircuitBreakerForProvider(provider: ModelProvider): CircuitBreaker {
+export function getCircuitBreakerForProvider(
+  provider: ModelProvider,
+): CircuitBreaker {
   return provider === "dashscope" ? dashscopeCircuit : openaiCircuit;
 }
 

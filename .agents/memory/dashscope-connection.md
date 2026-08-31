@@ -16,5 +16,7 @@ description: Alibaba Cloud Model Studio (DashScope) 接続時のエンドポイ�
 - Qwen/DashScopeの401はキー再発行を疑う前にベースURLを確認する。
 - 利用可能なモデルはハードコードせず `GET {BASE_URL}/models` で確認する。
   Token Planではモデル名が標準の `qwen-max` 等と異なる（例: `qwen3.8-max`）。
+- モデル一覧取得は、ベースURLと認証を内包する既存のSDK clientの`models.list`経由にする。
+  手動HTTPリクエストで資格情報やprovider境界を再実装しない。
 - キー入力ミスの診断は値を表示せず、長さ・プレフィックス・文字種のみ検査する。
   過去に画面表示用の省略キー（`...`入り）が貼られたことがある。

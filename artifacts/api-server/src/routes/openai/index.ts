@@ -214,9 +214,7 @@ async function resolveSharedChatParams(
   const auditModelQuery =
     typeof req.query.auditModel === "string" ? req.query.auditModel : "";
   const auditModel =
-    auditModelQuery &&
-    auditModelQuery !== modelId &&
-    availableModels.find((m) => m.id === auditModelQuery)
+    auditModelQuery && auditModelQuery !== modelId
       ? availableModels.find((m) => m.id === auditModelQuery)
       : undefined;
   const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
