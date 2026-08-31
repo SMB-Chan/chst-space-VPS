@@ -1160,7 +1160,8 @@ export function ChatPage() {
 
       <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background to-transparent">
         <div className="max-w-4xl mx-auto space-y-2">
-          <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0">
+          <div className="relative">
+            <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0 pb-1">
             <ModelSelector
               selectedModel={selectedModel}
               onSelect={setSelectedModel}
@@ -1213,6 +1214,8 @@ export function ChatPage() {
                   ? " ON(?)"
                   : ""}
             </button>
+            </div>
+            <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-8 bg-gradient-to-l from-background to-transparent md:hidden" />
           </div>
           <MessageInput
             onSend={handleSend}
