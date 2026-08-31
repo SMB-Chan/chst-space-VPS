@@ -667,7 +667,8 @@ export async function streamChatReply(args: {
                 );
                 return {
                   ok: false,
-                  capability: toolCall.name as SpecialistToolResult["capability"],
+                  capability:
+                    toolCall.name as SpecialistToolResult["capability"],
                   summary:
                     toolError instanceof Error
                       ? toolError.message
@@ -954,11 +955,7 @@ export async function streamChatReply(args: {
           } catch (toolError) {
             if (clientAbort.signal.aborted) throw toolError;
             logger.warn(
-              safeFailureFields(
-                toolError,
-                "chat-stream",
-                "BROKER_TOOL_FAILED",
-              ),
+              safeFailureFields(toolError, "chat-stream", "BROKER_TOOL_FAILED"),
               `Broker tool ${toolCall.name} failed; returning error to model`,
             );
             return {
