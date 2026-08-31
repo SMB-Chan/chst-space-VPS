@@ -375,9 +375,6 @@ export async function streamChatReply(args: {
         content: FILE_GENERATION_SYSTEM_PROMPT,
       });
     }
-    if (!translationMode) {
-      workingMessages.push({ role: "system", content: RESEARCH_SYSTEM_PROMPT });
-    }
 
     const skills = translationMode ? [] : matchSkills(userText);
     if (skills.length > 0 && !clientGone()) {
@@ -489,6 +486,14 @@ export async function streamChatReply(args: {
           `data: ${JSON.stringify({ sources: webContext.sources })}\n\n`,
         );
       }
+    }
+
+    // Only inject the research/tool-use prompt when no web data was already
+    // gathered. When web data IS present, the model should rely on it rather
+    // than redundantly calling web_search again (which wastes latency and
+    // risks timeout).
+    if (!translationMode && !webContext.contextText) {
+      workingMessages.push({ role: "system", content: RESEARCH_SYSTEM_PROMPT });
     }
 
     // Auto-inject relevant LLM memories based on the user's message

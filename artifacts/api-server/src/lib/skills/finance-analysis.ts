@@ -6,7 +6,7 @@ export const financeAnalysisSkill: ChatSkill = {
   forceSearch: true,
   searchHint: "株価 決算 ニュース",
   trigger:
-    /株(式|価|価収益|式市場)?|銘柄|投資|ポートフォリオ|配当|決算|業績|日経|TOPIX|ダウ|ナスダック|S&P|為替|円安|円高|金利|利上げ|利下げ|債券|国債|ETF|投信|信用取引|空売り|時価総額|PER|PBR|ROE|EPS|ファンダメンタル|テクニカル|財務諸表|バランスシート|損益計算|キャッシュフロー|暗号資産|仮想通貨|ビットコイン|イーサリアム|原油|金価格|FRB|FOMC|日銀|イールド|バリュエーション|\b(stock|equity|shares?|ticker|nasdaq|nyse|earnings|valuation|forex|fed|yield|bond|etf|crypto|bitcoin)\b/i,
+    /株(式|価|価収益|式市場)?|銘柄|投資|ポートフォリオ|配当|決算|業績|日経|TOPIX|ダウ|ナスダック|S&P|為替|円安|円高|金利|利上げ|利下げ|債券|国債|ETF|投信|信用取引|空売り|時価総額|PER|PBR|ROE|EPS|ファンダメンタル|テクニカル|財務諸表|バランスシート|損益計算|キャッシュフロー|暗号資産|仮想通貨|ビットコイン|イーサリアム|原油|金価格|FRB|FOMC|日銀|イールド|バリュエーション|マーケット|市場(?!調査)|相場|\b(stock|equity|shares?|ticker|nasdaq|nyse|earnings|valuation|forex|fed|yield|bond|etf|crypto|bitcoin|market)\b/i,
   prompt: `あなたは金融分析スキルが有効な状態です。このメッセージは投資助言ではなく、公開情報に基づく整理です。
 
 必ず守ること:
