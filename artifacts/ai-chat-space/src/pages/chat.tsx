@@ -20,12 +20,7 @@ import {
   type FileFormat,
   type VideoGenerationInput,
 } from "@/components/chat/message-input";
-import {
-  ModelSelector,
-  useAvailableModels,
-} from "@/components/chat/model-selector";
-import { ReasoningSelector } from "@/components/chat/reasoning-selector";
-import { TranslationModeSelector } from "@/components/chat/translation-selector";
+import { useAvailableModels } from "@/components/chat/model-selector";
 import {
   conversationTitle,
   timeGreeting,
@@ -46,7 +41,7 @@ import {
   compactAttachmentMessageForHistory,
   serializeAttachmentMessage,
 } from "@/lib/attachments";
-import { Sparkles, X, Shield, Scale } from "lucide-react";
+import { Sparkles, X, Shield } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -1177,24 +1172,6 @@ export function ChatPage() {
         )}
       </div>
 
-      {activeSkills.length > 0 && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-4xl mx-auto w-full">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300">
-            <span className="text-xs uppercase tracking-wider opacity-80">
-              自動スキル
-            </span>
-            {activeSkills.map((skill) => (
-              <span
-                key={skill.id}
-                className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-medium"
-              >
-                {skill.label}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {streamError && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
           <div className="flex items-start gap-2 px-4 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
@@ -1212,69 +1189,28 @@ export function ChatPage() {
       )}
 
       <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background to-transparent">
-        <div className="max-w-4xl mx-auto space-y-2">
-          <div className="relative">
-            <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0 pb-1">
-              <ModelSelector
-                selectedModel={selectedModel}
-                onSelect={setSelectedModel}
-                disabled={isStreaming || createConversation.isPending}
-              />
-              {(models.find((m) => m.id === selectedModel)?.supportsReasoning ??
-                true) && (
-                <ReasoningSelector
-                  value={reasoningLevel}
-                  onSelect={setReasoningLevel}
-                  disabled={isStreaming || createConversation.isPending}
-                />
-              )}
-              <TranslationModeSelector
-                value={translationMode}
-                onSelect={(mode) => {
-                  setTranslationMode(mode);
-                  saveSettings({ translationMode: mode });
-                }}
-                disabled={isStreaming || createConversation.isPending}
-              />
-              <button
-                type="button"
-                disabled={isStreaming || createConversation.isPending}
-                onClick={() => {
-                  const next = !auditEnabled;
-                  setAuditEnabled(next);
-                  saveSettings({ auditEnabled: next });
-                }}
-                className={cn(
-                  "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center",
-                  auditEnabled
-                    ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
-                    : "text-muted-foreground border-border/50 hover:text-foreground",
-                  (isStreaming || createConversation.isPending) && "opacity-50",
-                )}
-                title={
-                  auditEnabled && auditModel
-                    ? `監査: ${auditModel}`
-                    : auditEnabled
-                      ? "監査 ON（監査モデルが選択されていません）"
-                      : "監査モード"
-                }
-              >
-                <Scale className="w-3 h-3" />
-                監査
-                {auditEnabled && auditModel
-                  ? " ON"
-                  : auditEnabled
-                    ? " ON(?)"
-                    : ""}
-              </button>
-            </div>
-            <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-8 bg-gradient-to-l from-background to-transparent md:hidden" />
-          </div>
+        <div className="max-w-4xl mx-auto">
           <MessageInput
             onSend={handleSend}
             disabled={isStreaming || videoBusy || createConversation.isPending}
             conversationId={conversationId}
             selectedModel={selectedModel}
+            onSelectModel={setSelectedModel}
+            reasoningLevel={reasoningLevel}
+            onReasoningChange={setReasoningLevel}
+            translationMode={translationMode}
+            onTranslationModeChange={(mode) => {
+              setTranslationMode(mode);
+              saveSettings({ translationMode: mode });
+            }}
+            auditEnabled={auditEnabled}
+            onAuditToggle={() => {
+              const next = !auditEnabled;
+              setAuditEnabled(next);
+              saveSettings({ auditEnabled: next });
+            }}
+            auditModel={auditModel}
+            activeSkills={activeSkills}
             fileGenerationEnabled={!isPrivate && translationMode === "off"}
             videoGenerationEnabled={!isPrivate}
             onGenerateVideo={handleGenerateVideo}
