@@ -12,6 +12,14 @@ import {
 import router from "./routes";
 import healthRouter from "./routes/health";
 import { logger } from "./lib/logger";
+import {
+  createSafeHttpAccessFields,
+  createSafeHttpLogFields,
+  httpLogLevel,
+  logSafeHttpError,
+  SAFE_HTTP_ACCESS_MESSAGE,
+  SAFE_HTTP_ERROR_MESSAGE,
+} from "./lib/http-error-observability";
 import { DEFAULT_JSON_LIMIT, LARGE_JSON_LIMIT, LARGE_JSON_PATHS } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
@@ -30,20 +38,17 @@ const app: Express = express();
 app.use(
   pinoHttp({
     logger,
-    serializers: {
-      req(req) {
-        return {
-          id: req.id,
-          method: req.method,
-          url: req.url?.split("?")[0],
-        };
-      },
-      res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
-      },
+    quietReqLogger: true,
+    quietResLogger: true,
+    customAttributeKeys: { reqId: "requestId" },
+    customLogLevel: (_req, res, error) => httpLogLevel(res.statusCode, error),
+    customSuccessObject: (req, res) => createSafeHttpAccessFields(req, res.statusCode),
+    customErrorObject: (req, res, error) => {
+      const { requestId: _requestId, ...fields } = createSafeHttpLogFields(req, res.statusCode, error);
+      return fields;
     },
+    customSuccessMessage: () => SAFE_HTTP_ACCESS_MESSAGE,
+    customErrorMessage: () => SAFE_HTTP_ERROR_MESSAGE,
   }),
 );
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
@@ -128,9 +133,9 @@ app.use("/api", (_req, res) => {
 
 // JSON形式のグローバルエラーハンドラ（413等のExpressエラーを含む）
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: Error & { status?: number; statusCode?: number; type?: string }, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { status?: number; statusCode?: number; type?: string }, req: Request, res: Response, _next: NextFunction) => {
   const { status, message } = publicHttpError(err);
-  logger.error({ err, status }, "Unhandled request error");
+  logSafeHttpError(req, status, err);
   res.status(status).json({ error: message });
 });
 

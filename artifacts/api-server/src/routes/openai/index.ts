@@ -72,6 +72,7 @@ import {
   alibabaVideoProviderExpiresAt,
   canCancelAlibabaVideoStatus,
 } from "../../lib/alibaba-video-job-state";
+import { logSafeHttpError } from "../../lib/http-error-observability";
 
 const router = Router();
 
@@ -387,7 +388,7 @@ router.post("/openai/realtime/session", requireAuth, async (req, res) => {
       res.status(error.retryable ? 503 : 400).json({ error: error.publicMessage });
       return;
     }
-    req.log.error({ err: error }, "Failed to create realtime session");
+    logSafeHttpError(req, 500, error, "HTTP_PROVIDER");
     res.status(500).json({ error: "リアルタイム音声を開始できませんでした。" });
   }
 });
@@ -494,7 +495,7 @@ router.post("/openai/conversations/:conversationId/video-jobs", requireAuth, asy
         return;
       }
     }
-    req.log.error({ err: error, conversationId }, "Failed to reserve Alibaba video job");
+    logSafeHttpError(req, 500, error, "HTTP_DATABASE");
     res.status(500).json({ error: "動画ジョブを準備できませんでした。" });
     return;
   }
@@ -516,10 +517,7 @@ router.post("/openai/conversations/:conversationId/video-jobs", requireAuth, asy
     try {
       await markVideoSubmissionFailed(job.id, userId, error);
     } catch (persistError) {
-      req.log.error(
-        { err: persistError, jobId: job.id },
-        "Failed to record Alibaba video submission failure",
-      );
+      logSafeHttpError(req, 503, persistError, "HTTP_DATABASE");
     }
     const publicMessage =
       error instanceof AlibabaVideoError
@@ -556,10 +554,7 @@ router.post("/openai/conversations/:conversationId/video-jobs", requireAuth, asy
   if (!persisted) {
     // Never submit again: the provider task was accepted, but the durable
     // link needs operational repair/retry rather than another billable call.
-    req.log.error(
-      { err: persistenceError, jobId: job.id, providerTaskId: submitted.taskId },
-      "Alibaba video provider task accepted but could not be linked to job",
-    );
+    logSafeHttpError(req, 503, persistenceError, "HTTP_DATABASE");
     res.status(503).json({
       error: "動画生成は受け付けられましたが、状態の保存に時間がかかっています。再送信せず、しばらくしてから履歴を確認してください。",
     });
@@ -584,7 +579,7 @@ router.get("/openai/video-jobs/:jobId", requireAuth, async (req, res) => {
     }
     res.json(await toPublicVideoJob(job));
   } catch (error) {
-    req.log.error({ err: error, jobId }, "Failed to get Alibaba video job");
+    logSafeHttpError(req, 500, error, "HTTP_DATABASE");
     res.status(500).json({ error: "動画ジョブの状態を取得できませんでした。" });
   }
 });
@@ -645,7 +640,7 @@ router.delete("/openai/video-jobs/:jobId", requireAuth, async (req, res) => {
     }
     res.json(await toPublicVideoJob(updated));
   } catch (error) {
-    req.log.error({ err: error, jobId }, "Failed to cancel Alibaba video job");
+    logSafeHttpError(req, 500, error, "HTTP_DATABASE");
     res.status(500).json({ error: "動画ジョブをキャンセルできませんでした。" });
   }
 });
@@ -677,7 +672,7 @@ router.get("/openai/artifacts/:artifactId", async (req: Request, res: Response) 
     }
     res.send(artifact.content);
   } catch (err) {
-    logger.error({ err, artifactId }, "Failed to download artifact");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "ファイルの取得に失敗しました" });
   }
 });
@@ -692,7 +687,7 @@ router.get("/openai/conversations", requireAuth, async (req, res) => {
       .orderBy(conversations.createdAt);
     res.json(result);
   } catch (err) {
-    req.log.error({ err }, "Failed to list conversations");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to list conversations" });
   }
 });
@@ -720,7 +715,7 @@ router.get("/openai/conversations/:conversationId", requireAuth, async (req, res
       messages: messagesResult,
     });
   } catch (err) {
-    req.log.error({ err }, "Failed to get conversation");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to get conversation" });
   }
 });
@@ -744,7 +739,7 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
       .returning();
     res.status(201).json(conversation);
   } catch (err) {
-    req.log.error({ err }, "Failed to create conversation");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to create conversation" });
   }
 });
@@ -778,7 +773,7 @@ router.patch("/openai/conversations/:conversationId", requireAuth, async (req, r
     }
     res.json(updated);
   } catch (err) {
-    req.log.error({ err }, "Failed to update conversation");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to update conversation" });
   }
 });
@@ -789,7 +784,7 @@ router.delete("/openai/conversations", requireAuth, async (req, res) => {
     await db.delete(conversations).where(eq(conversations.userId, userId));
     res.status(204).send();
   } catch (err) {
-    req.log.error({ err }, "Failed to wipe conversations");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to wipe conversations" });
   }
 });
@@ -812,7 +807,7 @@ router.delete("/openai/conversations/:conversationId", requireAuth, async (req, 
     }
     res.status(204).send();
   } catch (err) {
-    req.log.error({ err }, "Failed to delete conversation");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to delete conversation" });
   }
 });
@@ -836,7 +831,7 @@ router.get("/openai/conversations/:conversationId/messages", requireAuth, async 
     }
     res.json(await getHydratedMessages(conversationId, userId));
   } catch (err) {
-    req.log.error({ err }, "Failed to list messages");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to list messages" });
   }
 });
@@ -1043,7 +1038,7 @@ router.post("/openai/conversations/:conversationId/messages", requireAuth, async
       },
     });
   } catch (err) {
-    logger.error({ err }, "Failed to send message");
+    logSafeHttpError(req, 500, err);
     if (!res.headersSent) {
       res.status(500).json({ error: "Failed to send message" });
     } else if (!res.writableEnded) {
@@ -1070,7 +1065,7 @@ router.delete("/openai/messages", requireAuth, async (req, res) => {
     }
     res.status(204).send();
   } catch (err) {
-    req.log.error({ err }, "Failed to delete messages");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "Failed to delete messages" });
   }
 });
@@ -1230,7 +1225,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       publicAiError,
     });
   } catch (err) {
-    logger.error({ err }, "Failed to send ephemeral message");
+    logSafeHttpError(req, 500, err);
     if (!res.headersSent) {
       res.status(500).json({ error: "Failed to send message" });
     } else if (!res.writableEnded) {
@@ -1269,7 +1264,7 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
 
     const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
     if (!base64Pattern.test(asset.data)) {
-      logger.error({ assetId }, "Asset data is not valid base64");
+      logSafeHttpError(req, 500, new Error("invalid asset data"), "HTTP_INTERNAL");
       res.status(500).json({ error: "ファイルデータが破損しています" });
       return;
     }
@@ -1294,7 +1289,7 @@ router.get("/openai/assets/:assetId", requireAuth, async (req, res): Promise<voi
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.end(buffer);
   } catch (err) {
-    logger.error({ err, assetId }, "Failed to download asset");
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "ファイルの取得に失敗しました" });
   }
 });
