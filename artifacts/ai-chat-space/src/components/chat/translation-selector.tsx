@@ -2,13 +2,11 @@ import { Check, Languages } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Chip } from "@/design-system/chip";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { TranslationModeSetting } from "@/lib/settings";
+import { ResponsiveSelection } from "./responsive-selection";
 
 const TRANSLATION_MODES: {
   id: TranslationModeSetting;
@@ -54,9 +52,86 @@ export function TranslationModeSelector({
     TRANSLATION_MODES.find((mode) => mode.id === value) ?? TRANSLATION_MODES[0];
   const active = value !== "off";
 
+  const renderModeOption = (
+    mode: (typeof TRANSLATION_MODES)[number],
+    surface: "desktop" | "mobile",
+    close?: () => void,
+  ) => {
+    const selected = value === mode.id;
+    const optionContent = (
+      <>
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">{mode.label}</span>
+          <span
+            className={cn(
+              "block text-[11px] leading-relaxed text-muted-foreground",
+              selected && "text-current/70",
+            )}
+          >
+            {mode.hint}
+          </span>
+        </span>
+        <Check
+          className={cn(
+            "h-4 w-4 shrink-0 transition-opacity",
+            selected ? "opacity-100" : "opacity-0",
+          )}
+          aria-hidden="true"
+        />
+      </>
+    );
+
+    if (surface === "mobile") {
+      return (
+        <button
+          key={mode.id}
+          type="button"
+          onClick={() => {
+            onSelect(mode.id);
+            close?.();
+          }}
+          aria-current={selected ? "true" : undefined}
+          className={cn(
+            "flex min-h-14 w-full items-center gap-3 rounded-[var(--m3-shape-sm)] px-4 py-3 text-left text-sm outline-none transition-[background-color,color,transform] duration-[var(--m3-duration-short)] ease-[var(--m3-motion-standard)] hover:bg-[var(--m3-surface-container-highest)] focus-visible:ring-2 focus-visible:ring-[var(--m3-primary)] active:scale-[0.99]",
+            selected &&
+              "[background:var(--m3-primary-container)] [color:var(--m3-on-primary-container)]",
+          )}
+        >
+          {optionContent}
+        </button>
+      );
+    }
+
+    return (
+      <DropdownMenuItem
+        key={mode.id}
+        onClick={() => onSelect(mode.id)}
+        aria-current={selected ? "true" : undefined}
+        className={cn(
+          "min-h-11 cursor-pointer items-center gap-3 rounded-[var(--m3-shape-sm)]",
+          selected &&
+            "[background:var(--m3-primary-container)] [color:var(--m3-on-primary-container)]",
+        )}
+      >
+        {optionContent}
+      </DropdownMenuItem>
+    );
+  };
+
+  const selectionHeader = (
+    <DropdownMenuLabel className="font-normal">
+      <span className="block text-xs font-medium text-foreground">
+        翻訳モード
+      </span>
+      <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+        入力を指定した言語へ自動変換して送信します
+      </span>
+    </DropdownMenuLabel>
+  );
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
+    <ResponsiveSelection
+      trigger={
         <Chip
           selected={active}
           disabled={disabled}
@@ -67,51 +142,28 @@ export function TranslationModeSelector({
           <Languages className="h-3.5 w-3.5" aria-hidden="true" />
           <span>{active ? `翻訳 ${current.label}` : "翻訳"}</span>
         </Chip>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuLabel className="font-normal">
-          <span className="block text-xs font-medium text-foreground">
-            翻訳モード
-          </span>
-          <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
-            入力を指定した言語へ自動変換して送信します
-          </span>
-        </DropdownMenuLabel>
-        {TRANSLATION_MODES.map((mode) => {
-          const selected = value === mode.id;
-          return (
-            <DropdownMenuItem
-              key={mode.id}
-              onClick={() => onSelect(mode.id)}
-              aria-current={selected ? "true" : undefined}
-              className={cn(
-                "min-h-11 cursor-pointer items-center gap-3 rounded-[var(--m3-shape-sm)]",
-                selected &&
-                  "[background:var(--m3-primary-container)] [color:var(--m3-on-primary-container)]",
-              )}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium">{mode.label}</span>
-                <span
-                  className={cn(
-                    "block text-[11px] leading-relaxed text-muted-foreground",
-                    selected && "text-current/70",
-                  )}
-                >
-                  {mode.hint}
-                </span>
-              </span>
-              <Check
-                className={cn(
-                  "h-4 w-4 shrink-0 transition-opacity",
-                  selected ? "opacity-100" : "opacity-0",
-                )}
-                aria-hidden="true"
-              />
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      }
+      title="翻訳モード"
+      description="入力を指定した言語へ自動変換して送信します"
+      disabled={disabled}
+      contentTestId="dropdown-translation-list"
+      desktopContentClassName="w-72"
+      desktopContent={
+        <>
+          {selectionHeader}
+          {TRANSLATION_MODES.map((mode) => renderModeOption(mode, "desktop"))}
+        </>
+      }
+      mobileContent={(close) => (
+        <div className="space-y-1">
+          <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+            入力の変換方法を選択
+          </div>
+          {TRANSLATION_MODES.map((mode) =>
+            renderModeOption(mode, "mobile", close),
+          )}
+        </div>
+      )}
+    />
   );
 }

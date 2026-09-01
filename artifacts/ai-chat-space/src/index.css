@@ -262,6 +262,13 @@
   }
 }
 
+@layer components {
+  .responsive-selection-sheet {
+    max-height: calc(100dvh - max(0.75rem, env(safe-area-inset-top)));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
+
 @layer utilities {
   /* Liquid glass surfaces */
   .glass {

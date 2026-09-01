@@ -2,14 +2,12 @@ import { useEffect, useState } from "react";
 import { ChevronDown, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { ResponsiveSelection } from "./responsive-selection";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TOKEN_PLAN_QUOTA_REFRESH_MS = 60_000;
@@ -351,22 +349,121 @@ export function ModelSelector({
   const triggerQuotaLabel =
     quota?.weeklyRemainingPercent !== undefined ? "週" : "TP";
 
+  const renderModelOption = (
+    model: ModelInfo,
+    surface: "desktop" | "mobile",
+    close?: () => void,
+  ) => {
+    const selected = selectedModel === model.id;
+    const optionContent = (
+      <>
+        <span className="min-w-0 break-words font-medium">{model.label}</span>
+        <span className="max-w-[48%] shrink-0 text-right text-xs text-muted-foreground">
+          {model.description}
+        </span>
+      </>
+    );
+
+    if (surface === "mobile") {
+      return (
+        <button
+          key={model.id}
+          type="button"
+          onClick={() => {
+            onSelect(model.id);
+            close?.();
+          }}
+          data-testid={`model-option-${model.id}`}
+          aria-current={selected ? "true" : undefined}
+          className={cn(
+            "flex min-h-14 w-full items-center justify-between gap-3 rounded-[var(--m3-shape-sm)] px-4 py-3 text-left text-sm outline-none transition-[background-color,color,transform] duration-[var(--m3-duration-short)] ease-[var(--m3-motion-standard)] hover:bg-[var(--m3-surface-container-highest)] focus-visible:ring-2 focus-visible:ring-[var(--m3-primary)] active:scale-[0.99]",
+            selected && "bg-primary/10 text-primary",
+            model.provider === "dashscope" &&
+              selected &&
+              "[background:var(--app-status-accent-container)] [color:var(--app-status-accent)]",
+          )}
+        >
+          {optionContent}
+        </button>
+      );
+    }
+
+    return (
+      <DropdownMenuItem
+        key={model.id}
+        onClick={() => onSelect(model.id)}
+        data-testid={`model-option-${model.id}`}
+        className={cn(
+          "flex items-center justify-between gap-3 cursor-pointer rounded-[var(--m3-shape-xs)]",
+          selected && "bg-primary/10 text-primary",
+          model.provider === "dashscope" &&
+            selected &&
+            "[background:var(--app-status-accent-container)] [color:var(--app-status-accent)]",
+        )}
+      >
+        {optionContent}
+      </DropdownMenuItem>
+    );
+  };
+
+  const providerQuota = (
+    <div className="flex flex-wrap items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
+      <span>{PROVIDER_LABELS["dashscope"]}</span>
+      {quota?.weeklyRemainingPercent !== undefined ? (
+        <span
+          title={quotaTitle(quota)}
+          className={cn(
+            "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums",
+            quotaTone(quota.weeklyRemainingPercent),
+          )}
+        >
+          週 {formatQuotaPercent(quota.weeklyRemainingPercent)}%
+        </span>
+      ) : null}
+      {quota?.fiveHourRemainingPercent !== undefined ? (
+        <span
+          title={quotaTitle(quota)}
+          className={cn(
+            "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums",
+            quotaTone(quota.fiveHourRemainingPercent),
+          )}
+        >
+          5h {formatQuotaPercent(quota.fiveHourRemainingPercent)}%
+        </span>
+      ) : null}
+    </div>
+  );
+
+  const desktopContent = (
+    <>
+      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+        {PROVIDER_LABELS["openai"]}
+      </DropdownMenuLabel>
+      {openaiModels.map((model) => renderModelOption(model, "desktop"))}
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
+        {providerQuota}
+      </DropdownMenuLabel>
+      {qwenModels.map((model) => renderModelOption(model, "desktop"))}
+    </>
+  );
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
+    <ResponsiveSelection
+      trigger={
         <Button
           variant="ghost"
           size="sm"
           data-testid="button-model-selector"
           className={cn(
-            "h-8 gap-1.5 px-3 rounded-[var(--m3-shape-full)] text-xs font-medium transition-all duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
-            "border border-border/60 bg-card/50 text-muted-foreground hover:text-foreground hover:bg-card/80",
+            "h-8 gap-1.5 rounded-[var(--m3-shape-full)] px-3 text-xs font-medium transition-all duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
+            "border border-border/60 bg-card/50 text-muted-foreground hover:bg-card/80 hover:text-foreground",
             current.provider === "dashscope" &&
               "[color:var(--app-status-accent)] [border-color:var(--app-status-accent)] [background:var(--app-status-accent-container)] hover:[color:var(--app-status-accent)] hover:[border-color:var(--app-status-accent)] hover:[background:var(--app-status-accent-container)]",
-            disabled && "opacity-50 cursor-not-allowed",
+            disabled && "cursor-not-allowed opacity-50",
           )}
         >
-          <Cpu className="w-3 h-3" />
+          <Cpu className="h-3 w-3" />
           <span>{current.label}</span>
           {current.provider === "dashscope" && triggerQuota !== undefined ? (
             <span
@@ -379,81 +476,29 @@ export function ModelSelector({
               {triggerQuotaLabel} {formatQuotaPercent(triggerQuota)}%
             </span>
           ) : null}
-          <ChevronDown className="w-3 h-3 opacity-60" />
+          <ChevronDown className="h-3 w-3 opacity-60" />
         </Button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent
-        align="start"
-        className="w-64"
-        data-testid="dropdown-model-list"
-      >
-        <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
-          {PROVIDER_LABELS["openai"]}
-        </DropdownMenuLabel>
-        {openaiModels.map((model) => (
-          <DropdownMenuItem
-            key={model.id}
-            onClick={() => onSelect(model.id)}
-            data-testid={`model-option-${model.id}`}
-            className={cn(
-              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]",
-              selectedModel === model.id && "bg-primary/10 text-primary",
-            )}
-          >
-            <span className="font-medium">{model.label}</span>
-            <span className="text-xs text-muted-foreground">
-              {model.description}
-            </span>
-          </DropdownMenuItem>
-        ))}
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
-          <span>{PROVIDER_LABELS["dashscope"]}</span>
-          {quota?.weeklyRemainingPercent !== undefined ? (
-            <span
-              title={quotaTitle(quota)}
-              className={cn(
-                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums",
-                quotaTone(quota.weeklyRemainingPercent),
-              )}
-            >
-              週 {formatQuotaPercent(quota.weeklyRemainingPercent)}%
-            </span>
-          ) : null}
-          {quota?.fiveHourRemainingPercent !== undefined ? (
-            <span
-              title={quotaTitle(quota)}
-              className={cn(
-                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums",
-                quotaTone(quota.fiveHourRemainingPercent),
-              )}
-            >
-              5h {formatQuotaPercent(quota.fiveHourRemainingPercent)}%
-            </span>
-          ) : null}
-        </DropdownMenuLabel>
-        {qwenModels.map((model) => (
-          <DropdownMenuItem
-            key={model.id}
-            onClick={() => onSelect(model.id)}
-            data-testid={`model-option-${model.id}`}
-            className={cn(
-              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]",
-              selectedModel === model.id &&
-                "[background:var(--app-status-accent-container)] [color:var(--app-status-accent)]",
-            )}
-          >
-            <span className="font-medium">{model.label}</span>
-            <span className="text-xs text-muted-foreground">
-              {model.description}
-            </span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      }
+      title="モデルを選択"
+      description="使用するAIモデルを選択します"
+      disabled={disabled}
+      contentTestId="dropdown-model-list"
+      desktopContentClassName="w-64"
+      desktopContent={desktopContent}
+      mobileContent={(close) => (
+        <div className="space-y-1">
+          <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+            {PROVIDER_LABELS["openai"]}
+          </div>
+          {openaiModels.map((model) =>
+            renderModelOption(model, "mobile", close),
+          )}
+          <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
+          <div className="px-2 pb-1 pt-1">{providerQuota}</div>
+          {qwenModels.map((model) => renderModelOption(model, "mobile", close))}
+        </div>
+      )}
+    />
   );
 }
 
