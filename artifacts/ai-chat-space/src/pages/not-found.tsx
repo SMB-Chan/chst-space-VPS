@@ -4,19 +4,19 @@ import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <div className="min-h-[100dvh] w-full flex items-center justify-center bg-background px-6">
+    <div className="min-h-[100dvh] w-full flex items-center justify-center px-6">
       <div className="max-w-md w-full text-center">
-        <div className="flex items-center justify-center gap-2 mb-4 text-destructive">
-          <AlertCircle className="h-7 w-7" />
-          <h1 className="text-2xl font-serif font-medium text-foreground">
-            ページが見つかりません
-          </h1>
+        <div className="w-16 h-16 mx-auto rounded-[22px] bg-destructive/10 border border-destructive/25 flex items-center justify-center mb-6">
+          <AlertCircle className="h-7 w-7 text-destructive" />
         </div>
-        <p className="text-sm text-muted-foreground mb-6">
+        <h1 className="text-3xl font-serif font-medium text-foreground tracking-tight mb-2">
+          ページが見つかりません
+        </h1>
+        <p className="text-sm text-muted-foreground mb-8">
           指定された URL は存在しません。ホームに戻ってやり直してください。
         </p>
         <Link href="/">
-          <Button>ホームへ戻る</Button>
+          <Button size="lg">ホームへ戻る</Button>
         </Link>
       </div>
     </div>

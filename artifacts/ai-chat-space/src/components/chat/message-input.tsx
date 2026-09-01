@@ -429,7 +429,7 @@ export function MessageInput({
   const hasFiles = files.length > 0;
 
   return (
-    <div className="relative bg-card rounded-3xl border border-border shadow-md flex flex-col transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20">
+    <div className="relative rounded-[28px] glass-strong flex flex-col transition-all duration-300 ease-emphasized focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/20 focus-within:shadow-[inset_0_1px_0_0_rgb(255_255_255/0.07),0_20px_50px_-12px_rgb(0_0_0/0.55)]">
       {fileError && (
         <div className="flex items-start gap-2 px-4 pt-3 pb-1">
           <div className="flex items-start gap-2 px-3 py-2 rounded-2xl bg-destructive/10 border border-destructive/20 text-xs text-destructive w-full animate-in fade-in slide-in-from-bottom-2 whitespace-pre-wrap">
@@ -454,7 +454,7 @@ export function MessageInput({
           {files.map((item, index) => (
             <div
               key={`${item.file.name}-${item.file.size}-${index}`}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-foreground max-w-full animate-in fade-in slide-in-from-bottom-2"
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-foreground/5 border border-border/60 text-xs text-foreground max-w-full animate-in fade-in slide-in-from-bottom-2"
             >
               {item.file.type.startsWith("image/") ? (
                 <ImageIcon className="w-3.5 h-3.5 text-primary shrink-0" />
@@ -492,10 +492,10 @@ export function MessageInput({
             onClick={() => setVideoMode((current) => (current ? null : "t2v"))}
             disabled={disabled || compressing}
             className={cn(
-              "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+              "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors",
               videoMode
                 ? "bg-violet-500/10 border-violet-500/40 text-violet-600 dark:text-violet-300"
-                : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
+                : "bg-foreground/5 border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/20",
               (disabled || compressing) && "opacity-50 cursor-not-allowed",
             )}
           >
@@ -508,7 +508,7 @@ export function MessageInput({
                 onChange={(event) =>
                   setVideoMode(event.target.value as VideoMode)
                 }
-                className="h-8 rounded-full border border-violet-500/30 bg-background px-2.5 text-xs text-foreground outline-none"
+                className="h-8 rounded-full border border-violet-500/30 bg-foreground/5 px-2.5 text-xs text-foreground outline-none"
                 aria-label="動画生成モード"
               >
                 <option value="t2v">T2V・テキスト</option>
@@ -520,7 +520,7 @@ export function MessageInput({
                 onChange={(event) =>
                   setVideoDuration(Number(event.target.value))
                 }
-                className="h-8 rounded-full border border-border bg-background px-2.5 text-xs text-foreground outline-none"
+                className="h-8 rounded-full border border-border/60 bg-foreground/5 px-2.5 text-xs text-foreground outline-none"
                 aria-label="動画の長さ"
               >
                 {[3, 5, 8, 10, 15].map((seconds) => (
@@ -534,7 +534,7 @@ export function MessageInput({
                 onChange={(event) =>
                   setVideoResolution(event.target.value as "720P" | "1080P")
                 }
-                className="h-8 rounded-full border border-border bg-background px-2.5 text-xs text-foreground outline-none"
+                className="h-8 rounded-full border border-border/60 bg-foreground/5 px-2.5 text-xs text-foreground outline-none"
                 aria-label="動画の解像度"
               >
                 <option value="720P">720P</option>
@@ -548,7 +548,7 @@ export function MessageInput({
                     event.target.value as VideoGenerationInput["ratio"],
                   )
                 }
-                className="h-8 rounded-full border border-border bg-background px-2.5 text-xs text-foreground outline-none disabled:opacity-50"
+                className="h-8 rounded-full border border-border/60 bg-foreground/5 px-2.5 text-xs text-foreground outline-none disabled:opacity-50"
                 aria-label="動画の比率"
               >
                 {[
@@ -590,10 +590,10 @@ export function MessageInput({
                 onClick={() => setFileFormat(active ? null : format)}
                 disabled={disabled || compressing}
                 className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
                   active
-                    ? "bg-primary/10 border-primary/40 text-primary"
-                    : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/20",
+                    ? "bg-primary/10 border-primary/40 text-primary shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
+                    : "bg-foreground/5 border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/20",
                   (disabled || compressing) && "opacity-50 cursor-not-allowed",
                 )}
               >
@@ -658,10 +658,10 @@ export function MessageInput({
           onClick={handleSubmit}
           disabled={(!content.trim() && !hasFiles) || disabled || compressing}
           className={cn(
-            "mb-1 w-10 h-10 rounded-full flex-shrink-0 transition-all duration-300",
+            "mb-1 w-10 h-10 rounded-full flex-shrink-0 transition-all duration-300 ease-expressive",
             content.trim() || hasFiles
-              ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:scale-105"
-              : "bg-muted text-muted-foreground",
+              ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 hover:bg-primary/90 hover:scale-105"
+              : "bg-muted text-muted-foreground shadow-none",
           )}
         >
           <Send className="w-4 h-4 ml-0.5" />

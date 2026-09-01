@@ -53,7 +53,7 @@ export function FileGenerationPanel({ phase }: { phase: FileGenerationPhase }) {
   const activeIndex = STEPS.findIndex((s) => s.id === phase);
 
   return (
-    <div className="w-full rounded-2xl border border-border bg-card/80 backdrop-blur-sm shadow-sm p-4 space-y-4">
+    <div className="w-full rounded-3xl border border-border/60 bg-card/60 backdrop-blur-xl shadow-lg p-4 space-y-4">
       <div className="flex items-center gap-3">
         <div className="relative w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 overflow-hidden">
           <FileText className="w-5 h-5 relative z-10" />

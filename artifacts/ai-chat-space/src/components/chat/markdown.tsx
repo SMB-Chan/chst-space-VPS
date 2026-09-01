@@ -42,9 +42,9 @@ function CodeBlock({
   children: string;
 }) {
   return (
-    <div className="rounded-xl overflow-hidden bg-background border border-border shadow-sm my-4 font-sans">
+    <div className="rounded-2xl overflow-hidden bg-background/60 border border-border/60 backdrop-blur-xl shadow-sm my-4 font-sans">
       {language ? (
-        <div className="bg-muted px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border uppercase tracking-wider">
+        <div className="bg-muted/60 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border/60 uppercase tracking-wider">
           {language}
         </div>
       ) : null}

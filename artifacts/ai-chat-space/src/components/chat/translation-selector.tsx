@@ -61,11 +61,10 @@ export function TranslationModeSelector({
           size="sm"
           data-testid="button-translation-selector"
           className={cn(
-            "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium transition-all",
-            "border border-border/50 text-muted-foreground hover:text-foreground hover:border-border",
-            "hover:bg-muted/40",
+            "h-8 gap-1.5 px-3 rounded-full text-xs font-medium transition-all duration-200 backdrop-blur-xl",
+            "border border-border/60 bg-card/50 text-muted-foreground hover:text-foreground hover:bg-card/80",
             value !== "off" &&
-              "text-emerald-400/90 border-emerald-500/30 hover:text-emerald-300 hover:border-emerald-500/50",
+              "text-emerald-400/90 border-emerald-500/30 bg-emerald-500/8 hover:text-emerald-300 hover:border-emerald-500/50 hover:bg-emerald-500/12",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >

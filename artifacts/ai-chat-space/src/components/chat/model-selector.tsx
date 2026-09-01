@@ -358,11 +358,10 @@ export function ModelSelector({
           size="sm"
           data-testid="button-model-selector"
           className={cn(
-            "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium transition-all",
-            "border border-border/50 text-muted-foreground hover:text-foreground hover:border-border",
-            "hover:bg-muted/40",
+            "h-8 gap-1.5 px-3 rounded-full text-xs font-medium transition-all duration-200 backdrop-blur-xl",
+            "border border-border/60 bg-card/50 text-muted-foreground hover:text-foreground hover:bg-card/80",
             current.provider === "dashscope" &&
-              "text-amber-400/80 border-amber-500/30 hover:text-amber-400 hover:border-amber-500/50",
+              "text-amber-400/80 border-amber-500/30 bg-amber-500/8 hover:text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/12",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >

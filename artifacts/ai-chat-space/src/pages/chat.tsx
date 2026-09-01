@@ -1109,19 +1109,19 @@ export function ChatPage() {
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-2xl mx-auto w-full">
             <div
               className={cn(
-                "w-16 h-16 rounded-2xl flex items-center justify-center mb-6 shadow-inner border",
+                "w-20 h-20 rounded-[28px] flex items-center justify-center mb-7 border shadow-[inset_0_1px_0_0_rgb(255_255_255/0.08),0_16px_40px_-12px_rgb(0_0_0/0.5)] bg-gradient-to-br",
                 isPrivate
-                  ? "bg-violet-500/10 border-violet-500/30"
-                  : "bg-primary/10 border-primary/20",
+                  ? "from-violet-500/25 to-violet-500/5 border-violet-500/30"
+                  : "from-primary/30 to-primary/5 border-primary/25",
               )}
             >
               {isPrivate ? (
-                <Shield className="w-8 h-8 text-violet-300" />
+                <Shield className="w-9 h-9 text-violet-300" />
               ) : (
-                <Sparkles className="w-8 h-8 text-primary" />
+                <Sparkles className="w-9 h-9 text-primary" />
               )}
             </div>
-            <h2 className="text-3xl font-serif font-medium mb-3 text-foreground tracking-tight">
+            <h2 className="text-4xl font-serif font-medium mb-3 text-foreground tracking-tight">
               {isPrivate ? "プライベートセッション" : greeting.title}
             </h2>
             <p className="text-muted-foreground mb-8 text-lg max-w-md font-sans font-light">
@@ -1179,14 +1179,14 @@ export function ChatPage() {
 
       {activeSkills.length > 0 && (
         <div className="mx-4 md:mx-6 mb-2 max-w-4xl mx-auto w-full">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300 backdrop-blur-xl">
             <span className="text-xs uppercase tracking-wider opacity-80">
               自動スキル
             </span>
             {activeSkills.map((skill) => (
               <span
                 key={skill.id}
-                className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-medium"
+                className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-medium"
               >
                 {skill.label}
               </span>
@@ -1197,7 +1197,7 @@ export function ChatPage() {
 
       {streamError && (
         <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
-          <div className="flex items-start gap-2 px-4 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+          <div className="flex items-start gap-2 px-4 py-2 rounded-2xl bg-destructive/10 border border-destructive/30 text-destructive text-sm backdrop-blur-xl">
             <span className="flex-1">エラー: {streamError}</span>
             <button
               type="button"
@@ -1211,8 +1211,8 @@ export function ChatPage() {
         </div>
       )}
 
-      <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background to-transparent">
-        <div className="max-w-4xl mx-auto space-y-2">
+      <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background/70 to-transparent">
+        <div className="max-w-4xl mx-auto space-y-2.5">
           <div className="relative">
             <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0 pb-1">
               <ModelSelector
@@ -1245,10 +1245,10 @@ export function ChatPage() {
                   saveSettings({ auditEnabled: next });
                 }}
                 className={cn(
-                  "h-7 gap-1.5 px-2.5 rounded-full text-xs font-medium border inline-flex items-center",
+                  "h-8 gap-1.5 px-3 rounded-full text-xs font-medium border inline-flex items-center backdrop-blur-xl transition-colors",
                   auditEnabled
-                    ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
-                    : "text-muted-foreground border-border/50 hover:text-foreground",
+                    ? "text-sky-300 border-sky-500/40 bg-sky-500/10 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
+                    : "text-muted-foreground border-border/60 bg-card/50 hover:text-foreground hover:bg-card/80",
                   (isStreaming || createConversation.isPending) && "opacity-50",
                 )}
                 title={

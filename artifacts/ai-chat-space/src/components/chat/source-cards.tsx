@@ -44,7 +44,7 @@ export function SourceCards({ sources }: SourceCardsProps) {
               href={url.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="group flex items-center gap-2 px-3 py-2 rounded-xl bg-background border border-border hover:border-primary/40 hover:bg-primary/5 transition-all duration-150 text-left shadow-sm max-w-[260px] min-w-0"
+              className="group flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-card/60 border border-border/60 backdrop-blur-xl hover:border-primary/40 hover:bg-primary/8 transition-all duration-200 ease-emphasized text-left shadow-sm max-w-[260px] min-w-0"
             >
               {/* Deliberately use a local icon. Fetching favicons through a
                   third party would disclose every cited domain to that party. */}

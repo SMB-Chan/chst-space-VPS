@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import {
   OpenaiMessage,
   OpenaiVideoJob,
@@ -151,12 +152,12 @@ function VideoJobCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border px-4 py-4 shadow-sm",
+        "rounded-3xl border px-4 py-4 shadow-lg backdrop-blur-xl",
         busy
           ? "border-violet-500/30 bg-violet-500/5"
           : job.status === "FAILED" || job.status === "UNKNOWN"
             ? "border-amber-500/30 bg-amber-500/5"
-            : "border-border bg-card",
+            : "border-border/60 bg-card/60",
       )}
     >
       <div className="flex items-center gap-2 text-sm">
@@ -241,7 +242,7 @@ function SpecialistProgress({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+        "flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs backdrop-blur-xl",
         failed
           ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
           : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
@@ -280,7 +281,7 @@ function AuditCard({
   const [open, setOpen] = useState(!!live);
   if (!content && !live) return null;
   return (
-    <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
+    <div className="w-full rounded-2xl border border-sky-500/25 bg-sky-500/5 backdrop-blur-xl overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -333,9 +334,9 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
             href={artifact.downloadUrl}
             download={artifact.filename}
             className={cn(
-              "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
+              "flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-3.5 py-3 shadow-sm backdrop-blur-xl transition-all",
               artifact.downloadUrl
-                ? "hover:border-primary/40 hover:bg-primary/5"
+                ? "hover:border-primary/40 hover:bg-primary/8"
                 : "opacity-70 pointer-events-none",
             )}
           >
@@ -393,7 +394,7 @@ function FileDownloadButton({
       <a
         href={downloadUrl}
         download={filename}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
+        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-card/60 border border-border/60 text-sm text-foreground shadow-sm backdrop-blur-xl hover:bg-primary/8 hover:border-primary/30 transition-all"
       >
         {mimeType?.startsWith("audio/") ? (
           <Volume2 className="w-4 h-4 text-primary" />
@@ -523,7 +524,7 @@ export function MessageFeed({
               block: "end",
             });
           }}
-          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs text-foreground shadow-md"
+          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full glass-panel glass-hover px-3.5 py-2 text-xs text-foreground"
         >
           <ArrowDown className="h-3.5 w-3.5" /> 最新へ戻る
         </button>
@@ -566,8 +567,11 @@ export function MessageFeed({
           }
 
           return (
-            <div
+            <motion.div
               key={message.id}
+              initial={{ opacity: 0, y: 14, scale: 0.985 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ type: "spring", stiffness: 340, damping: 30 }}
               className={cn(
                 "flex gap-3 md:gap-6 group",
                 isUser ? "flex-row-reverse" : "flex-row",
@@ -575,7 +579,7 @@ export function MessageFeed({
             >
               <div className="flex-shrink-0 mt-1">
                 {isUser ? (
-                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-primary/20 bg-primary/10 text-primary">
+                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-primary/25 bg-gradient-to-br from-primary/25 to-primary/5 text-primary shadow-sm">
                     {user?.imageUrl ? (
                       <AvatarImage src={user.imageUrl} alt="" />
                     ) : null}
@@ -584,8 +588,8 @@ export function MessageFeed({
                     </AvatarFallback>
                   </Avatar>
                 ) : (
-                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-border bg-card">
-                    <AvatarFallback className="bg-transparent text-muted-foreground">
+                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-border/60 bg-card/70 backdrop-blur-xl shadow-sm">
+                    <AvatarFallback className="bg-transparent text-primary">
                       <Bot className="w-5 h-5" />
                     </AvatarFallback>
                   </Avatar>
@@ -605,7 +609,7 @@ export function MessageFeed({
                     {attachments.map((attachment, index) => (
                       <div
                         key={`${attachment.name}-${index}`}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-muted-foreground shadow-sm max-w-full"
+                        className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-card/60 border border-border/60 text-sm text-muted-foreground shadow-sm backdrop-blur-xl max-w-full"
                       >
                         <Paperclip className="w-4 h-4 text-primary shrink-0" />
                         <span className="font-medium text-foreground truncate">
@@ -619,7 +623,7 @@ export function MessageFeed({
                 {!isUser &&
                 message.id === STREAMING_ASSISTANT_ID &&
                 !displayContent ? (
-                  <div className="px-5 py-4 rounded-2xl bg-card border border-border shadow-sm">
+                  <div className="px-5 py-4 rounded-[24px] rounded-bl-md bg-card/60 border border-border/60 backdrop-blur-xl shadow-sm">
                     <GenerationBadge
                       phase={streamingPhase}
                       researchStep={researchStep}
@@ -628,10 +632,10 @@ export function MessageFeed({
                 ) : (
                   <div
                     className={cn(
-                      "px-4 py-3 md:px-5 md:py-4 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words [overflow-wrap:anywhere]",
+                      "px-4 py-3 md:px-5 md:py-4 text-[15px] leading-relaxed break-words [overflow-wrap:anywhere] rounded-[24px]",
                       isUser
-                        ? "bg-primary text-primary-foreground font-sans font-normal"
-                        : "bg-card border border-border font-serif text-foreground prose-p:leading-loose",
+                        ? "bg-primary text-primary-foreground font-sans font-normal rounded-br-md shadow-lg shadow-primary/15"
+                        : "bg-card/60 border border-border/60 backdrop-blur-xl font-sans text-foreground prose-p:leading-loose rounded-bl-md shadow-sm",
                     )}
                   >
                     {isUser ? (
@@ -775,7 +779,7 @@ export function MessageFeed({
                   )}
 
                 {!isUser && message.modelId && (
-                  <div className="text-[11px] text-muted-foreground/80 px-1 select-none">
+                  <div className="text-[11px] text-muted-foreground/70 px-1.5 select-none">
                     {getModelLabel(message.modelId)}
                   </div>
                 )}
@@ -790,7 +794,7 @@ export function MessageFeed({
                           setCopiedId(message.id);
                           setTimeout(() => setCopiedId(null), 2000);
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label="メッセージをコピー"
                       >
                         {copiedId === message.id ? (
@@ -811,7 +815,7 @@ export function MessageFeed({
                           <button
                             type="button"
                             onClick={onRegenerate}
-                            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             aria-label="回答を再生成"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
@@ -821,7 +825,7 @@ export function MessageFeed({
                     </div>
                   )}
               </div>
-            </div>
+            </motion.div>
           );
         })}
         {videoJob ? (

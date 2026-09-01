@@ -68,9 +68,9 @@ export function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-xl mx-auto px-5 py-10 space-y-10">
-        <div>
-          <h1 className="text-2xl font-serif font-medium tracking-tight mb-1">
+      <div className="max-w-xl mx-auto px-5 py-10 space-y-6">
+        <div className="mb-4">
+          <h1 className="text-3xl font-serif font-medium tracking-tight mb-1.5">
             設定
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -78,7 +78,7 @@ export function SettingsPage() {
           </p>
         </div>
 
-        <section className="space-y-3">
+        <section className="space-y-3 glass-panel rounded-3xl p-5">
           <h2 className="text-sm font-medium text-foreground">既定のモデル</h2>
           <p className="text-xs text-muted-foreground">
             新しい会話とプライベートセッションで最初に選ばれるモデルです。会話ごとの切替はチャット画面でできます。
@@ -97,14 +97,14 @@ export function SettingsPage() {
           </div>
         </section>
 
-        <section className="space-y-3">
+        <section className="space-y-3 glass-panel rounded-3xl p-5">
           <h2 className="text-sm font-medium text-foreground">
             中立監査モード
           </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             回答のあと、別モデルが会話履歴なしで本文を点検します。使用中のモデルがその指摘を読んで最終報告を書き直し、それを本文として出します。監査モデルは別の系統を指定してください。
           </p>
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-foreground/4 px-4 py-3">
             <span className="text-sm">監査を有効にする</span>
             <Switch
               checked={settings.auditEnabled}
@@ -137,7 +137,7 @@ export function SettingsPage() {
           </p>
         </section>
 
-        <section className="space-y-3">
+        <section className="space-y-3 glass-panel rounded-3xl p-5">
           <h2 className="text-sm font-medium text-foreground">
             アプリとして使う
           </h2>
@@ -178,7 +178,7 @@ export function SettingsPage() {
           )}
         </section>
 
-        <section className="space-y-3">
+        <section className="space-y-3 glass-panel rounded-3xl p-5">
           <h2 className="text-sm font-medium text-foreground">
             プライベートセッション
           </h2>
@@ -188,7 +188,7 @@ export function SettingsPage() {
           </p>
         </section>
 
-        <section className="space-y-3">
+        <section className="space-y-3 glass-panel rounded-3xl p-5">
           <h2 className="text-sm font-medium text-destructive">メモリの消去</h2>
           <p className="text-xs text-muted-foreground">
             このアカウントに保存されている会話とメッセージをすべて削除します。元に戻せません。既定モデルの設定は端末に残ります。

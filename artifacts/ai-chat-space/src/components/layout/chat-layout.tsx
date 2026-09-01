@@ -150,7 +150,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
       {/* Sidebar */}
       <div
         className={cn(
-          "flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
+          "flex flex-col border-r border-sidebar-border/60 bg-sidebar/80 backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
           // Desktop: push layout
           !isMobile && (open ? "w-72" : "w-0 opacity-0 border-r-0"),
           // Mobile: fixed overlay
@@ -159,9 +159,11 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           isMobile && open && "translate-x-0 shadow-2xl",
         )}
       >
-        <div className="flex h-14 items-center justify-between px-4 border-b border-sidebar-border flex-shrink-0">
-          <div className="flex items-center gap-2 font-medium text-sidebar-foreground">
-            <Command className="w-5 h-5 text-primary" />
+        <div className="flex h-14 items-center justify-between px-4 border-b border-sidebar-border/60 flex-shrink-0">
+          <div className="flex items-center gap-2.5 font-medium text-sidebar-foreground">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/35 to-primary/5 border border-primary/25 flex items-center justify-center shadow-inner">
+              <Command className="w-4 h-4 text-primary" />
+            </div>
             <span className="tracking-tight">AI Space</span>
           </div>
           <Button
@@ -174,11 +176,10 @@ export function ChatLayout({ children }: ChatLayoutProps) {
           </Button>
         </div>
 
-        <div className="p-3 flex-shrink-0 space-y-1">
+        <div className="p-3 flex-shrink-0 space-y-1.5">
           <Button
             onClick={handleNewChat}
-            className="w-full justify-start gap-2 h-10 bg-sidebar-accent/50 text-sidebar-foreground hover:bg-sidebar-accent hover:text-primary transition-colors"
-            variant="ghost"
+            className="w-full justify-start gap-2 h-11 rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/15 hover:bg-primary/90 hover:shadow-primary/25 font-medium"
           >
             <Plus className="w-4 h-4" />
             新しい会話
@@ -189,9 +190,9 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               if (isMobile) setSidebarOpen(false);
             }}
             className={cn(
-              "w-full justify-start gap-2 h-10 text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
+              "w-full justify-start gap-2 h-10 rounded-2xl border border-transparent text-sidebar-foreground/80 hover:bg-violet-500/10 hover:text-violet-200 transition-colors",
               location === "/private" &&
-                "bg-violet-500/15 text-violet-200 hover:bg-violet-500/20",
+                "border-violet-500/25 bg-violet-500/15 text-violet-200 hover:bg-violet-500/20",
             )}
             variant="ghost"
           >
@@ -201,7 +202,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
-          <div className="px-2 py-2 text-xs font-medium text-sidebar-foreground/40 uppercase tracking-wider">
+          <div className="px-3 py-2 text-[11px] font-medium text-sidebar-foreground/40 uppercase tracking-wider">
             履歴 {conversations && `(${conversations.length})`}
           </div>
 
@@ -241,7 +242,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                           setRenamingId(null);
                         }
                       }}
-                      className="w-full h-8 rounded-md bg-background border border-border px-2 text-sm text-foreground outline-none focus:border-primary/60"
+                      className="w-full h-8 rounded-xl bg-background/70 border border-border px-2 text-sm text-foreground outline-none focus:border-primary/60"
                       aria-label="会話名"
                     />
                   </div>
@@ -250,10 +251,10 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                     href={`/conversations/${conv.id}`}
                     onClick={() => isMobile && setSidebarOpen(false)}
                     className={cn(
-                      "flex flex-col gap-1 rounded-lg px-3 py-2.5 text-sm transition-all duration-200",
+                      "flex flex-col gap-1 rounded-2xl border px-3 py-2.5 text-sm transition-all duration-200",
                       activeId === conv.id
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                        ? "border-primary/25 bg-primary/12 text-foreground shadow-sm"
+                        : "border-transparent text-sidebar-foreground/70 hover:bg-foreground/5 hover:text-sidebar-foreground",
                     )}
                   >
                     <div className="font-medium truncate pr-6">
@@ -319,7 +320,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         </div>
 
         {/* User footer */}
-        <div className="border-t border-sidebar-border p-3 flex items-center gap-2 flex-shrink-0">
+        <div className="border-t border-sidebar-border/60 p-3 flex items-center gap-2 flex-shrink-0">
           <div className="flex-1 min-w-0">
             <div className="text-xs text-sidebar-foreground/70 truncate">
               {user?.primaryEmailAddress?.emailAddress ?? ""}
@@ -360,7 +361,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="w-9 h-9 bg-background/50 backdrop-blur border border-border text-muted-foreground hover:text-foreground shadow-sm"
+              className="w-10 h-10 rounded-full glass-panel glass-hover text-muted-foreground hover:text-foreground"
               onClick={() => setSidebarOpen(true)}
             >
               <PanelLeftOpen className="w-4 h-4" />
