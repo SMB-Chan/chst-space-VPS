@@ -50,6 +50,14 @@ import {
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
 import {
+  FACTUALITY_SYSTEM_PROMPT,
+  buildFactualityUserMessage,
+  mergeResearchEvidence,
+  parseFactualityVerification,
+  unavailableFactualityReport,
+  type FactualityReport,
+} from "./factuality";
+import {
   executeSpecialistTool,
   getSpecialistTools,
   isResearchTool,
@@ -70,6 +78,7 @@ import {
 const AUDIT_TIMEOUT_MS = 120_000;
 const AUDIT_MAX_OUTPUT_TOKENS = 2_048;
 const AUDIT_REASONING_MAX_OUTPUT_TOKENS = 4_096;
+const FACTUALITY_MAX_OUTPUT_TOKENS = 1_600;
 const AUDIT_IMAGE_TRANSCRIPT_MAX_CHARS = 2_500;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
@@ -170,6 +179,14 @@ export function shouldAttachSpecialistTools(args: {
   );
 }
 
+function isMemoryMutationCall(call: SpecialistToolCall): boolean {
+  return (
+    call.name === "memory_store" ||
+    call.name === "memory_update" ||
+    call.name === "memory_supersede"
+  );
+}
+
 const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファイル（Markdown / text / CSV / JSON / HTML）を求めた場合だけ、回答とは別に次の fenced block でファイル内容を出してください。
 
 形式:
@@ -201,7 +218,9 @@ const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツール
 - 十分な情報が集まったら、収集した情報を使って回答を生成してください。
 
 記憶の管理:
-- Web検索で得た重要な事実や、ユーザーとの会話で学んだことは memory_store で保存してください。
+- ユーザーが明示した安定的な好みや設定は memory_store で保存できます。
+- Web検索で得た事実は、出典URLと本文が直接支持することを確認できた場合だけ保存し、source_url、valid_as_of、控えめなconfidenceを必ず付けてください。
+- 予測、スニペットだけの事実、矛盾中、または未確認の内容は保存しないでください。
 - 同じトピックの古い記憶がある場合は、memory_supersede で古いものを置き換えてから memory_store で新しいものを保存してください。
 - 誤った情報や不要になった情報は memory_forget で削除してください。
 - 過去の記憶を参照したい場合は memory_recall を使ってください。
@@ -317,6 +336,7 @@ export async function streamChatReply(args: {
       fetchedAt?: string | null;
     }[];
     audit?: { content: string; modelId: string };
+    factuality?: FactualityReport;
     artifacts?: ExtractedArtifact[];
     generatedFiles?: GeneratedFile[];
     generatedAssets?: GeneratedAsset[];
@@ -631,13 +651,16 @@ export async function streamChatReply(args: {
     // tools execute once after the loop.
     const researchCalls = effectiveToolCalls.filter(isResearchTool);
     const nonResearchCalls = effectiveToolCalls.filter(
-      (c) => !isResearchTool(c),
+      (c) =>
+        !isResearchTool(c) &&
+        !(researchCalls.length > 0 && isMemoryMutationCall(c)),
     );
     const allResearchSources: {
       title: string;
       url: string;
       publishedAt?: string | null;
     }[] = [];
+    const researchEvidenceParts: string[] = [];
 
     if (
       effectiveToolCalls.length > 0 &&
@@ -682,7 +705,7 @@ export async function streamChatReply(args: {
                 })}\n\n`,
               );
             }
-            const result = await (async () => {
+            let result = await (async () => {
               try {
                 return await withTimeout(
                   (signal) =>
@@ -717,12 +740,21 @@ export async function streamChatReply(args: {
                 } satisfies SpecialistToolResult;
               }
             })();
-            if (result.sources) {
-              for (const source of result.sources) {
-                if (!allResearchSources.some((s) => s.url === source.url)) {
-                  allResearchSources.push(source);
-                }
-              }
+            if (result.sources?.length) {
+              const mergedEvidence = mergeResearchEvidence({
+                text: result.text ?? "",
+                sources: result.sources,
+                accumulatedSources: allResearchSources,
+              });
+              allResearchSources.splice(
+                0,
+                allResearchSources.length,
+                ...mergedEvidence.sources,
+              );
+              result = { ...result, text: mergedEvidence.text };
+            }
+            if (result.text?.trim()) {
+              researchEvidenceParts.push(result.text);
             }
             toolResults.push({ call: toolCall, result });
             if (!clientGone()) {
@@ -807,7 +839,11 @@ export async function streamChatReply(args: {
             // Any non-research calls from intermediate rounds are deferred
             // to after the research loop completes.
             for (const c of nextRoundCalls) {
-              if (!isResearchTool(c) && !nonResearchCalls.includes(c)) {
+              if (
+                !isResearchTool(c) &&
+                !isMemoryMutationCall(c) &&
+                !nonResearchCalls.includes(c)
+              ) {
                 nonResearchCalls.push(c);
               }
             }
@@ -818,7 +854,11 @@ export async function streamChatReply(args: {
               !nextRoundCalls.every(isResearchTool)
             ) {
               for (const c of nextRoundCalls) {
-                if (!isResearchTool(c) && !nonResearchCalls.includes(c)) {
+                if (
+                  !isResearchTool(c) &&
+                  !isMemoryMutationCall(c) &&
+                  !nonResearchCalls.includes(c)
+                ) {
                   nonResearchCalls.push(c);
                 }
               }
@@ -1083,14 +1123,145 @@ export async function streamChatReply(args: {
         );
       }
     } else {
-      // Preserve the original assistant response before audit/revision so file
-      // generation is based on the answer the user actually saw, not a revised
-      // version that may strip file-oriented structure.
-      const fileGenerationBaseResponse = fullResponse;
+      const responseSources = [
+        ...webContext.sources,
+        ...allResearchSources.filter(
+          (source) =>
+            !webContext.sources.some((existing) => existing.url === source.url),
+        ),
+      ];
+      const factualitySourceText =
+        webContext.contextText || researchEvidenceParts.join("\n\n");
       let audit: { content: string; modelId: string } | undefined;
+      let factuality: FactualityReport | undefined;
+      const shouldVerifyFactuality =
+        !translationMode &&
+        responseSources.length > 0 &&
+        Boolean(factualitySourceText.trim()) &&
+        !wantsGeneratedFile(userText) &&
+        !requestedFileFormat;
+
+      // Search-backed answers receive an automatic, compact process-based
+      // verification pass. When audit mode selected a separate model, reuse it
+      // here instead of paying for a second generic audit call.
+      if (shouldVerifyFactuality && !clientAbort.signal.aborted) {
+        const verifierModel =
+          auditModel && auditModel.id !== modelId
+            ? auditModel
+            : { id: modelId, provider };
+        try {
+          const verifier =
+            verifierModel.id === modelId
+              ? { client, provider }
+              : getClientForModel(verifierModel.id, verifierModel.provider);
+          if (!clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({ status: "verifying", model: verifierModel.id })}\n\n`,
+            );
+          }
+          const verificationText = await withTimeout(
+            (signal) =>
+              streamModelText({
+                client: verifier.client,
+                provider: verifier.provider,
+                modelId: verifierModel.id,
+                reasoningLevel: "off",
+                maxOutputTokens: FACTUALITY_MAX_OUTPUT_TOKENS,
+                messages: [
+                  { role: "system", content: FACTUALITY_SYSTEM_PROMPT },
+                  {
+                    role: "user",
+                    content: buildFactualityUserMessage({
+                      question: userText,
+                      answer: fullResponse,
+                      sourceText: factualitySourceText,
+                    }),
+                  },
+                ],
+                onDelta: () => {
+                  // Verification JSON remains server-side until validated.
+                },
+                shouldStop: () => clientGone() || clientAbort.signal.aborted,
+                signal,
+              }),
+            AUDIT_TIMEOUT_MS,
+            "Factuality verification",
+            clientAbort.signal,
+          );
+          const parsed = parseFactualityVerification({
+            raw: verificationText,
+            modelId: verifierModel.id,
+            sourceCount: responseSources.length,
+          });
+          if (parsed) {
+            const patched = applyValidatedAuditPatch(
+              fullResponse,
+              JSON.stringify({
+                note: parsed.report.summary,
+                operations: parsed.operations,
+              }),
+            );
+            if (patched.applied) {
+              fullResponse = patched.content;
+              if (!clientGone()) {
+                res.write(
+                  `data: ${JSON.stringify({ status: "revising", patch: patched.operations })}\n\n`,
+                );
+              }
+            } else if (
+              parsed.operations.length > 0 &&
+              patched.reason &&
+              !clientGone()
+            ) {
+              res.write(
+                `data: ${JSON.stringify({
+                  status: "search_warning",
+                  message: `${patched.reason} 検証結果のみ表示します。`,
+                })}\n\n`,
+              );
+            }
+            factuality = {
+              ...parsed.report,
+              corrected: patched.applied,
+            };
+            if (
+              parsed.report.status !== "verified" &&
+              parsed.report.claims.length > 0 &&
+              !patched.applied
+            ) {
+              const notice =
+                "\n\n> **根拠上の注意:** 上記には、取得した資料だけでは確認できない主張が含まれます。根拠チェックの詳細を確認してください。";
+              fullResponse += notice;
+              if (!clientGone()) {
+                res.write(
+                  `data: ${JSON.stringify({ content: notice, status: "revising" })}\n\n`,
+                );
+              }
+            }
+          } else {
+            factuality = unavailableFactualityReport(verifierModel.id);
+          }
+        } catch (err) {
+          if (clientAbort.signal.aborted) throw err;
+          logger.warn(
+            safeFailureFields(
+              err,
+              "chat-stream",
+              "FACTUALITY_VERIFICATION_FAILED",
+            ),
+            "Factuality verification failed; preserving the sourced answer",
+          );
+          factuality = unavailableFactualityReport(verifierModel.id);
+        }
+        if (factuality && !clientGone()) {
+          res.write(`data: ${JSON.stringify({ factuality })}\n\n`);
+        }
+      }
+
       // A user stop aborts the shared signal, so no audit or revision work
       // starts after the client explicitly cancels the turn.
       if (
+        !shouldVerifyFactuality &&
         auditModel &&
         auditModel.id !== modelId &&
         !clientAbort.signal.aborted
@@ -1242,6 +1413,10 @@ export async function streamChatReply(args: {
         }
       }
 
+      // File generation works from the validated final text when factuality
+      // correction ran, and from the normal audited text in every other case.
+      const fileGenerationBaseResponse = fullResponse;
+
       // A user stop is a successful partial turn: preserve what was generated,
       // but never start audit, file generation, or layout review afterwards.
       const stopped = clientAbort.signal.aborted;
@@ -1327,8 +1502,9 @@ export async function streamChatReply(args: {
         completion = onComplete
           ? await onComplete({
               content: fullResponse,
-              sources: webContext.sources,
+              sources: responseSources,
               audit,
+              factuality,
               artifacts: extracted.artifacts,
               generatedFiles: generatedFile ? [generatedFile] : undefined,
               generatedAssets:

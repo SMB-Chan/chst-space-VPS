@@ -38,6 +38,10 @@ import {
 import { cn } from "@/lib/utils";
 import { applyClientPatch } from "@/lib/audit-patch";
 import {
+  normalizeFactualityReport,
+  type FactualityReport,
+} from "@/components/chat/factuality-card";
+import {
   compactAttachmentMessageForHistory,
   serializeAttachmentMessage,
 } from "@/lib/attachments";
@@ -79,6 +83,7 @@ async function streamMessage(
       fetchedAt?: string | null;
     }[],
   ) => void,
+  onFactuality: (report: FactualityReport) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
   onAudit: (text: string) => void,
   onArtifacts: (artifacts: ChatArtifact[]) => void,
@@ -218,6 +223,7 @@ async function streamMessage(
         }
       }
       if (parsed.status === "auditing") onStatus("auditing");
+      if (parsed.status === "verifying") onStatus("verifying");
       if (parsed.status === "revising") {
         onStatus("revising");
         if (parsed.resetContent) onResetContent();
@@ -269,6 +275,10 @@ async function streamMessage(
             fetchedAt?: string | null;
           }[],
         );
+      }
+      if (parsed.factuality) {
+        const report = normalizeFactualityReport(parsed.factuality);
+        if (report) onFactuality(report);
       }
       if (Array.isArray(parsed.artifacts)) {
         const artifacts = parsed.artifacts.flatMap((item): ChatArtifact[] => {
@@ -394,6 +404,7 @@ export function ChatPage() {
       fetchedAt?: string | null;
     }[],
     audit: "",
+    factuality: null as FactualityReport | null,
     artifacts: [] as ChatArtifact[],
   });
   const artifactBlobUrlCache = useRef(new Map<string, string>());
@@ -443,6 +454,8 @@ export function ChatPage() {
     initialSettings.auditModelId,
   );
   const [streamingAudit, setStreamingAudit] = useState("");
+  const [streamingFactuality, setStreamingFactuality] =
+    useState<FactualityReport | null>(null);
   const resolvedAuditModel = auditEnabled
     ? pickAuditModel(selectedModel, models, auditModelId)
     : undefined;
@@ -468,6 +481,7 @@ export function ChatPage() {
     setResearchStep(null);
     setSpecialistProgress(null);
     setStreamingAudit("");
+    setStreamingFactuality(null);
     setStreamError(null);
     setSearchWarning(
       streamingContent
@@ -486,6 +500,7 @@ export function ChatPage() {
           role: "assistant",
           content: stripArtifactBlocks(streamingContent),
           sources: streamingSources.length > 0 ? streamingSources : null,
+          factuality: streamSnapshotRef.current.factuality,
           createdAt: now,
         } as OpenaiMessage);
       }
@@ -496,6 +511,7 @@ export function ChatPage() {
       setStreamingSources([]);
       setStreamingArtifacts([]);
       setStreamingFiles([]);
+      setStreamingFactuality(null);
       setOptimisticUserMessage(null);
       return;
     }
@@ -511,6 +527,7 @@ export function ChatPage() {
             setStreamingSources([]);
             setStreamingArtifacts([]);
             setStreamingFiles([]);
+            setStreamingFactuality(null);
             setOptimisticUserMessage(null);
           });
       }, 1_000);
@@ -547,6 +564,7 @@ export function ChatPage() {
     setSearchWarning(null);
     setActiveSkills([]);
     setStreamingAudit("");
+    setStreamingFactuality(null);
     setVideoJob(null);
     // Revoke object URLs created for ephemeral artifact downloads so we do not
     // leak memory when the user switches conversations.
@@ -603,6 +621,7 @@ export function ChatPage() {
       setStreamingArtifacts([]);
       setStreamingFiles([]);
       setStreamingAudit("");
+      setStreamingFactuality(null);
       setSpecialistProgress(null);
       setOptimisticUserMessage(null);
       streamSnapshotRef.current = {
@@ -610,6 +629,7 @@ export function ChatPage() {
         sources: [],
         artifacts: [],
         audit: "",
+        factuality: null,
       };
       setStreamError(
         "応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。",
@@ -833,6 +853,7 @@ export function ChatPage() {
     setSearchWarning(visionBridgeNote);
     setActiveSkills([]);
     setStreamingAudit("");
+    setStreamingFactuality(null);
     setStreamingArtifacts([]);
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
@@ -853,6 +874,7 @@ export function ChatPage() {
       content: "",
       sources: [],
       audit: "",
+      factuality: null,
       artifacts: [],
     };
 
@@ -927,6 +949,7 @@ export function ChatPage() {
                 auditModelId: streamSnapshotRef.current.audit
                   ? auditModel
                   : null,
+                factuality: streamSnapshotRef.current.factuality,
                 createdAt: now,
               } as OpenaiMessage,
             ]);
@@ -948,6 +971,7 @@ export function ChatPage() {
           setStreamingArtifacts([]);
           setStreamingFiles([]);
           setStreamingAudit("");
+          setStreamingFactuality(null);
           setSpecialistProgress(null);
           setOptimisticUserMessage(null);
         }
@@ -960,6 +984,7 @@ export function ChatPage() {
         setStreamingArtifacts([]);
         setStreamingFiles([]);
         setStreamingAudit("");
+        setStreamingFactuality(null);
         setSpecialistProgress(null);
         setStreamError(err.message);
         if (!isPrivate && targetId) {
@@ -987,6 +1012,10 @@ export function ChatPage() {
       (sources) => {
         streamSnapshotRef.current.sources = sources;
         setStreamingSources(sources);
+      },
+      (report) => {
+        streamSnapshotRef.current.factuality = report;
+        setStreamingFactuality(report);
       },
       (skills) => {
         setActiveSkills(skills);
@@ -1069,6 +1098,7 @@ export function ChatPage() {
             role: "assistant",
             content: streamingContent,
             sources: streamingSources.length > 0 ? streamingSources : null,
+            factuality: streamingFactuality,
             artifacts:
               streamingArtifacts.length > 0
                 ? (streamingArtifacts as unknown as OpenaiArtifact[])
@@ -1156,24 +1186,27 @@ export function ChatPage() {
                         ? "revising"
                         : searchStatus?.kind === "auditing"
                           ? "auditing"
-                          : searchStatus?.kind === "researching"
-                            ? "researching"
-                            : searchStatus?.kind === "searching" ||
-                                searchStatus?.kind === "fetching"
-                              ? "searching"
-                              : searchStatus?.kind === "generating-file"
-                                ? "generating-file"
-                                : searchStatus?.kind === "reviewing-layout"
-                                  ? "reviewing-layout"
-                                  : searchStatus?.kind === "revising-layout"
-                                    ? "revising-layout"
-                                    : streamingContent
-                                      ? "generating"
-                                      : "starting"
+                          : searchStatus?.kind === "verifying"
+                            ? "verifying"
+                            : searchStatus?.kind === "researching"
+                              ? "researching"
+                              : searchStatus?.kind === "searching" ||
+                                  searchStatus?.kind === "fetching"
+                                ? "searching"
+                                : searchStatus?.kind === "generating-file"
+                                  ? "generating-file"
+                                  : searchStatus?.kind === "reviewing-layout"
+                                    ? "reviewing-layout"
+                                    : searchStatus?.kind === "revising-layout"
+                                      ? "revising-layout"
+                                      : streamingContent
+                                        ? "generating"
+                                        : "starting"
                 : null
             }
             researchStep={researchStep}
             streamingAudit={streamingAudit}
+            streamingFactuality={streamingFactuality}
             specialistProgress={specialistProgress}
             streamingFiles={streamingFiles}
             videoJob={videoJob}

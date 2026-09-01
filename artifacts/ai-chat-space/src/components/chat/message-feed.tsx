@@ -8,6 +8,11 @@ import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import {
+  FactualityCard,
+  normalizeFactualityReport,
+  type FactualityReport,
+} from "./factuality-card";
+import {
   FileGenerationPanel,
   type FileGenerationPhase,
 } from "./file-generation-panel";
@@ -45,6 +50,7 @@ export type StreamingPhase =
   | "reviewing-layout"
   | "revising-layout"
   | "auditing"
+  | "verifying"
   | "revising"
   | null;
 
@@ -60,6 +66,7 @@ export type ChatArtifact = {
 type DisplayMessage = OpenaiMessage & {
   auditContent?: string | null;
   auditModelId?: string | null;
+  factuality?: FactualityReport | string | null;
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
   generatedAssets?:
@@ -116,6 +123,7 @@ interface MessageFeedProps {
   } | null;
   streamingFiles?: { id: number; filename: string; mimeType: string }[];
   streamingAudit?: string;
+  streamingFactuality?: FactualityReport | null;
   isStreaming?: boolean;
   onStop?: () => void;
   streamingWarning?: string | null;
@@ -439,9 +447,11 @@ function GenerationBadge({
                       ? "生成中"
                       : phase === "auditing"
                         ? "監査中"
-                        : phase === "revising"
-                          ? "最終報告を作成中"
-                          : "準備中";
+                        : phase === "verifying"
+                          ? "根拠を検証中"
+                          : phase === "revising"
+                            ? "最終報告を作成中"
+                            : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -461,6 +471,7 @@ export function MessageFeed({
   specialistProgress = null,
   streamingFiles = [],
   streamingAudit = "",
+  streamingFactuality = null,
   isStreaming = false,
   onStop,
   streamingWarning,
@@ -540,6 +551,7 @@ export function MessageFeed({
           // For assistant messages: prefer DB-persisted sources; fall back to parsing
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
           let sources = normalizeSources(message.sources);
+          const factuality = normalizeFactualityReport(display.factuality);
           const assetIds = normalizeAssetIds(message.assetIds);
           const generatedAssets = display.generatedAssets ?? [];
           if (!isUser) {
@@ -742,6 +754,21 @@ export function MessageFeed({
                         streamingPhase === "auditing"
                       }
                     />
+                  )}
+
+                {!isUser &&
+                  (message.id === STREAMING_ASSISTANT_ID
+                    ? streamingFactuality || factuality
+                    : factuality) && (
+                    <div className="w-full px-1">
+                      <FactualityCard
+                        report={
+                          (message.id === STREAMING_ASSISTANT_ID
+                            ? streamingFactuality || factuality
+                            : factuality)!
+                        }
+                      />
+                    </div>
                   )}
 
                 {!isUser && sources && sources.length > 0 && (

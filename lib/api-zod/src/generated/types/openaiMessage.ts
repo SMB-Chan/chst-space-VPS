@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OpenaiArtifact } from './openaiArtifact';
+import type { OpenaiFactualityReport } from './openaiFactualityReport';
 import type { OpenaiGeneratedAsset } from './openaiGeneratedAsset';
 import type { OpenaiSource } from './openaiSource';
 
@@ -19,6 +20,7 @@ export interface OpenaiMessage {
   artifacts?: OpenaiArtifact[] | null;
   auditContent?: string | null;
   auditModelId?: string | null;
+  factuality?: OpenaiFactualityReport | null;
   assetIds?: number[] | null;
   generatedAssets?: OpenaiGeneratedAsset[] | null;
   createdAt: Date;

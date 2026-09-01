@@ -84,6 +84,7 @@ import {
 } from "../../lib/alibaba-video-job-state";
 import { logSafeHttpError } from "../../lib/http-error-observability";
 import { publicAiError } from "../../lib/public-error";
+import { parseStoredFactuality } from "../../lib/factuality";
 
 const router = Router();
 
@@ -291,26 +292,33 @@ async function getHydratedMessages(conversationId: number, userId: string) {
     .where(eq(assets.conversationId, conversationId))
     .orderBy(asc(assets.id));
 
-  return messageRows.map((message) => ({
-    ...message,
-    sources: parseStoredSources(message.sources),
-    assetIds: parseStoredAssetIds(message.assetIds),
-    generatedAssets: generatedAssetRows
-      .filter((asset) => asset.messageId === message.id)
-      .map((asset) => ({
-        id: asset.id,
-        filename: asset.filename,
-        mimeType: asset.mimeType,
-        size: asset.size,
-        downloadUrl: `/api/openai/assets/${asset.id}`,
-      })),
-    artifacts: artifactRows
-      .filter((artifact) => artifact.messageId === message.id)
-      .map(({ messageId: _messageId, ...artifact }) => ({
-        ...artifact,
-        downloadUrl: `/api/openai/artifacts/${artifact.id}`,
-      })),
-  }));
+  return messageRows.map((message) => {
+    const sources = parseStoredSources(message.sources);
+    return {
+      ...message,
+      sources,
+      factuality: parseStoredFactuality(
+        message.factuality,
+        sources?.length ?? 0,
+      ),
+      assetIds: parseStoredAssetIds(message.assetIds),
+      generatedAssets: generatedAssetRows
+        .filter((asset) => asset.messageId === message.id)
+        .map((asset) => ({
+          id: asset.id,
+          filename: asset.filename,
+          mimeType: asset.mimeType,
+          size: asset.size,
+          downloadUrl: `/api/openai/assets/${asset.id}`,
+        })),
+      artifacts: artifactRows
+        .filter((artifact) => artifact.messageId === message.id)
+        .map(({ messageId: _messageId, ...artifact }) => ({
+          ...artifact,
+          downloadUrl: `/api/openai/artifacts/${artifact.id}`,
+        })),
+    };
+  });
 }
 
 function sendMessageContentError(res: Response, error: unknown): boolean {
@@ -1243,6 +1251,7 @@ router.post(
           content,
           sources,
           audit,
+          factuality,
           artifacts: extractedArtifacts,
           generatedFiles,
           generatedAssets,
@@ -1256,6 +1265,7 @@ router.post(
             modelId,
             sources,
             audit,
+            factuality,
             generatedFiles,
             generatedAssets,
             extractedArtifacts,

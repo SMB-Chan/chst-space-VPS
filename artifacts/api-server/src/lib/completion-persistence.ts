@@ -11,6 +11,7 @@ import type { GeneratedFile } from "./file-generation";
 import type { GeneratedAsset } from "./specialist-capabilities";
 import { validateGeneratedAsset } from "./generated-assets";
 import { logger } from "./logger";
+import type { FactualityReport } from "./factuality";
 
 export const DEFAULT_MAX_USER_GENERATED_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_ARTIFACTS_PER_MESSAGE = 3;
@@ -44,6 +45,7 @@ export interface PersistChatCompletionInput {
   modelId: string;
   sources: { title: string; url: string }[];
   audit?: { content: string; modelId: string };
+  factuality?: FactualityReport;
   generatedFiles?: GeneratedFile[];
   generatedAssets?: GeneratedAsset[];
   extractedArtifacts?: ExtractedArtifact[];
@@ -210,6 +212,9 @@ export async function persistChatCompletion(
               : undefined,
           auditContent: input.audit?.content,
           auditModelId: input.audit?.modelId,
+          factuality: input.factuality
+            ? JSON.stringify(input.factuality)
+            : undefined,
         },
       ])
       .returning();

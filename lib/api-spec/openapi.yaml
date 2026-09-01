@@ -557,7 +557,18 @@ components:
       properties:
         id:
           type: string
-          enum: [chat, reasoning, vision, image-generate, image-edit, speech-to-text, audio-synthesis, realtime, video]
+          enum:
+            [
+              chat,
+              reasoning,
+              vision,
+              image-generate,
+              image-edit,
+              speech-to-text,
+              audio-synthesis,
+              realtime,
+              video,
+            ]
         label:
           type: string
         description:
@@ -584,7 +595,18 @@ components:
           type: array
           items:
             type: string
-            enum: [chat, reasoning, vision, image-generate, image-edit, speech-to-text, audio-synthesis, realtime, video]
+            enum:
+              [
+                chat,
+                reasoning,
+                vision,
+                image-generate,
+                image-edit,
+                speech-to-text,
+                audio-synthesis,
+                realtime,
+                video,
+              ]
         configured:
           type: boolean
       required: [id, label, provider, capabilities, configured]
@@ -658,6 +680,47 @@ components:
         - mimeType
         - size
         - downloadUrl
+    OpenaiFactualityClaim:
+      type: object
+      properties:
+        claim:
+          type: string
+        verdict:
+          type: string
+          enum: [supported, contradicted, unknown]
+        sourceIds:
+          type: array
+          items:
+            type: integer
+        reason:
+          type: string
+      required:
+        - claim
+        - verdict
+        - sourceIds
+        - reason
+    OpenaiFactualityReport:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [verified, mixed, insufficient]
+        summary:
+          type: string
+        claims:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenaiFactualityClaim"
+        modelId:
+          type: string
+        corrected:
+          type: boolean
+      required:
+        - status
+        - summary
+        - claims
+        - modelId
+        - corrected
     OpenaiMessage:
       type: object
       properties:
@@ -675,18 +738,22 @@ components:
         sources:
           type: array
           items:
-            $ref: '#/components/schemas/OpenaiSource'
+            $ref: "#/components/schemas/OpenaiSource"
           nullable: true
         artifacts:
           type: array
           items:
-            $ref: '#/components/schemas/OpenaiArtifact'
+            $ref: "#/components/schemas/OpenaiArtifact"
           nullable: true
         auditContent:
           type: string
           nullable: true
         auditModelId:
           type: string
+          nullable: true
+        factuality:
+          allOf:
+            - $ref: "#/components/schemas/OpenaiFactualityReport"
           nullable: true
         assetIds:
           type: array
@@ -696,7 +763,7 @@ components:
         generatedAssets:
           type: array
           items:
-            $ref: '#/components/schemas/OpenaiGeneratedAsset'
+            $ref: "#/components/schemas/OpenaiGeneratedAsset"
           nullable: true
         createdAt:
           type: string
@@ -857,7 +924,8 @@ components:
           enum: [720P, 1080P]
         ratio:
           type: string
-          enum: ["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4", "9:21", "21:9"]
+          enum:
+            ["16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "5:4", "9:21", "21:9"]
         duration:
           type: integer
           minimum: 3
@@ -907,7 +975,8 @@ components:
           enum: [t2v, i2v, r2v]
         status:
           type: string
-          enum: [SUBMITTING, PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED, UNKNOWN]
+          enum:
+            [SUBMITTING, PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED, UNKNOWN]
         failureCode:
           type: string
           nullable: true
@@ -928,7 +997,21 @@ components:
           type: string
           format: date-time
           nullable: true
-      required: [id, conversationId, requestMessageId, modelId, mode, status, failureCode, failureMessage, resultAsset, createdAt, updatedAt, completedAt]
+      required:
+        [
+          id,
+          conversationId,
+          requestMessageId,
+          modelId,
+          mode,
+          status,
+          failureCode,
+          failureMessage,
+          resultAsset,
+          createdAt,
+          updatedAt,
+          completedAt,
+        ]
     OpenaiError:
       type: object
       properties:
