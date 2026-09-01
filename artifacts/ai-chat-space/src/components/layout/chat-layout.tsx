@@ -44,10 +44,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
-import {
-  CONVERSATION_TITLE_MAX,
-  normalizeConversationTitle,
-} from "@/lib/chat";
+import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -470,7 +467,9 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                 size="icon"
                 className="h-10 w-10 shrink-0 rounded-[var(--m3-shape-lg)]"
                 onClick={() => setSidebarOpen((current) => !current)}
-                aria-label={open ? "ナビゲーションを折りたたむ" : "ナビゲーションを開く"}
+                aria-label={
+                  open ? "ナビゲーションを折りたたむ" : "ナビゲーションを開く"
+                }
               >
                 {open ? (
                   <PanelLeftClose className="h-4 w-4" />
