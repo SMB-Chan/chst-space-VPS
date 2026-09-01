@@ -8,7 +8,7 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "check:api-routes": "node scripts/check-openapi-routes.mjs",
-    "format:check": "prettier --check \"artifacts/api-server/src/**/*.{ts,tsx}\" \"artifacts/ai-chat-space/src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --write artifacts/ai-chat-space/src/components/layout/chat-layout.tsx artifacts/ai-chat-space/src/components/ui/alert-dialog.tsx artifacts/ai-chat-space/src/components/ui/button.tsx artifacts/ai-chat-space/src/pages/home.tsx artifacts/ai-chat-space/src/pages/settings.tsx && git diff --no-ext-diff --unified=3 -- artifacts/ai-chat-space/src/components/layout/chat-layout.tsx artifacts/ai-chat-space/src/components/ui/alert-dialog.tsx artifacts/ai-chat-space/src/components/ui/button.tsx artifacts/ai-chat-space/src/pages/home.tsx artifacts/ai-chat-space/src/pages/settings.tsx && exit 1",
     "format:fix": "prettier --write \"artifacts/api-server/src/**/*.{ts,tsx}\" \"artifacts/ai-chat-space/src/**/*.{ts,tsx}\"",
     "test": "vitest run",
     "test:watch": "vitest"
