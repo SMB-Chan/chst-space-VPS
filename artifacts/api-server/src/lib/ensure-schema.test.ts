@@ -17,6 +17,9 @@ describe("ensureMessageSchema", () => {
       "ADD COLUMN IF NOT EXISTS audit_model_id text",
     );
     expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain(
+      "ADD COLUMN IF NOT EXISTS factuality text",
+    );
+    expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain(
       "ADD COLUMN IF NOT EXISTS model_id text",
     );
     expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain(

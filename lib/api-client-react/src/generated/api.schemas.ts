@@ -132,6 +132,39 @@ export interface OpenaiGeneratedAsset {
   downloadUrl: string;
 }
 
+export type OpenaiFactualityClaimVerdict = typeof OpenaiFactualityClaimVerdict[keyof typeof OpenaiFactualityClaimVerdict];
+
+
+export const OpenaiFactualityClaimVerdict = {
+  supported: 'supported',
+  contradicted: 'contradicted',
+  unknown: 'unknown',
+} as const;
+
+export interface OpenaiFactualityClaim {
+  claim: string;
+  verdict: OpenaiFactualityClaimVerdict;
+  sourceIds: number[];
+  reason: string;
+}
+
+export type OpenaiFactualityReportStatus = typeof OpenaiFactualityReportStatus[keyof typeof OpenaiFactualityReportStatus];
+
+
+export const OpenaiFactualityReportStatus = {
+  verified: 'verified',
+  mixed: 'mixed',
+  insufficient: 'insufficient',
+} as const;
+
+export interface OpenaiFactualityReport {
+  status: OpenaiFactualityReportStatus;
+  summary: string;
+  claims: OpenaiFactualityClaim[];
+  modelId: string;
+  corrected: boolean;
+}
+
 export interface OpenaiMessage {
   id: number;
   conversationId: number;
@@ -142,6 +175,7 @@ export interface OpenaiMessage {
   artifacts?: OpenaiArtifact[] | null;
   auditContent?: string | null;
   auditModelId?: string | null;
+  factuality?: OpenaiFactualityReport | null;
   assetIds?: number[] | null;
   generatedAssets?: OpenaiGeneratedAsset[] | null;
   createdAt: string;

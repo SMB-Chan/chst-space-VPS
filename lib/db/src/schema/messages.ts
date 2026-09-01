@@ -1,4 +1,11 @@
-import { index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -18,12 +25,19 @@ export const messages = pgTable(
     sources: text("sources"),
     auditContent: text("audit_content"),
     auditModelId: text("audit_model_id"),
+    /** JSON-encoded claim-level evidence verification report */
+    factuality: text("factuality"),
     /** JSON-encoded array of asset ids generated for this assistant message */
     assetIds: text("asset_ids"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
-    index("messages_conversation_id_created_at_idx").on(table.conversationId, table.createdAt),
+    index("messages_conversation_id_created_at_idx").on(
+      table.conversationId,
+      table.createdAt,
+    ),
   ],
 );
 

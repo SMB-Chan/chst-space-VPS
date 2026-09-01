@@ -451,10 +451,15 @@ export function isHeavyAlibabaChatRequest(body: unknown): boolean {
       ? (request.extra_body as Record<string, unknown>)
       : undefined;
   const reasoningEffort =
-    typeof extra?.reasoning_effort === "string"
-      ? extra.reasoning_effort.toLowerCase()
-      : "";
-  const thinkingBudget = finiteNumber(extra?.thinking_budget) ?? 0;
+    typeof request.reasoning_effort === "string"
+      ? request.reasoning_effort.toLowerCase()
+      : typeof extra?.reasoning_effort === "string"
+        ? extra.reasoning_effort.toLowerCase()
+        : "";
+  const thinkingBudget =
+    finiteNumber(request.thinking_budget) ??
+    finiteNumber(extra?.thinking_budget) ??
+    0;
   const highReasoning =
     reasoningEffort === "high" ||
     reasoningEffort === "xhigh" ||

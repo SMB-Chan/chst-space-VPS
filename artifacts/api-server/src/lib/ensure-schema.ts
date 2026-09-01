@@ -3,6 +3,7 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_id text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sources text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS audit_content text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS audit_model_id text;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS factuality text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS asset_ids text;
 `.trim();
 

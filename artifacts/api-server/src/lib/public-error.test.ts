@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isDatabaseError,
+  isTransientAiError,
   publicAiError,
   publicHttpError,
 } from "./public-error";
@@ -27,6 +28,43 @@ describe("isDatabaseError", () => {
   });
 });
 
+describe("isTransientAiError", () => {
+  it("detects retryable provider and nested network failures", () => {
+    expect(
+      isTransientAiError(
+        Object.assign(new Error("upstream failed"), { status: 503 }),
+      ),
+    ).toBe(true);
+    expect(
+      isTransientAiError(
+        Object.assign(new Error("Connection error."), {
+          cause: Object.assign(new Error("socket closed"), {
+            code: "ECONNRESET",
+          }),
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not retry authentication, validation, or quota errors", () => {
+    expect(
+      isTransientAiError(
+        Object.assign(new Error("unauthorized"), { status: 401 }),
+      ),
+    ).toBe(false);
+    expect(
+      isTransientAiError(
+        Object.assign(new Error("bad input"), { status: 400 }),
+      ),
+    ).toBe(false);
+    expect(
+      isTransientAiError(
+        Object.assign(new Error("rate limit"), { status: 429 }),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("publicAiError", () => {
   it("does not leak SQL or the user prompt", () => {
     const message = publicAiError(drizzleInsertError);
@@ -43,6 +81,14 @@ describe("publicAiError", () => {
     expect(publicAiError(new Error("rate limit 429"))).toBe(
       "利用制限に達しました。しばらくしてから再試行してください。",
     );
+  });
+
+  it("explains exhausted transient failures", () => {
+    expect(
+      publicAiError(
+        Object.assign(new Error("upstream failed"), { status: 502 }),
+      ),
+    ).toBe("AIサービスへの接続が一時的に不安定です。もう一度お試しください。");
   });
 });
 

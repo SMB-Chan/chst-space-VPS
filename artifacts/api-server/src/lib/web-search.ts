@@ -834,6 +834,7 @@ export async function buildWebContext(
   let urlFetchFailed = false;
   urlPages.forEach((page, i) => {
     if (page) {
+      const sourceNumber = sources.length + 1;
       sources.push({
         title: page.title,
         url: urls[i],
@@ -841,7 +842,8 @@ export async function buildWebContext(
         fetchedAt,
       });
       parts.push(
-        `【ユーザー提供URL: ${urls[i]}】\nタイトル: ${page.title}\n本文抜粋: ${page.text}`,
+        `【ユーザー提供URL: [${sourceNumber}] ${urls[i]}】\n` +
+          `[${sourceNumber}] ${page.title}\n    URL: ${urls[i]}\n    本文抜粋: ${page.text}`,
       );
     } else if (urls[i]) {
       urlFetchFailed = true;
@@ -874,8 +876,10 @@ export async function buildWebContext(
   // Web search — each round searches, fetches the top pages, and appends to
   // the shared sources/parts.  Sources and fetched pages are deduplicated by
   // URL across rounds.
-  const seenSourceUrls = new Set<string>();
-  let sourceIndex = 0;
+  const seenSourceUrls = new Set(sources.map((source) => source.url));
+  // User-provided URLs already occupy the first source-card positions. Search
+  // result numbering must continue from there so [n] always points to card n.
+  let sourceIndex = sources.length;
   const runSearchRound = async (roundQuery: string): Promise<void> => {
     onStatus({ status: "searching", query: roundQuery });
     if (signal?.aborted) return;

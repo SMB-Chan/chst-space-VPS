@@ -9,13 +9,17 @@ import { cn } from "@/lib/utils";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import {
+  FactualityCard,
+  normalizeFactualityReport,
+  type FactualityReport,
+} from "./factuality-card";
+import {
   FileGenerationPanel,
   type FileGenerationPhase,
 } from "./file-generation-panel";
 import {
   Loader2,
   Paperclip,
-  Bot,
   ChevronDown,
   FileText,
   Download,
@@ -47,6 +51,7 @@ export type StreamingPhase =
   | "reviewing-layout"
   | "revising-layout"
   | "auditing"
+  | "verifying"
   | "revising"
   | null;
 
@@ -62,6 +67,7 @@ export type ChatArtifact = {
 type DisplayMessage = OpenaiMessage & {
   auditContent?: string | null;
   auditModelId?: string | null;
+  factuality?: FactualityReport | string | null;
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
   generatedAssets?:
@@ -118,6 +124,7 @@ interface MessageFeedProps {
   } | null;
   streamingFiles?: { id: number; filename: string; mimeType: string }[];
   streamingAudit?: string;
+  streamingFactuality?: FactualityReport | null;
   isStreaming?: boolean;
   onStop?: () => void;
   streamingWarning?: string | null;
@@ -152,12 +159,12 @@ function VideoJobCard({
   return (
     <div
       className={cn(
-        "rounded-3xl border px-4 py-4 shadow-lg backdrop-blur-xl",
+        "rounded-2xl border px-4 py-4 shadow-sm",
         busy
           ? "border-violet-500/30 bg-violet-500/5"
           : job.status === "FAILED" || job.status === "UNKNOWN"
             ? "border-amber-500/30 bg-amber-500/5"
-            : "border-border/60 bg-card/60",
+            : "border-border bg-card",
       )}
     >
       <div className="flex items-center gap-2 text-sm">
@@ -242,7 +249,7 @@ function SpecialistProgress({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs backdrop-blur-xl",
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
         failed
           ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
           : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
@@ -281,7 +288,7 @@ function AuditCard({
   const [open, setOpen] = useState(!!live);
   if (!content && !live) return null;
   return (
-    <div className="w-full rounded-2xl border border-sky-500/25 bg-sky-500/5 backdrop-blur-xl overflow-hidden">
+    <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -334,9 +341,9 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
             href={artifact.downloadUrl}
             download={artifact.filename}
             className={cn(
-              "flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-3.5 py-3 shadow-sm backdrop-blur-xl transition-all",
+              "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
               artifact.downloadUrl
-                ? "hover:border-primary/40 hover:bg-primary/8"
+                ? "hover:border-primary/40 hover:bg-primary/5"
                 : "opacity-70 pointer-events-none",
             )}
           >
@@ -394,7 +401,7 @@ function FileDownloadButton({
       <a
         href={downloadUrl}
         download={filename}
-        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-card/60 border border-border/60 text-sm text-foreground shadow-sm backdrop-blur-xl hover:bg-primary/8 hover:border-primary/30 transition-all"
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
       >
         {mimeType?.startsWith("audio/") ? (
           <Volume2 className="w-4 h-4 text-primary" />
@@ -441,9 +448,11 @@ function GenerationBadge({
                       ? "生成中"
                       : phase === "auditing"
                         ? "監査中"
-                        : phase === "revising"
-                          ? "最終報告を作成中"
-                          : "準備中";
+                        : phase === "verifying"
+                          ? "根拠を検証中"
+                          : phase === "revising"
+                            ? "最終報告を作成中"
+                            : "準備中";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
@@ -463,6 +472,7 @@ export function MessageFeed({
   specialistProgress = null,
   streamingFiles = [],
   streamingAudit = "",
+  streamingFactuality = null,
   isStreaming = false,
   onStop,
   streamingWarning,
@@ -511,7 +521,7 @@ export function MessageFeed({
         stickToBottomRef.current = atBottom;
         setAwayFromBottom(!atBottom);
       }}
-      className="relative flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 pb-[calc(6rem+env(safe-area-inset-bottom))]"
+      className="relative flex-1 overflow-y-auto px-3 py-5 sm:px-5 md:px-8 md:py-7 pb-[calc(6rem+env(safe-area-inset-bottom))]"
     >
       {awayFromBottom && (
         <button
@@ -524,12 +534,12 @@ export function MessageFeed({
               block: "end",
             });
           }}
-          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full glass-panel glass-hover px-3.5 py-2 text-xs text-foreground"
+          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border/80 bg-card/90 px-3 py-1.5 text-xs text-foreground shadow-lg backdrop-blur-xl"
         >
           <ArrowDown className="h-3.5 w-3.5" /> 最新へ戻る
         </button>
       )}
-      <div className="max-w-5xl mx-auto space-y-8 md:space-y-12">
+      <div className="mx-auto max-w-4xl space-y-8 md:space-y-10">
         {messages.map((message) => {
           const display = message as DisplayMessage;
           const isUser = message.role === "user";
@@ -542,6 +552,7 @@ export function MessageFeed({
           // For assistant messages: prefer DB-persisted sources; fall back to parsing
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
           let sources = normalizeSources(message.sources);
+          const factuality = normalizeFactualityReport(display.factuality);
           const assetIds = normalizeAssetIds(message.assetIds);
           const generatedAssets = display.generatedAssets ?? [];
           if (!isUser) {
@@ -573,13 +584,13 @@ export function MessageFeed({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ type: "spring", stiffness: 340, damping: 30 }}
               className={cn(
-                "flex gap-3 md:gap-6 group",
+                "group flex gap-2.5 sm:gap-3.5 md:gap-4",
                 isUser ? "flex-row-reverse" : "flex-row",
               )}
             >
               <div className="flex-shrink-0 mt-1">
                 {isUser ? (
-                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-primary/25 bg-gradient-to-br from-primary/25 to-primary/5 text-primary shadow-sm">
+                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/25 bg-primary/10 text-primary shadow-sm">
                     {user?.imageUrl ? (
                       <AvatarImage src={user.imageUrl} alt="" />
                     ) : null}
@@ -588,9 +599,9 @@ export function MessageFeed({
                     </AvatarFallback>
                   </Avatar>
                 ) : (
-                  <Avatar className="w-8 h-8 md:w-10 md:h-10 border border-border/60 bg-card/70 backdrop-blur-xl shadow-sm">
+                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/20 bg-gradient-to-br from-primary/15 to-sky-500/10 shadow-sm">
                     <AvatarFallback className="bg-transparent text-primary">
-                      <Bot className="w-5 h-5" />
+                      <Sparkles className="w-4 h-4" />
                     </AvatarFallback>
                   </Avatar>
                 )}
@@ -598,12 +609,28 @@ export function MessageFeed({
 
               <div
                 className={cn(
-                  "flex flex-col gap-2 min-w-0",
+                  "flex min-w-0 flex-col gap-2",
                   isUser
-                    ? "items-end max-w-[88%] md:max-w-[70%]"
-                    : "items-start w-full max-w-full md:max-w-[90%]",
+                    ? "items-end max-w-[90%] md:max-w-[72%]"
+                    : "items-start w-full max-w-full md:max-w-[92%]",
                 )}
               >
+                <div
+                  className={cn(
+                    "flex items-center gap-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/65",
+                    isUser && "flex-row-reverse",
+                  )}
+                >
+                  <span>{isUser ? "You" : "AI Space"}</span>
+                  {!isUser && message.modelId ? (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
+                      <span className="normal-case tracking-normal text-muted-foreground/55">
+                        {getModelLabel(message.modelId)}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
                 {isUser && attachments.length > 0 && (
                   <div className="flex flex-wrap justify-end gap-2 max-w-full">
                     {attachments.map((attachment, index) => (
@@ -623,7 +650,7 @@ export function MessageFeed({
                 {!isUser &&
                 message.id === STREAMING_ASSISTANT_ID &&
                 !displayContent ? (
-                  <div className="px-5 py-4 rounded-[24px] rounded-bl-md bg-card/60 border border-border/60 backdrop-blur-xl shadow-sm">
+                  <div className="surface-panel rounded-[1.35rem] rounded-tl-md px-5 py-4">
                     <GenerationBadge
                       phase={streamingPhase}
                       researchStep={researchStep}
@@ -632,10 +659,10 @@ export function MessageFeed({
                 ) : (
                   <div
                     className={cn(
-                      "px-4 py-3 md:px-5 md:py-4 text-[15px] leading-relaxed break-words [overflow-wrap:anywhere] rounded-[24px]",
+                      "break-words rounded-[1.35rem] px-4 py-3 text-[15px] leading-relaxed [overflow-wrap:anywhere] md:px-5 md:py-4",
                       isUser
-                        ? "bg-primary text-primary-foreground font-sans font-normal rounded-br-md shadow-lg shadow-primary/15"
-                        : "bg-card/60 border border-border/60 backdrop-blur-xl font-sans text-foreground prose-p:leading-loose rounded-bl-md shadow-sm",
+                        ? "rounded-tr-md bg-primary text-primary-foreground font-sans font-normal shadow-lg shadow-primary/15"
+                        : "surface-panel rounded-tl-md font-sans text-foreground prose-p:leading-loose",
                     )}
                   >
                     {isUser ? (
@@ -733,6 +760,21 @@ export function MessageFeed({
                     />
                   )}
 
+                {!isUser &&
+                  (message.id === STREAMING_ASSISTANT_ID
+                    ? streamingFactuality || factuality
+                    : factuality) && (
+                    <div className="w-full px-1">
+                      <FactualityCard
+                        report={
+                          (message.id === STREAMING_ASSISTANT_ID
+                            ? streamingFactuality || factuality
+                            : factuality)!
+                        }
+                      />
+                    </div>
+                  )}
+
                 {!isUser && sources && sources.length > 0 && (
                   <div className="w-full px-1">
                     <SourceCards sources={sources} />
@@ -778,11 +820,6 @@ export function MessageFeed({
                     </div>
                   )}
 
-                {!isUser && message.modelId && (
-                  <div className="text-[11px] text-muted-foreground/70 px-1.5 select-none">
-                    {getModelLabel(message.modelId)}
-                  </div>
-                )}
                 {!isUser &&
                   message.id !== STREAMING_ASSISTANT_ID &&
                   displayContent && (

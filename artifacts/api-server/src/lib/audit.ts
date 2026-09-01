@@ -15,8 +15,59 @@ export const AUDIT_SYSTEM_PROMPT = `あなたは会話の記憶を持たない�
 - 売買指示や断定が混じっていないか
 
 出力はJSONのみ。Markdownや前置きは禁止:
-{"note":"判定と短い点検メモ（最大2000文字）","operations":[{"find":"初稿内に一度だけ現れる短い原文","replacement":"置換後の短い本文"}]}
-operationsは初稿内に完全一致で一度だけ現れるfindを指定する最大8件の置換。findは空でなく長さ上限内、初稿全体を再掲しない。find不存在・複数一致・操作範囲重複・操作数・個別文字数・置換総量・最終回答長の上限超過、またはJSON不正なら全操作を棄却する。`;
+{"note":"判定と短い点検メモ（最大800文字）","operations":[{"find":"初稿内に一度だけ現れる短い原文","replacement":"置換後の短い本文"}]}
+operationsは重大な誤りを直す場合だけ使い、問題がなければ空配列にする。最大4件。初稿内に完全一致で一度だけ現れる短いfindを指定し、初稿全体を再掲・削除しない。find不存在・複数一致・操作範囲重複・操作数・個別文字数・置換総量・最終回答長の上限超過、JSON不正、または回答が実質的に空になる操作は全件棄却する。`;
+
+export const AUDIT_INPUT_LIMITS = {
+  question: 2_000,
+  answer: 8_000,
+  citedSources: 4_000,
+  uncitedSources: 1_500,
+  attachments: 3_000,
+} as const;
+
+function boundedHeadTail(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  const marker = "\n…（監査入力を省略）…\n";
+  const available = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(available * 0.6);
+  return trimmed.slice(0, head) + marker + trimmed.slice(-(available - head));
+}
+
+/** Keep only snippets/pages cited by the draft, then apply a hard input cap. */
+export function compactAuditSourceText(
+  sourceText: string | undefined,
+  answer: string,
+): string {
+  const raw = sourceText?.trim() ?? "";
+  if (!raw) return "なし";
+  const citationIds = [
+    ...new Set([...answer.matchAll(/\[(\d{1,3})\]/g)].map((match) => match[1])),
+  ];
+  if (citationIds.length === 0) {
+    return boundedHeadTail(raw, AUDIT_INPUT_LIMITS.uncitedSources);
+  }
+
+  const segments = raw.split(/\n{2,}(?=【)/);
+  const selected: string[] = [];
+  for (const id of citationIds) {
+    const marker = `[${id}]`;
+    const snippet = raw.match(
+      new RegExp(`(?:^|\\n)(\\[${id}\\][^\\n]*(?:\\n {4}[^\\n]*)*)`),
+    )?.[1];
+    if (snippet) selected.push(snippet);
+    const page = segments.find(
+      (segment) =>
+        segment.includes(`ページ内容 ${marker}`) ||
+        segment.includes(`ユーザー提供URL: ${marker}`),
+    );
+    if (page) selected.push(page);
+  }
+  const evidence =
+    selected.length > 0 ? [...new Set(selected)].join("\n\n") : raw;
+  return boundedHeadTail(evidence, AUDIT_INPUT_LIMITS.citedSources);
+}
 
 export function buildAuditUserMessage(args: {
   question: string;
@@ -24,10 +75,13 @@ export function buildAuditUserMessage(args: {
   sourceText?: string;
   attachmentText?: string;
 }): string {
-  const question = args.question.trim().slice(0, 4000);
-  const answer = args.answer.trim().slice(0, 12_000);
-  const sources = (args.sourceText ?? "").trim().slice(0, 8000) || "なし";
-  const attachments = (args.attachmentText ?? "").trim().slice(0, 8000);
+  const question = boundedHeadTail(args.question, AUDIT_INPUT_LIMITS.question);
+  const answer = boundedHeadTail(args.answer, AUDIT_INPUT_LIMITS.answer);
+  const sources = compactAuditSourceText(args.sourceText, answer);
+  const attachments = boundedHeadTail(
+    args.attachmentText ?? "",
+    AUDIT_INPUT_LIMITS.attachments,
+  );
   return (
     `<question_data>\n${question}\n</question_data>\n\n` +
     (attachments

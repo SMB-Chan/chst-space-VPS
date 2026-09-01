@@ -282,6 +282,18 @@ export const GetOpenaiConversationResponse = zod.object({
 })).nullish(),
   "auditContent": zod.string().nullish(),
   "auditModelId": zod.string().nullish(),
+  "factuality": zod.object({
+  "status": zod.enum(['verified', 'mixed', 'insufficient']),
+  "summary": zod.string(),
+  "claims": zod.array(zod.object({
+  "claim": zod.string(),
+  "verdict": zod.enum(['supported', 'contradicted', 'unknown']),
+  "sourceIds": zod.array(zod.number().int()),
+  "reason": zod.string()
+})),
+  "modelId": zod.string(),
+  "corrected": zod.boolean()
+}).nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
   "generatedAssets": zod.array(zod.object({
   "id": zod.number().int(),
@@ -364,6 +376,18 @@ export const ListOpenaiMessagesResponseItem = zod.object({
 })).nullish(),
   "auditContent": zod.string().nullish(),
   "auditModelId": zod.string().nullish(),
+  "factuality": zod.object({
+  "status": zod.enum(['verified', 'mixed', 'insufficient']),
+  "summary": zod.string(),
+  "claims": zod.array(zod.object({
+  "claim": zod.string(),
+  "verdict": zod.enum(['supported', 'contradicted', 'unknown']),
+  "sourceIds": zod.array(zod.number().int()),
+  "reason": zod.string()
+})),
+  "modelId": zod.string(),
+  "corrected": zod.boolean()
+}).nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
   "generatedAssets": zod.array(zod.object({
   "id": zod.number().int(),

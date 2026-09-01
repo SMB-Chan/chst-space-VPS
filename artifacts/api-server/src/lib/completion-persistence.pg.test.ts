@@ -226,6 +226,43 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     expect(await tableCount("artifacts", conversationId)).toBe(1);
   });
 
+  it("persists a bounded claim-level factuality report with the assistant message", async () => {
+    const user = userId("factuality");
+    const conversationId = await createConversation(user, "factuality");
+    const factuality = {
+      status: "mixed" as const,
+      summary: "根拠あり1件、追加確認が必要1件です。",
+      claims: [
+        {
+          claim: "A社は2026年に発表した",
+          verdict: "supported" as const,
+          sourceIds: [1],
+          reason: "[1]が直接記載",
+        },
+      ],
+      modelId: "qwen3.8-max",
+      corrected: false,
+    };
+
+    await persistChatCompletion({
+      userId: user,
+      conversationId,
+      userContent: "検証して",
+      assistantContent: "A社は2026年に発表した。[1]",
+      modelId: "integration-model",
+      sources: [{ title: "A", url: "https://example.com" }],
+      factuality,
+    });
+
+    const row = await pool.query<{ factuality: string }>(
+      `SELECT factuality FROM messages
+        WHERE conversation_id = $1 AND role = 'assistant'
+        ORDER BY id DESC LIMIT 1`,
+      [conversationId],
+    );
+    expect(JSON.parse(row.rows[0]?.factuality ?? "null")).toEqual(factuality);
+  });
+
   it("persists generated audio with metadata for authenticated playback", async () => {
     const user = userId("audio");
     const conversationId = await createConversation(user, "audio");

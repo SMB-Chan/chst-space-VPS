@@ -20,12 +20,7 @@ import {
   type FileFormat,
   type VideoGenerationInput,
 } from "@/components/chat/message-input";
-import {
-  ModelSelector,
-  useAvailableModels,
-} from "@/components/chat/model-selector";
-import { ReasoningSelector } from "@/components/chat/reasoning-selector";
-import { TranslationModeSelector } from "@/components/chat/translation-selector";
+import { useAvailableModels } from "@/components/chat/model-selector";
 import {
   conversationTitle,
   timeGreeting,
@@ -43,10 +38,14 @@ import {
 import { cn } from "@/lib/utils";
 import { applyClientPatch } from "@/lib/audit-patch";
 import {
+  normalizeFactualityReport,
+  type FactualityReport,
+} from "@/components/chat/factuality-card";
+import {
   compactAttachmentMessageForHistory,
   serializeAttachmentMessage,
 } from "@/lib/attachments";
-import { Sparkles, X, Shield, Scale } from "lucide-react";
+import { Sparkles, X, Shield } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -84,6 +83,7 @@ async function streamMessage(
       fetchedAt?: string | null;
     }[],
   ) => void,
+  onFactuality: (report: FactualityReport) => void,
   onSkills: (skills: { id: string; label: string }[]) => void,
   onAudit: (text: string) => void,
   onArtifacts: (artifacts: ChatArtifact[]) => void,
@@ -223,6 +223,7 @@ async function streamMessage(
         }
       }
       if (parsed.status === "auditing") onStatus("auditing");
+      if (parsed.status === "verifying") onStatus("verifying");
       if (parsed.status === "revising") {
         onStatus("revising");
         if (parsed.resetContent) onResetContent();
@@ -274,6 +275,10 @@ async function streamMessage(
             fetchedAt?: string | null;
           }[],
         );
+      }
+      if (parsed.factuality) {
+        const report = normalizeFactualityReport(parsed.factuality);
+        if (report) onFactuality(report);
       }
       if (Array.isArray(parsed.artifacts)) {
         const artifacts = parsed.artifacts.flatMap((item): ChatArtifact[] => {
@@ -399,6 +404,7 @@ export function ChatPage() {
       fetchedAt?: string | null;
     }[],
     audit: "",
+    factuality: null as FactualityReport | null,
     artifacts: [] as ChatArtifact[],
   });
   const artifactBlobUrlCache = useRef(new Map<string, string>());
@@ -448,6 +454,8 @@ export function ChatPage() {
     initialSettings.auditModelId,
   );
   const [streamingAudit, setStreamingAudit] = useState("");
+  const [streamingFactuality, setStreamingFactuality] =
+    useState<FactualityReport | null>(null);
   const resolvedAuditModel = auditEnabled
     ? pickAuditModel(selectedModel, models, auditModelId)
     : undefined;
@@ -473,6 +481,7 @@ export function ChatPage() {
     setResearchStep(null);
     setSpecialistProgress(null);
     setStreamingAudit("");
+    setStreamingFactuality(null);
     setStreamError(null);
     setSearchWarning(
       streamingContent
@@ -491,6 +500,7 @@ export function ChatPage() {
           role: "assistant",
           content: stripArtifactBlocks(streamingContent),
           sources: streamingSources.length > 0 ? streamingSources : null,
+          factuality: streamSnapshotRef.current.factuality,
           createdAt: now,
         } as OpenaiMessage);
       }
@@ -501,6 +511,7 @@ export function ChatPage() {
       setStreamingSources([]);
       setStreamingArtifacts([]);
       setStreamingFiles([]);
+      setStreamingFactuality(null);
       setOptimisticUserMessage(null);
       return;
     }
@@ -516,6 +527,7 @@ export function ChatPage() {
             setStreamingSources([]);
             setStreamingArtifacts([]);
             setStreamingFiles([]);
+            setStreamingFactuality(null);
             setOptimisticUserMessage(null);
           });
       }, 1_000);
@@ -552,6 +564,7 @@ export function ChatPage() {
     setSearchWarning(null);
     setActiveSkills([]);
     setStreamingAudit("");
+    setStreamingFactuality(null);
     setVideoJob(null);
     // Revoke object URLs created for ephemeral artifact downloads so we do not
     // leak memory when the user switches conversations.
@@ -608,6 +621,7 @@ export function ChatPage() {
       setStreamingArtifacts([]);
       setStreamingFiles([]);
       setStreamingAudit("");
+      setStreamingFactuality(null);
       setSpecialistProgress(null);
       setOptimisticUserMessage(null);
       streamSnapshotRef.current = {
@@ -615,6 +629,7 @@ export function ChatPage() {
         sources: [],
         artifacts: [],
         audit: "",
+        factuality: null,
       };
       setStreamError(
         "応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。",
@@ -838,6 +853,7 @@ export function ChatPage() {
     setSearchWarning(visionBridgeNote);
     setActiveSkills([]);
     setStreamingAudit("");
+    setStreamingFactuality(null);
     setStreamingArtifacts([]);
     setOptimisticUserMessage({
       id: OPTIMISTIC_USER_ID,
@@ -858,6 +874,7 @@ export function ChatPage() {
       content: "",
       sources: [],
       audit: "",
+      factuality: null,
       artifacts: [],
     };
 
@@ -932,6 +949,7 @@ export function ChatPage() {
                 auditModelId: streamSnapshotRef.current.audit
                   ? auditModel
                   : null,
+                factuality: streamSnapshotRef.current.factuality,
                 createdAt: now,
               } as OpenaiMessage,
             ]);
@@ -953,6 +971,7 @@ export function ChatPage() {
           setStreamingArtifacts([]);
           setStreamingFiles([]);
           setStreamingAudit("");
+          setStreamingFactuality(null);
           setSpecialistProgress(null);
           setOptimisticUserMessage(null);
         }
@@ -965,6 +984,7 @@ export function ChatPage() {
         setStreamingArtifacts([]);
         setStreamingFiles([]);
         setStreamingAudit("");
+        setStreamingFactuality(null);
         setSpecialistProgress(null);
         setStreamError(err.message);
         if (!isPrivate && targetId) {
@@ -992,6 +1012,10 @@ export function ChatPage() {
       (sources) => {
         streamSnapshotRef.current.sources = sources;
         setStreamingSources(sources);
+      },
+      (report) => {
+        streamSnapshotRef.current.factuality = report;
+        setStreamingFactuality(report);
       },
       (skills) => {
         setActiveSkills(skills);
@@ -1074,6 +1098,7 @@ export function ChatPage() {
             role: "assistant",
             content: streamingContent,
             sources: streamingSources.length > 0 ? streamingSources : null,
+            factuality: streamingFactuality,
             artifacts:
               streamingArtifacts.length > 0
                 ? (streamingArtifacts as unknown as OpenaiArtifact[])
@@ -1089,8 +1114,8 @@ export function ChatPage() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-hidden flex flex-col">
+    <div className="relative flex h-full flex-col">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {!isPrivate &&
         (invalidConversationId ||
           (conversationLoadError && !optimisticUserMessage && !isStreaming)) ? (
@@ -1106,13 +1131,13 @@ export function ChatPage() {
         ) : !conversationId &&
           !optimisticUserMessage &&
           privateMessages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-2xl mx-auto w-full">
+          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10 text-center sm:px-8">
             <div
               className={cn(
-                "w-20 h-20 rounded-[28px] flex items-center justify-center mb-7 border shadow-[inset_0_1px_0_0_rgb(255_255_255/0.08),0_16px_40px_-12px_rgb(0_0_0/0.5)] bg-gradient-to-br",
+                "relative mb-7 flex h-20 w-20 items-center justify-center rounded-[28px] border bg-gradient-to-br shadow-[inset_0_1px_0_0_rgb(255_255_255/0.08),0_16px_40px_-12px_rgb(0_0_0/0.5)] before:absolute before:inset-0 before:-z-10 before:rounded-[1.75rem] before:blur-2xl",
                 isPrivate
-                  ? "from-violet-500/25 to-violet-500/5 border-violet-500/30"
-                  : "from-primary/30 to-primary/5 border-primary/25",
+                  ? "from-violet-500/25 to-violet-500/5 border-violet-500/30 before:bg-violet-500/15"
+                  : "from-primary/30 to-primary/5 border-primary/25 before:bg-primary/20",
               )}
             >
               {isPrivate ? (
@@ -1121,14 +1146,29 @@ export function ChatPage() {
                 <Sparkles className="w-9 h-9 text-primary" />
               )}
             </div>
-            <h2 className="text-4xl font-serif font-medium mb-3 text-foreground tracking-tight">
+            <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/70">
+              {isPrivate ? "Ephemeral workspace" : "Ready when you are"}
+            </div>
+            <h2 className="text-balance mb-3 font-serif text-3xl font-medium tracking-[-0.025em] text-foreground sm:text-4xl">
               {isPrivate ? "プライベートセッション" : greeting.title}
             </h2>
-            <p className="text-muted-foreground mb-8 text-lg max-w-md font-sans font-light">
+            <p className="text-balance mb-8 max-w-lg font-sans text-base font-light leading-7 text-muted-foreground sm:text-lg">
               {isPrivate
                 ? "この会話はサーバーに保存されません。タブを閉じると履歴は消えます。"
                 : greeting.subtitle}
             </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
+              {["Webリサーチ", "画像・文書解析", "資料生成", "複数モデル"].map(
+                (capability) => (
+                  <span
+                    key={capability}
+                    className="rounded-full border border-border/70 bg-card/55 px-3 py-1.5 shadow-sm backdrop-blur"
+                  >
+                    {capability}
+                  </span>
+                ),
+              )}
+            </div>
           </div>
         ) : (
           <MessageFeed
@@ -1146,24 +1186,27 @@ export function ChatPage() {
                         ? "revising"
                         : searchStatus?.kind === "auditing"
                           ? "auditing"
-                          : searchStatus?.kind === "researching"
-                            ? "researching"
-                            : searchStatus?.kind === "searching" ||
-                                searchStatus?.kind === "fetching"
-                              ? "searching"
-                              : searchStatus?.kind === "generating-file"
-                                ? "generating-file"
-                                : searchStatus?.kind === "reviewing-layout"
-                                  ? "reviewing-layout"
-                                  : searchStatus?.kind === "revising-layout"
-                                    ? "revising-layout"
-                                    : streamingContent
-                                      ? "generating"
-                                      : "starting"
+                          : searchStatus?.kind === "verifying"
+                            ? "verifying"
+                            : searchStatus?.kind === "researching"
+                              ? "researching"
+                              : searchStatus?.kind === "searching" ||
+                                  searchStatus?.kind === "fetching"
+                                ? "searching"
+                                : searchStatus?.kind === "generating-file"
+                                  ? "generating-file"
+                                  : searchStatus?.kind === "reviewing-layout"
+                                    ? "reviewing-layout"
+                                    : searchStatus?.kind === "revising-layout"
+                                      ? "revising-layout"
+                                      : streamingContent
+                                        ? "generating"
+                                        : "starting"
                 : null
             }
             researchStep={researchStep}
             streamingAudit={streamingAudit}
+            streamingFactuality={streamingFactuality}
             specialistProgress={specialistProgress}
             streamingFiles={streamingFiles}
             videoJob={videoJob}
@@ -1177,26 +1220,8 @@ export function ChatPage() {
         )}
       </div>
 
-      {activeSkills.length > 0 && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-4xl mx-auto w-full">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-700 dark:text-emerald-300 backdrop-blur-xl">
-            <span className="text-xs uppercase tracking-wider opacity-80">
-              自動スキル
-            </span>
-            {activeSkills.map((skill) => (
-              <span
-                key={skill.id}
-                className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-medium"
-              >
-                {skill.label}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {streamError && (
-        <div className="mx-4 md:mx-6 mb-2 max-w-3xl mx-auto w-full">
+        <div className="mx-auto mb-2 w-full max-w-4xl px-4 md:px-6">
           <div className="flex items-start gap-2 px-4 py-2 rounded-2xl bg-destructive/10 border border-destructive/30 text-destructive text-sm backdrop-blur-xl">
             <span className="flex-1">エラー: {streamError}</span>
             <button
@@ -1211,70 +1236,29 @@ export function ChatPage() {
         </div>
       )}
 
-      <div className="px-4 md:px-6 pt-10 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6 bg-gradient-to-t from-background via-background/70 to-transparent">
-        <div className="max-w-4xl mx-auto space-y-2.5">
-          <div className="relative">
-            <div className="flex items-center gap-2 px-1 flex-nowrap overflow-x-auto scrollbar-none [&>*]:shrink-0 pb-1">
-              <ModelSelector
-                selectedModel={selectedModel}
-                onSelect={setSelectedModel}
-                disabled={isStreaming || createConversation.isPending}
-              />
-              {(models.find((m) => m.id === selectedModel)?.supportsReasoning ??
-                true) && (
-                <ReasoningSelector
-                  value={reasoningLevel}
-                  onSelect={setReasoningLevel}
-                  disabled={isStreaming || createConversation.isPending}
-                />
-              )}
-              <TranslationModeSelector
-                value={translationMode}
-                onSelect={(mode) => {
-                  setTranslationMode(mode);
-                  saveSettings({ translationMode: mode });
-                }}
-                disabled={isStreaming || createConversation.isPending}
-              />
-              <button
-                type="button"
-                disabled={isStreaming || createConversation.isPending}
-                onClick={() => {
-                  const next = !auditEnabled;
-                  setAuditEnabled(next);
-                  saveSettings({ auditEnabled: next });
-                }}
-                className={cn(
-                  "h-8 gap-1.5 px-3 rounded-full text-xs font-medium border inline-flex items-center backdrop-blur-xl transition-colors",
-                  auditEnabled
-                    ? "text-sky-300 border-sky-500/40 bg-sky-500/10 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
-                    : "text-muted-foreground border-border/60 bg-card/50 hover:text-foreground hover:bg-card/80",
-                  (isStreaming || createConversation.isPending) && "opacity-50",
-                )}
-                title={
-                  auditEnabled && auditModel
-                    ? `監査: ${auditModel}`
-                    : auditEnabled
-                      ? "監査 ON（監査モデルが選択されていません）"
-                      : "監査モード"
-                }
-              >
-                <Scale className="w-3 h-3" />
-                監査
-                {auditEnabled && auditModel
-                  ? " ON"
-                  : auditEnabled
-                    ? " ON(?)"
-                    : ""}
-              </button>
-            </div>
-            <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-8 bg-gradient-to-l from-background to-transparent md:hidden" />
-          </div>
+      <div className="bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-8 sm:px-5 md:px-6 md:pb-5 md:pt-10">
+        <div className="mx-auto max-w-4xl">
           <MessageInput
             onSend={handleSend}
             disabled={isStreaming || videoBusy || createConversation.isPending}
             conversationId={conversationId}
             selectedModel={selectedModel}
+            onSelectModel={setSelectedModel}
+            reasoningLevel={reasoningLevel}
+            onReasoningChange={setReasoningLevel}
+            translationMode={translationMode}
+            onTranslationModeChange={(mode) => {
+              setTranslationMode(mode);
+              saveSettings({ translationMode: mode });
+            }}
+            auditEnabled={auditEnabled}
+            onAuditToggle={() => {
+              const next = !auditEnabled;
+              setAuditEnabled(next);
+              saveSettings({ auditEnabled: next });
+            }}
+            auditModel={auditModel}
+            activeSkills={activeSkills}
             fileGenerationEnabled={!isPrivate && translationMode === "off"}
             videoGenerationEnabled={!isPrivate}
             onGenerateVideo={handleGenerateVideo}

@@ -110,4 +110,19 @@ describe("applyValidatedAuditPatch", () => {
     ]);
     expect(finalLength.applied).toBe(false);
   });
+
+  it("never lets an audit patch erase the visible answer", () => {
+    const draft = "短い初稿ですが、ユーザーに見せる有効な回答です。";
+    const result = patch(draft, [{ find: draft, replacement: "" }]);
+    expect(result).toMatchObject({
+      content: draft,
+      applied: false,
+      reason: expect.stringContaining("実質的に空"),
+    });
+
+    const longDraft = "a".repeat(1_000);
+    expect(
+      patch(longDraft, [{ find: longDraft, replacement: "short" }]),
+    ).toMatchObject({ content: longDraft, applied: false });
+  });
 });

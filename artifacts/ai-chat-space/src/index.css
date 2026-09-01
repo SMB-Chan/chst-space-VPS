@@ -1,8 +1,8 @@
 @layer theme, base, clerk, components, utilities;
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap');
-@import 'tailwindcss';
-@import '@clerk/themes/shadcn.css';
-@import 'tw-animate-css';
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap");
+@import "tailwindcss";
+@import "@clerk/themes/shadcn.css";
+@import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -121,9 +121,11 @@
   --chart-4: 280 50% 48%;
   --chart-5: 330 55% 48%;
 
-  --app-font-sans: 'Outfit', sans-serif;
-  --app-font-serif: 'Lora', serif;
-  --app-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --app-font-sans: "Outfit", sans-serif;
+  --app-font-serif: "Lora", serif;
+  --app-font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
   --radius: 1rem;
 
   /* Liquid glass — light scheme */
@@ -137,15 +139,15 @@
   --ambient-2: hsl(268 70% 60% / 0.06);
   --ambient-3: hsl(200 85% 55% / 0.05);
 
-  --shadow-2xs: 0px 1px 2px 0px rgba(0,0,0,0.05);
-  --shadow-xs: 0px 1px 3px 0px rgba(0,0,0,0.1);
-  --shadow-sm: 0px 2px 4px 0px rgba(0,0,0,0.1);
-  --shadow: 0px 4px 6px -1px rgba(0,0,0,0.1);
-  --shadow-md: 0px 6px 12px -2px rgba(0,0,0,0.12);
-  --shadow-lg: 0px 12px 24px -4px rgba(0,0,0,0.14);
-  --shadow-xl: 0px 20px 40px -8px rgba(0,0,0,0.18);
-  --shadow-2xl: 0px 25px 50px -12px rgba(0,0,0,0.22);
-  --shadow-glass: 0px 8px 32px rgba(0,0,0,0.12);
+  --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
+  --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
+  --shadow-sm: 0px 2px 4px 0px rgba(0, 0, 0, 0.1);
+  --shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0px 6px 12px -2px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0px 12px 24px -4px rgba(0, 0, 0, 0.14);
+  --shadow-xl: 0px 20px 40px -8px rgba(0, 0, 0, 0.18);
+  --shadow-2xl: 0px 25px 50px -12px rgba(0, 0, 0, 0.22);
+  --shadow-glass: 0px 8px 32px rgba(0, 0, 0, 0.12);
 
   --tracking-normal: 0em;
   --spacing: 0.25rem;
@@ -224,13 +226,34 @@
 
   body {
     @apply font-sans antialiased text-foreground selection:bg-primary/25 selection:text-primary;
+    min-width: 320px;
     background-color: hsl(var(--background));
     /* Ambient glow field — gives liquid glass surfaces something to refract */
     background-image:
-      radial-gradient(56rem 38rem at 112% -8%, var(--ambient-1), transparent 62%),
-      radial-gradient(48rem 34rem at -12% 108%, var(--ambient-2), transparent 60%),
-      radial-gradient(40rem 28rem at 55% 118%, var(--ambient-3), transparent 58%);
+      radial-gradient(
+        56rem 38rem at 112% -8%,
+        var(--ambient-1),
+        transparent 62%
+      ),
+      radial-gradient(
+        48rem 34rem at -12% 108%,
+        var(--ambient-2),
+        transparent 60%
+      ),
+      radial-gradient(
+        40rem 28rem at 55% 118%,
+        var(--ambient-3),
+        transparent 58%
+      );
     background-attachment: fixed;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
   }
 
   button:not(:disabled),
@@ -278,7 +301,8 @@
   }
 
   .glass-hover {
-    transition: background-color 200ms var(--ease-emphasized),
+    transition:
+      background-color 200ms var(--ease-emphasized),
       border-color 200ms var(--ease-emphasized),
       box-shadow 200ms var(--ease-emphasized);
   }
@@ -287,19 +311,72 @@
     border-color: var(--glass-border-hover);
   }
 
+  /* Composers and raised panels (kept name from prior iteration) */
+  .surface-panel {
+    background: var(--glass-surface);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-highlight),
+      0 18px 60px -32px hsl(232 35% 2% / 0.55);
+  }
+
   /* Specular top edge for floating controls */
   .specular {
     box-shadow: inset 0 1px 0 0 var(--glass-highlight);
   }
 
+  .ambient-grid {
+    background-image:
+      linear-gradient(hsl(var(--foreground) / 0.025) 1px, transparent 1px),
+      linear-gradient(
+        90deg,
+        hsl(var(--foreground) / 0.025) 1px,
+        transparent 1px
+      );
+    background-size: 32px 32px;
+    mask-image: linear-gradient(to bottom, black, transparent 88%);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-rise-in {
+    animation: rise-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
   @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 
   @keyframes breathe {
-    0%, 100% { opacity: 0.55; transform: scale(1); }
-    50% { opacity: 1; transform: scale(1.06); }
+    0%,
+    100% {
+      opacity: 0.55;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.06);
+    }
   }
 
   /* Custom scrollbar for webkit */
@@ -315,5 +392,11 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/40;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-rise-in {
+      animation: none;
+    }
   }
 }
