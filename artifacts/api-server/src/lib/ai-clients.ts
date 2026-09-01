@@ -261,6 +261,23 @@ export function applySafeGenerationParams(
   }
 }
 
+/**
+ * Retry an otherwise successful-but-empty completion without spending the
+ * entire token budget on hidden reasoning again.
+ */
+export function applyNonReasoningGenerationParams(
+  opts: Record<string, unknown>,
+  provider: ModelProvider,
+): void {
+  applySafeGenerationParams(opts, provider);
+  if (provider === "dashscope") {
+    opts.extra_body = {
+      incremental_output: true,
+      enable_thinking: false,
+    };
+  }
+}
+
 export function isUnsupportedGenerationParam(err: unknown): boolean {
   const status = (err as { status?: number }).status;
   const msg = err instanceof Error ? err.message : String(err);

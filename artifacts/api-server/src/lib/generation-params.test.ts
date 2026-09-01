@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyGenerationParams,
+  applyNonReasoningGenerationParams,
   applySafeGenerationParams,
   isUnsupportedGenerationParam,
 } from "./ai-clients";
@@ -41,5 +42,29 @@ describe("applySafeGenerationParams", () => {
     applySafeGenerationParams(opts, "dashscope");
     expect(opts.reasoning_effort).toBeUndefined();
     expect(opts.extra_body).toEqual({ incremental_output: true });
+  });
+});
+
+describe("applyNonReasoningGenerationParams", () => {
+  it("explicitly disables DashScope thinking for an empty-response retry", () => {
+    const opts: Record<string, unknown> = {
+      extra_body: { enable_thinking: true, thinking_budget: 8192 },
+    };
+    applyNonReasoningGenerationParams(opts, "dashscope");
+    expect(opts.extra_body).toEqual({
+      incremental_output: true,
+      enable_thinking: false,
+    });
+  });
+
+  it("removes OpenAI reasoning effort while preserving its token parameter", () => {
+    const opts: Record<string, unknown> = {
+      reasoning_effort: "high",
+      max_tokens: 8192,
+    };
+    applyNonReasoningGenerationParams(opts, "openai");
+    expect(opts.reasoning_effort).toBeUndefined();
+    expect(opts.max_tokens).toBeUndefined();
+    expect(opts.max_completion_tokens).toBe(8192);
   });
 });

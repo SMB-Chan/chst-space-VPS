@@ -83,6 +83,19 @@ async function* reasoningStream(): AsyncGenerator<{
   yield { choices: [{ delta: { content: "answer" } }] };
 }
 
+async function* emptyStream(): AsyncGenerator<{
+  choices: { delta: { content?: string } }[];
+}> {
+  return;
+}
+
+async function* delayedAnswerStream(): AsyncGenerator<{
+  choices: { delta: { content: string } }[];
+}> {
+  await new Promise((resolve) => setTimeout(resolve, 16_000));
+  yield { choices: [{ delta: { content: "answer" } }] };
+}
+
 describe("response cancellation", () => {
   it("aborts the shared signal when the response closes before streaming starts", () => {
     const response = new MockResponse();
@@ -186,6 +199,61 @@ describe("model stream recovery", () => {
     );
   });
 
+  it("retries a clean empty response with thinking disabled", async () => {
+    const response = new StreamingResponse();
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(emptyStream())
+      .mockResolvedValueOnce(answerStream());
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    await streamChatReply({
+      res: response as unknown as Response,
+      client,
+      provider: "dashscope",
+      modelId: "qwen3.8-max",
+      reasoningLevel: "high",
+      userText: "hello",
+      chatMessages: [{ role: "user", content: "hello" }],
+      translationMode: "ja-en",
+      publicAiError: () => "error",
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0]).toMatchObject({
+      extra_body: { incremental_output: true, enable_thinking: false },
+    });
+    expect(response.writes.join("\n")).toContain('"content":"answer"');
+    expect(response.writes.join("\n")).not.toContain('"error"');
+  });
+
+  it("reports an error after a clean empty response is retried once", async () => {
+    const response = new StreamingResponse();
+    const create = vi.fn().mockImplementation(async () => emptyStream());
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    await streamChatReply({
+      res: response as unknown as Response,
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      reasoningLevel: "medium",
+      userText: "hello",
+      chatMessages: [{ role: "user", content: "hello" }],
+      translationMode: "ja-en",
+      publicAiError: () => "error",
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(response.writes.join("\n")).toContain(
+      '"error":"応答が空でした。もう一度お試しください。"',
+    );
+  });
+
   it("emits a safe thinking heartbeat without exposing reasoning text", async () => {
     const response = new StreamingResponse();
     const client = {
@@ -210,5 +278,39 @@ describe("model stream recovery", () => {
     expect(output).toContain('"status":"thinking"');
     expect(output).not.toContain("private chain");
     expect(output).toContain('"content":"answer"');
+  });
+
+  it("keeps the SSE connection alive while the model is silent", async () => {
+    vi.useFakeTimers();
+    try {
+      const response = new StreamingResponse();
+      const client = {
+        chat: {
+          completions: {
+            create: vi.fn().mockResolvedValue(delayedAnswerStream()),
+          },
+        },
+      } as unknown as OpenAI;
+
+      const reply = streamChatReply({
+        res: response as unknown as Response,
+        client,
+        provider: "openai",
+        modelId: "gpt-5.6-terra",
+        reasoningLevel: "off",
+        userText: "hello",
+        chatMessages: [{ role: "user", content: "hello" }],
+        translationMode: "ja-en",
+        publicAiError: () => "error",
+      });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(response.writes).toContain(": keepalive\n\n");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await reply;
+      expect(response.writes.join("\n")).toContain('"content":"answer"');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -2,6 +2,7 @@ import type { Response } from "express";
 import type OpenAI from "openai";
 import {
   applyGenerationParams,
+  applyNonReasoningGenerationParams,
   applySafeGenerationParams,
   isUnsupportedGenerationParam,
   type ChatModel,
@@ -68,6 +69,7 @@ const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
 const SPECIALIST_TIMEOUT_MS = 120_000;
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 /** Maximum research tool calls (web_search/fetch_page) per turn. */
 const MAX_RESEARCH_STEPS = 6;
 /** Per-step timeout for a single research tool execution. */
@@ -352,6 +354,21 @@ export async function streamChatReply(args: {
   const cancellation = providedCancellation ?? createResponseCancellation(res);
   const clientAbort = { signal: cancellation.signal };
   const clientGone = () => cancellation.isClientGone();
+  const heartbeat: ReturnType<typeof setInterval> = setInterval(() => {
+    if (!clientGone() && !res.writableEnded) {
+      // SSE comments are ignored by the UI but keep idle proxies from closing
+      // the response while the model or a specialist tool is still working.
+      try {
+        res.write(": keepalive\n\n");
+      } catch {
+        // A close event normally updates clientGone first, but a socket can
+        // fail between the state check and write. Timer callbacks must never
+        // turn that race into an uncaught process-level exception.
+        clearInterval(heartbeat);
+      }
+    }
+  }, SSE_HEARTBEAT_INTERVAL_MS);
+  heartbeat.unref();
 
   let fullResponse = "";
   try {
@@ -1380,6 +1397,7 @@ export async function streamChatReply(args: {
   if (!res.writableEnded) {
     res.end();
   }
+  clearInterval(heartbeat);
   if (ownsCancellation) cancellation.dispose();
 }
 
@@ -1423,13 +1441,23 @@ async function streamModelText(args: {
   const maxAttempts = 2;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let stream: AsyncIterable<{ choices?: { delta?: StreamDelta }[] }>;
+    let stream: AsyncIterable<{
+      choices?: {
+        delta?: StreamDelta;
+        finish_reason?: string | null;
+      }[];
+    }>;
+    let sawChunk = false;
+    let finishReason: string | null = null;
     try {
       try {
         stream = (await args.client.chat.completions.create(streamOptions, {
           signal: args.signal,
         })) as AsyncIterable<{
-          choices?: { delta?: StreamDelta }[];
+          choices?: {
+            delta?: StreamDelta;
+            finish_reason?: string | null;
+          }[];
         }>;
       } catch (err) {
         if (args.signal?.aborted) throw args.signal.reason;
@@ -1445,13 +1473,19 @@ async function streamModelText(args: {
         stream = (await args.client.chat.completions.create(streamOptions, {
           signal: args.signal,
         })) as AsyncIterable<{
-          choices?: { delta?: StreamDelta }[];
+          choices?: {
+            delta?: StreamDelta;
+            finish_reason?: string | null;
+          }[];
         }>;
       }
 
       for await (const chunk of stream) {
         if (args.shouldStop()) break;
-        const delta = chunk.choices?.[0]?.delta;
+        sawChunk = true;
+        const choice = chunk.choices?.[0];
+        const delta = choice?.delta;
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
         const rawToolCalls = (
           delta as unknown as
             | {
@@ -1497,6 +1531,34 @@ async function streamModelText(args: {
           full = merged;
           if (added) args.onDelta(added, "content");
         }
+      }
+      const shouldRetryEmpty =
+        attempt < maxAttempts &&
+        !args.signal?.aborted &&
+        !args.shouldStop() &&
+        !full.trim() &&
+        toolCalls.size === 0 &&
+        finishReason !== "content_filter";
+      if (shouldRetryEmpty) {
+        logger.warn(
+          {
+            component: "chat-stream",
+            errorCode: "MODEL_STREAM_EMPTY_RETRY",
+            provider: args.provider,
+            modelId: args.modelId,
+            attempt,
+            sawChunk,
+            finishReason,
+            hadReasoning: Boolean(reasoning),
+          },
+          "Retrying model stream that completed without visible output",
+        );
+        reasoning = "";
+        applyNonReasoningGenerationParams(
+          streamOptions as unknown as Record<string, unknown>,
+          args.provider,
+        );
+        continue;
       }
       break;
     } catch (err) {
