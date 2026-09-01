@@ -104,7 +104,11 @@ export function HomePage() {
                 </Button>
               </Link>
               <Link href="/sign-in">
-                <Button size="lg" variant="elevated" className="w-full sm:w-auto">
+                <Button
+                  size="lg"
+                  variant="elevated"
+                  className="w-full sm:w-auto"
+                >
                   既存アカウントで続ける
                 </Button>
               </Link>
