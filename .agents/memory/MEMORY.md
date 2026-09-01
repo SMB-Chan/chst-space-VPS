@@ -7,3 +7,4 @@
 - [画像添付のマルチモーダル変換](image-attachments-multimodal.md) — 保存は文字列形式、送信直前にstructured contentへ変換。vision可否はフロントとサーバー両方で管理。
 - [PDF用CJKフォント互換性](pdf-cjk-font-compatibility.md) — fontconfigで見つかる可変TTCはpdf-lib非互換。単体の静的TTF/OTFを使う。
 - [マージ後セットアップ](post-merge-setup.md) — frozen install後にDBライブラリの生成型を再ビルドし、依存変更時はlockfileも同期する。
+- [公開ビルドのセキュリティ検査](deployment-security-scan.md) — 公開ログが二度目のSecurity Scanで終わる場合はOSV監査で依存脆弱性を特定し、frozen installまで再確認する。
