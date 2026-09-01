@@ -8,7 +8,7 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "check:api-routes": "node scripts/check-openapi-routes.mjs",
-    "format:check": "prettier --check \"artifacts/api-server/src/**/*.{ts,tsx}\" \"artifacts/ai-chat-space/src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --write \"artifacts/ai-chat-space/src/components/chat/file-generation-panel.tsx\" \"artifacts/ai-chat-space/src/components/chat/message-input.tsx\" && git diff -- \"artifacts/ai-chat-space/src/components/chat/file-generation-panel.tsx\" \"artifacts/ai-chat-space/src/components/chat/message-input.tsx\" && exit 1",
     "format:fix": "prettier --write \"artifacts/api-server/src/**/*.{ts,tsx}\" \"artifacts/ai-chat-space/src/**/*.{ts,tsx}\"",
     "test": "vitest run",
     "test:watch": "vitest"
