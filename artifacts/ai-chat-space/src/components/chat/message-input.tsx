@@ -51,15 +51,7 @@ export type VideoGenerationInput = {
   referenceImages?: OutgoingAttachment[];
   resolution: "720P" | "1080P";
   ratio:
-    | "16:9"
-    | "9:16"
-    | "1:1"
-    | "4:3"
-    | "3:4"
-    | "4:5"
-    | "5:4"
-    | "9:21"
-    | "21:9";
+    "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "4:5" | "5:4" | "9:21" | "21:9";
   duration: number;
 };
 
