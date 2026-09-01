@@ -30,7 +30,8 @@ const surfaceVariants = cva("text-foreground", {
 });
 
 export interface SurfaceProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends
+    React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof surfaceVariants> {
   asChild?: boolean;
 }
