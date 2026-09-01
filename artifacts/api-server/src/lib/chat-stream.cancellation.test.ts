@@ -88,6 +88,20 @@ async function* reasoningStream(): AsyncGenerator<{
   yield { choices: [{ delta: { content: "answer" } }] };
 }
 
+async function* reasoningOnlyLengthStream(): AsyncGenerator<{
+  choices: {
+    delta: { reasoning_content?: string };
+    finish_reason?: string | null;
+  }[];
+}> {
+  yield {
+    choices: [{ delta: { reasoning_content: "private chain" } }],
+  };
+  yield {
+    choices: [{ delta: {}, finish_reason: "length" }],
+  };
+}
+
 async function* emptyStream(): AsyncGenerator<{
   choices: { delta: { content?: string } }[];
 }> {
@@ -276,11 +290,51 @@ describe("model stream recovery", () => {
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[1]?.[0]).toMatchObject({
-      extra_body: { incremental_output: true, enable_thinking: false },
+      incremental_output: true,
+      enable_thinking: false,
     });
+    expect(create.mock.calls[1]?.[0]?.extra_body).toBeUndefined();
     expect(response.writes.join("\n")).toContain('"content":"answer"');
     expect(response.writes.join("\n")).not.toContain('"error"');
   });
+
+  it.each(["deepseek-v4-flash-0731", "glm-5.2"])(
+    "recovers a %s reasoning-only length response with top-level non-thinking params",
+    async (modelId) => {
+      const sentOptions: Record<string, unknown>[] = [];
+      const create = vi
+        .fn()
+        .mockImplementationOnce(async (options: Record<string, unknown>) => {
+          sentOptions.push(structuredClone(options));
+          return reasoningOnlyLengthStream();
+        })
+        .mockImplementationOnce(async (options: Record<string, unknown>) => {
+          sentOptions.push(structuredClone(options));
+          return answerStream();
+        });
+      const client = {
+        chat: { completions: { create } },
+      } as unknown as OpenAI;
+
+      const result = await streamModelText({
+        client,
+        provider: "dashscope",
+        modelId,
+        reasoningLevel: "medium",
+        messages: [{ role: "user", content: "market outlook" }],
+        onDelta: () => undefined,
+        shouldStop: () => false,
+      });
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(sentOptions[1]).toMatchObject({
+        incremental_output: true,
+        enable_thinking: false,
+      });
+      expect(sentOptions[1]?.extra_body).toBeUndefined();
+      expect(result).toBe("answer");
+    },
+  );
 
   it("reports an error after a clean empty response is retried once", async () => {
     const response = new StreamingResponse();
@@ -350,9 +404,11 @@ describe("model stream recovery", () => {
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(sentOptions[0]).toMatchObject({
-      extra_body: { tool_stream: true },
+      tool_stream: true,
     });
     expect(sentOptions[1]?.tools).toBeUndefined();
+    expect(sentOptions[1]?.tool_stream).toBeUndefined();
+    expect(sentOptions[1]?.enable_thinking).toBe(false);
     expect(onToolCalls).not.toHaveBeenCalled();
     expect(deltas.join("")).toBe("answer");
     expect(result).toBe("answer");

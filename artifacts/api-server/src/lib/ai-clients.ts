@@ -231,18 +231,27 @@ export function applyGenerationParams(
   }
 
   opts.max_tokens = 8192;
-  const extra: Record<string, unknown> = { incremental_output: true };
+  // Alibaba's OpenAI-compatible API accepts these vendor parameters at the
+  // request-body top level when used through the OpenAI Node.js SDK. The
+  // Python SDK's extra_body convention is not interpreted by the Node SDK.
+  opts.incremental_output = true;
   if (model?.reasoning === "dashscope") {
-    extra.enable_thinking = level !== "off";
+    opts.enable_thinking = level !== "off";
     if (level !== "off") {
       if (modelId.startsWith("qwen3.8")) {
-        extra.reasoning_effort = level === "high" ? "xhigh" : level;
+        opts.reasoning_effort = level === "high" ? "xhigh" : level;
+      } else if (modelId === "deepseek-v4-flash-0731") {
+        opts.reasoning_effort =
+          level === "low" ? "low" : level === "high" ? "max" : "high";
+      } else if (modelId.startsWith("deepseek-v4-")) {
+        opts.reasoning_effort = level === "high" ? "max" : "high";
+      } else if (modelId.startsWith("glm-")) {
+        opts.reasoning_effort = level;
       } else {
-        extra.thinking_budget = THINKING_BUDGET[level];
+        opts.thinking_budget = THINKING_BUDGET[level];
       }
     }
   }
-  opts.extra_body = extra;
 }
 
 export function applySafeGenerationParams(
@@ -250,6 +259,10 @@ export function applySafeGenerationParams(
   provider: ModelProvider,
 ): void {
   delete opts.reasoning_effort;
+  delete opts.enable_thinking;
+  delete opts.thinking_budget;
+  delete opts.incremental_output;
+  delete opts.tool_stream;
   delete opts.extra_body;
   if (provider === "openai") {
     opts.max_completion_tokens = 8192;
@@ -257,7 +270,7 @@ export function applySafeGenerationParams(
   } else {
     opts.max_tokens = 8192;
     delete opts.max_completion_tokens;
-    opts.extra_body = { incremental_output: true };
+    opts.incremental_output = true;
   }
 }
 
@@ -271,10 +284,7 @@ export function applyNonReasoningGenerationParams(
 ): void {
   applySafeGenerationParams(opts, provider);
   if (provider === "dashscope") {
-    opts.extra_body = {
-      incremental_output: true,
-      enable_thinking: false,
-    };
+    opts.enable_thinking = false;
   }
 }
 
@@ -285,21 +295,18 @@ export function applyStreamingToolParams(
   provider: ModelProvider,
   hasTools: boolean,
 ): void {
+  delete opts.tool_stream;
   if (provider !== "dashscope" || !hasTools || !modelId.startsWith("glm-")) {
     return;
   }
-  const current =
-    opts.extra_body && typeof opts.extra_body === "object"
-      ? (opts.extra_body as Record<string, unknown>)
-      : {};
-  opts.extra_body = { ...current, tool_stream: true };
+  opts.tool_stream = true;
 }
 
 export function isUnsupportedGenerationParam(err: unknown): boolean {
   const status = (err as { status?: number }).status;
   const msg = err instanceof Error ? err.message : String(err);
   if (status != null && status !== 400) return false;
-  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning_effort|enable_thinking|thinking_budget|incremental_output/i.test(
+  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning_effort|enable_thinking|thinking_budget|incremental_output|tool_stream/i.test(
     msg,
   );
 }
