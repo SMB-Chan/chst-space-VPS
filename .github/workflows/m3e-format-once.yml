@@ -1,0 +1,42 @@
+name: M3E format once
+
+on:
+  push:
+    branches:
+      - m3e-ui-rebuild
+    paths:
+      - artifacts/ai-chat-space/src/components/chat/message-input.tsx
+      - artifacts/ai-chat-space/src/components/chat/file-generation-panel.tsx
+      - .github/workflows/m3e-format-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.event.head_commit.message != 'style(ui): auto-format M3E chat components'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: m3e-ui-rebuild
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prettier --write artifacts/ai-chat-space/src/components/chat/message-input.tsx artifacts/ai-chat-space/src/components/chat/file-generation-panel.tsx
+      - name: Commit formatting
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add artifacts/ai-chat-space/src/components/chat/message-input.tsx artifacts/ai-chat-space/src/components/chat/file-generation-panel.tsx
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'style(ui): auto-format M3E chat components'
+          git push origin HEAD:m3e-ui-rebuild
