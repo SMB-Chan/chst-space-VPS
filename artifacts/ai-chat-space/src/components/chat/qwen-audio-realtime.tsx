@@ -655,7 +655,7 @@ export function QwenAudioRealtime({
           }
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
-            "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10",
+            "[border-color:color-mix(in_oklab,var(--app-status-info)_30%,transparent)] [background:color-mix(in_oklab,var(--app-status-info)_8%,transparent)] [color:var(--app-status-info)] hover:[background:color-mix(in_oklab,var(--app-status-info)_14%,transparent)]",
             "disabled:pointer-events-none disabled:opacity-50",
           )}
           aria-label={state === "error" ? "音声接続を再試行" : "音声入力を開始"}
@@ -687,7 +687,7 @@ export function QwenAudioRealtime({
               "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors select-none touch-none",
               state === "listening"
                 ? "border-destructive/40 bg-destructive/10 text-destructive"
-                : "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10",
+                : "[border-color:color-mix(in_oklab,var(--app-status-info)_30%,transparent)] [background:color-mix(in_oklab,var(--app-status-info)_8%,transparent)] [color:var(--app-status-info)] hover:[background:color-mix(in_oklab,var(--app-status-info)_14%,transparent)]",
               "disabled:pointer-events-none disabled:opacity-50",
             )}
             aria-label="押している間だけ話す"

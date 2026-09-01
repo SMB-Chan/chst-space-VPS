@@ -78,7 +78,7 @@ function AuthLoading() {
   );
 }
 
-// Dark theme appearance matching the app (bg-background / bg-card / amber primary)
+// Dark theme appearance matching the app (bg-background / bg-card / indigo primary)
 const clerkAppearance = {
   theme: shadcn,
   cssLayerName: "clerk",
@@ -88,14 +88,14 @@ const clerkAppearance = {
     logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
   },
   variables: {
-    colorPrimary: "hsl(38 95% 58%)",
-    colorForeground: "hsl(40 25% 95%)",
-    colorMutedForeground: "hsl(228 10% 62%)",
+    colorPrimary: "hsl(245 55% 65%)",
+    colorForeground: "hsl(220 15% 93%)",
+    colorMutedForeground: "hsl(230 12% 60%)",
     colorDanger: "hsl(0 72% 55%)",
-    colorBackground: "hsl(230 20% 10%)",
-    colorInput: "hsl(230 16% 13%)",
-    colorInputForeground: "hsl(40 25% 95%)",
-    colorNeutral: "hsl(40 15% 85%)",
+    colorBackground: "hsl(234 20% 9.5%)",
+    colorInput: "hsl(234 16% 12%)",
+    colorInputForeground: "hsl(220 15% 93%)",
+    colorNeutral: "hsl(220 12% 80%)",
     fontFamily: "'Outfit', sans-serif",
     borderRadius: "1rem",
   },

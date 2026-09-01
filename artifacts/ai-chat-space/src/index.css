@@ -88,38 +88,38 @@
   --sidebar: 40 20% 94%;
   --sidebar-foreground: 230 25% 15%;
   --sidebar-border: 40 15% 84%;
-  --sidebar-primary: 36 92% 42%;
-  --sidebar-primary-foreground: 40 30% 98%;
-  --sidebar-primary-border: hsl(36 92% 42% / 0.3);
-  --sidebar-accent: 40 20% 89%;
+  --sidebar-primary: 245 55% 50%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-primary-border: hsl(245 55% 50% / 0.3);
+  --sidebar-accent: 270 20% 90%;
   --sidebar-accent-foreground: 230 25% 12%;
-  --sidebar-accent-border: hsl(40 15% 70% / 0.4);
-  --sidebar-ring: 36 92% 42%;
+  --sidebar-accent-border: hsl(270 15% 70% / 0.4);
+  --sidebar-ring: 245 55% 50%;
   --popover: 40 30% 99%;
   --popover-foreground: 230 25% 12%;
   --popover-border: 40 15% 86%;
-  --primary: 36 92% 42%;
-  --primary-foreground: 40 30% 98%;
-  --primary-border: hsl(36 92% 42% / 0.35);
-  --secondary: 40 20% 90%;
+  --primary: 245 55% 50%;
+  --primary-foreground: 0 0% 100%;
+  --primary-border: hsl(245 55% 50% / 0.35);
+  --secondary: 270 20% 92%;
   --secondary-foreground: 230 25% 12%;
-  --secondary-border: hsl(40 15% 75% / 0.5);
+  --secondary-border: hsl(270 15% 75% / 0.5);
   --muted: 40 15% 92%;
   --muted-foreground: 230 10% 42%;
   --muted-border: hsl(40 15% 75% / 0.4);
-  --accent: 40 20% 90%;
+  --accent: 270 18% 90%;
   --accent-foreground: 230 25% 12%;
-  --accent-border: hsl(40 15% 75% / 0.5);
+  --accent-border: hsl(270 15% 75% / 0.5);
   --destructive: 0 78% 52%;
   --destructive-foreground: 0 0% 98%;
   --destructive-border: hsl(0 78% 52% / 0.35);
   --input: 40 15% 84%;
-  --ring: 36 92% 42%;
-  --chart-1: 36 92% 42%;
-  --chart-2: 200 60% 42%;
+  --ring: 245 55% 50%;
+  --chart-1: 245 55% 50%;
+  --chart-2: 190 60% 42%;
   --chart-3: 150 45% 38%;
   --chart-4: 280 50% 48%;
-  --chart-5: 330 55% 48%;
+  --chart-5: 38 80% 50%;
 
   --app-font-sans: "Outfit", sans-serif;
   --app-font-serif: "Lora", serif;
@@ -135,9 +135,9 @@
   --glass-border-hover: hsl(230 25% 20% / 0.2);
   --glass-highlight: hsl(40 40% 100% / 0.75);
   --glass-blur: 24px;
-  --ambient-1: hsl(36 92% 50% / 0.08);
-  --ambient-2: hsl(268 70% 60% / 0.06);
-  --ambient-3: hsl(200 85% 55% / 0.05);
+  --ambient-1: hsl(245 55% 50% / 0.06);
+  --ambient-2: hsl(275 65% 55% / 0.05);
+  --ambient-3: hsl(190 70% 50% / 0.04);
 
   --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
   --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
@@ -154,69 +154,80 @@
 }
 
 .dark {
-  /* DARK MODE — chromatic near-black surfaces under liquid glass */
-  --background: 232 22% 7%;
-  --foreground: 40 25% 95%;
-  --border: 230 15% 17%;
+  /*
+   * DARK MODE — Material 3 Expressive recolored for focus & trust.
+   *
+   * Palette architecture (color-psychology driven):
+   *   Primary   → Indigo / Periwinkle  (H≈245)  focus, trust, creativity
+   *   Secondary → Blue-purple          (H≈270)  calm selection states
+   *   Tertiary  → Teal / Cyan          (H≈190)  tools, voice, utility
+   *   Gold      → reserved for status accents (warning / quota) only
+   *
+   * Surface hierarchy uses lightness steps of 3–5 % with subtle hue
+   * rotation so each layer is distinguishable without heavy borders.
+   */
+  --background: 232 24% 6%;
+  --foreground: 220 15% 93%;
+  --border: 235 16% 19%;
 
-  --card: 230 20% 10%;
-  --card-foreground: 40 25% 95%;
-  --card-border: 230 15% 18%;
+  --card: 234 20% 9.5%;
+  --card-foreground: 220 15% 93%;
+  --card-border: 235 15% 20%;
 
-  --sidebar: 232 24% 6%;
-  --sidebar-foreground: 40 15% 90%;
-  --sidebar-border: 230 15% 14%;
-  --sidebar-primary: 38 95% 58%;
-  --sidebar-primary-foreground: 30 45% 10%;
-  --sidebar-primary-border: hsl(38 95% 58% / 0.3);
-  --sidebar-accent: 230 18% 14%;
-  --sidebar-accent-foreground: 40 25% 95%;
-  --sidebar-accent-border: hsl(230 15% 30% / 0.4);
-  --sidebar-ring: 38 95% 58%;
+  --sidebar: 236 26% 5%;
+  --sidebar-foreground: 220 12% 88%;
+  --sidebar-border: 235 15% 15%;
+  --sidebar-primary: 245 55% 65%;
+  --sidebar-primary-foreground: 245 50% 10%;
+  --sidebar-primary-border: hsl(245 55% 65% / 0.3);
+  --sidebar-accent: 270 20% 16%;
+  --sidebar-accent-foreground: 220 15% 93%;
+  --sidebar-accent-border: hsl(270 18% 32% / 0.4);
+  --sidebar-ring: 245 55% 65%;
 
-  --popover: 230 22% 9%;
-  --popover-foreground: 40 25% 95%;
-  --popover-border: 230 15% 18%;
+  --popover: 234 22% 8.5%;
+  --popover-foreground: 220 15% 93%;
+  --popover-border: 235 15% 20%;
 
-  --primary: 38 95% 58%;
-  --primary-foreground: 30 45% 10%;
-  --primary-border: hsl(38 95% 58% / 0.35);
+  --primary: 245 55% 65%;
+  --primary-foreground: 245 50% 10%;
+  --primary-border: hsl(245 55% 65% / 0.35);
 
-  --secondary: 230 16% 15%;
-  --secondary-foreground: 40 25% 95%;
-  --secondary-border: hsl(230 15% 30% / 0.5);
+  --secondary: 270 25% 20%;
+  --secondary-foreground: 220 15% 93%;
+  --secondary-border: hsl(270 20% 36% / 0.5);
 
-  --muted: 230 16% 13%;
-  --muted-foreground: 228 10% 62%;
-  --muted-border: hsl(230 15% 28% / 0.4);
+  --muted: 234 16% 12%;
+  --muted-foreground: 230 12% 60%;
+  --muted-border: hsl(234 15% 28% / 0.4);
 
-  --accent: 230 18% 16%;
-  --accent-foreground: 40 25% 95%;
-  --accent-border: hsl(230 15% 32% / 0.5);
+  --accent: 270 22% 18%;
+  --accent-foreground: 220 15% 93%;
+  --accent-border: hsl(270 18% 34% / 0.5);
 
   --destructive: 0 72% 55%;
   --destructive-foreground: 0 0% 98%;
   --destructive-border: hsl(0 72% 55% / 0.35);
 
-  --input: 230 15% 18%;
-  --ring: 38 95% 58%;
+  --input: 235 16% 20%;
+  --ring: 245 55% 65%;
 
-  --chart-1: 38 95% 58%;
-  --chart-2: 200 70% 55%;
+  --chart-1: 245 55% 65%;
+  --chart-2: 190 65% 55%;
   --chart-3: 150 55% 48%;
-  --chart-4: 280 65% 65%;
-  --chart-5: 330 70% 62%;
+  --chart-4: 280 60% 65%;
+  --chart-5: 38 85% 60%;
 
-  /* Liquid glass — dark scheme */
-  --glass-surface: hsl(230 25% 16% / 0.55);
-  --glass-surface-strong: hsl(230 25% 14% / 0.78);
-  --glass-border: hsl(40 30% 95% / 0.1);
-  --glass-border-hover: hsl(40 30% 95% / 0.18);
-  --glass-highlight: hsl(40 30% 100% / 0.07);
+  /* Liquid glass — dark scheme (cool indigo atmosphere) */
+  --glass-surface: hsl(240 22% 14% / 0.55);
+  --glass-surface-strong: hsl(240 22% 12% / 0.78);
+  --glass-border: hsl(220 20% 90% / 0.1);
+  --glass-border-hover: hsl(220 20% 90% / 0.18);
+  --glass-highlight: hsl(220 30% 100% / 0.07);
   --glass-blur: 24px;
-  --ambient-1: hsl(38 95% 55% / 0.07);
-  --ambient-2: hsl(268 75% 62% / 0.07);
-  --ambient-3: hsl(200 85% 55% / 0.045);
+  --ambient-1: hsl(245 55% 55% / 0.06);
+  --ambient-2: hsl(275 65% 55% / 0.05);
+  --ambient-3: hsl(190 70% 50% / 0.04);
 }
 
 @layer base {
