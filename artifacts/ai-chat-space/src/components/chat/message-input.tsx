@@ -6,6 +6,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  AlertTriangle,
   Paperclip,
   Send,
   X,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compressImageFile, formatBytes } from "@/lib/compress-image";
+import { Chip } from "@/design-system/chip";
 import { QwenAudioRealtime } from "./qwen-audio-realtime";
 import {
   ModelSelector,
@@ -204,8 +206,8 @@ function readOne(file: File): Promise<OutgoingAttachment> {
   const asDataUrl = isImage || !isTextFile(file);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result;
+    reader.onload = (event) => {
+      const result = event.target?.result;
       if (typeof result !== "string") {
         reject(new Error("ファイルの読み込みに失敗しました。"));
         return;
@@ -269,15 +271,21 @@ export function MessageInput({
     if (!videoGenerationEnabled) setVideoMode(null);
   }, [videoGenerationEnabled]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
       handleSubmit();
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files ?? []);
+  const handleFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const selected = Array.from(event.target.files ?? []);
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (selected.length === 0) return;
 
@@ -436,19 +444,21 @@ export function MessageInput({
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
-    } catch (err) {
-      setFileError(err instanceof Error ? err.message : "送信に失敗しました。");
+    } catch (error) {
+      setFileError(
+        error instanceof Error ? error.message : "送信に失敗しました。",
+      );
     } finally {
       isSendingRef.current = false;
     }
   };
 
   const adjustHeight = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const el = e.target;
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-      setContent(el.value);
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const element = event.target;
+      element.style.height = "auto";
+      element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
+      setContent(element.value);
     },
     [],
   );
@@ -460,7 +470,8 @@ export function MessageInput({
   const showModelSelector = onSelectModel != null;
   const showReasoning =
     onReasoningChange != null &&
-    (models.find((m) => m.id === selectedModel)?.supportsReasoning ?? true);
+    (models.find((model) => model.id === selectedModel)?.supportsReasoning ??
+      true);
   const showTranslation = onTranslationModeChange != null;
   const showAudit = onAuditToggle != null;
   const hasTools =
@@ -481,14 +492,11 @@ export function MessageInput({
   return (
     <div
       className={cn(
-        "glass-strong relative flex flex-col rounded-[1.75rem] transition-all duration-300 ease-emphasized",
-        toolsOpen
-          ? "border-primary/35 ring-1 ring-primary/15"
-          : "focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-primary/15",
+        "relative flex flex-col transition-[border-color,box-shadow,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-emphasized)]",
+        toolsOpen && "ring-1 ring-primary/15",
       )}
       data-testid="composer"
     >
-      {/* Hidden file input */}
       <input
         type="file"
         ref={fileInputRef}
@@ -498,98 +506,118 @@ export function MessageInput({
         multiple
       />
 
-      {/* Active capabilities */}
       {hasComposerStatus && (
-        <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3 pb-0">
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-0 pt-3">
           {hasActiveSkills && (
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-emerald-500/80">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/70 animate-pulse" />
-              <span className="uppercase tracking-[0.14em] font-semibold">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] [color:var(--app-status-success)]">
+              <span
+                className="h-1.5 w-1.5 animate-pulse rounded-[var(--m3-shape-full)] [background:var(--app-status-success)]"
+                aria-hidden="true"
+              />
+              <span className="font-semibold uppercase tracking-[0.14em]">
                 スキル
               </span>
               {activeSkills.map((skill) => (
-                <span
+                <Chip
                   key={skill.id}
-                  className="max-w-32 truncate rounded-md border border-emerald-500/15 bg-emerald-500/8 px-1.5 py-0.5 font-medium text-emerald-400/90"
+                  asChild
+                  className="min-h-6 max-w-40 px-2 text-[10px] [background:var(--app-status-success-container)] [border-color:var(--app-status-success)] [color:var(--app-status-success)]"
                 >
-                  {skill.label}
-                </span>
+                  <span className="truncate">{skill.label}</span>
+                </Chip>
               ))}
             </div>
           )}
           {activeModes.map((mode) => (
-            <span
+            <Chip
               key={mode}
-              className="rounded-full border border-primary/15 bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary/85"
+              asChild
+              selected
+              className="min-h-6 px-2 text-[10px]"
             >
-              {mode}
-            </span>
+              <span>{mode}</span>
+            </Chip>
           ))}
         </div>
       )}
 
-      {/* File error */}
       {fileError && (
-        <div className="flex items-start gap-2 px-4 pt-3 pb-0">
-          <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-destructive/10 border border-destructive/20 text-xs text-destructive w-full animate-in fade-in slide-in-from-bottom-2 whitespace-pre-wrap">
-            <span className="shrink-0 mt-0.5">⚠️</span>
+        <div className="flex items-start gap-2 px-4 pb-0 pt-3">
+          <div className="flex w-full animate-in items-start gap-2 rounded-[var(--m3-shape-md)] border [border-color:var(--m3-error)] [background:var(--m3-error-container)] px-3 py-2 text-xs [color:var(--m3-on-error-container)] fade-in slide-in-from-bottom-2 whitespace-pre-wrap">
+            <AlertTriangle
+              className="mt-0.5 h-3.5 w-3.5 shrink-0"
+              aria-hidden="true"
+            />
             <span className="flex-1">{fileError}</span>
             <button
+              type="button"
               onClick={() => setFileError(null)}
-              className="p-0.5 rounded-full hover:bg-destructive/20 transition-colors shrink-0"
+              className="m3-focus-ring shrink-0 rounded-[var(--m3-shape-full)] p-0.5 transition-colors hover:bg-foreground/10"
               aria-label="エラーを閉じる"
             >
-              <X className="w-3 h-3" />
+              <X className="h-3 w-3" />
             </button>
           </div>
         </div>
       )}
 
-      {/* Compressing indicator */}
       {compressing && (
-        <div className="px-4 pt-3 pb-0 text-xs text-muted-foreground animate-pulse">
+        <div className="px-4 pb-0 pt-3 text-xs text-muted-foreground animate-pulse">
           画像を軽量化しています...
         </div>
       )}
 
-      {/* File attachment chips */}
       {hasFiles && (
-        <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3 pb-0">
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-0 pt-3">
           {files.map((item, index) => (
-            <div
+            <Chip
               key={`${item.file.name}-${item.file.size}-${index}`}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-foreground/5 border border-border/60 text-xs text-foreground max-w-full animate-in fade-in slide-in-from-bottom-2"
+              asChild
+              className="min-h-8 max-w-full justify-start px-3 text-xs animate-in fade-in slide-in-from-bottom-2"
             >
-              {item.file.type.startsWith("image/") ? (
-                <ImageIcon className="w-3 h-3 text-primary shrink-0" />
-              ) : isAudioFile(item.file) ? (
-                <MusicIcon className="w-3 h-3 text-primary shrink-0" />
-              ) : (
-                <FileIcon className="w-3 h-3 text-primary shrink-0" />
-              )}
-              <span className="truncate font-medium max-w-[8rem] sm:max-w-[12rem]">
-                {item.file.name}
-              </span>
-              {item.note && (
-                <span className="text-muted-foreground shrink-0 hidden sm:inline text-[10px]">
-                  {item.note}
+              <span>
+                {item.file.type.startsWith("image/") ? (
+                  <ImageIcon
+                    className="h-3.5 w-3.5 shrink-0 [color:var(--m3-primary)]"
+                    aria-hidden="true"
+                  />
+                ) : isAudioFile(item.file) ? (
+                  <MusicIcon
+                    className="h-3.5 w-3.5 shrink-0 [color:var(--m3-primary)]"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <FileIcon
+                    className="h-3.5 w-3.5 shrink-0 [color:var(--m3-primary)]"
+                    aria-hidden="true"
+                  />
+                )}
+                <span className="max-w-[8rem] truncate font-medium sm:max-w-[12rem]">
+                  {item.file.name}
                 </span>
-              )}
-              <button
-                onClick={() =>
-                  setFiles((prev) => prev.filter((_, i) => i !== index))
-                }
-                className="p-0.5 rounded-full hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                aria-label={`${item.file.name} を外す`}
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
+                {item.note && (
+                  <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+                    {item.note}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFiles((previous) =>
+                      previous.filter((_, itemIndex) => itemIndex !== index),
+                    )
+                  }
+                  className="m3-focus-ring shrink-0 rounded-[var(--m3-shape-full)] p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                  aria-label={`${item.file.name} を外す`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            </Chip>
           ))}
         </div>
       )}
 
-      {/* Textarea */}
       <textarea
         ref={textareaRef}
         aria-label="メッセージ入力"
@@ -602,26 +630,24 @@ export function MessageInput({
             ? `この内容を ${fileFormat.toUpperCase()} で生成...`
             : "メッセージを入力...")
         }
-        className="flex-1 max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none placeholder:text-muted-foreground/55 scrollbar-none font-sans leading-relaxed"
+        className="max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-3 font-sans text-base leading-relaxed outline-none placeholder:text-muted-foreground/55 scrollbar-none"
         rows={1}
         disabled={disabled || compressing}
         data-testid="composer-textarea"
       />
 
-      {/* Bottom toolbar */}
       <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
-        {/* Left: primary actions */}
         <Button
           type="button"
           variant="ghost"
           size="icon"
           onClick={() => fileInputRef.current?.click()}
-          className="w-9 h-9 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-full flex-shrink-0 transition-colors"
+          className="h-9 w-9 shrink-0 rounded-[var(--m3-shape-full)] text-muted-foreground hover:[background:var(--m3-primary-container)] hover:[color:var(--m3-on-primary-container)]"
           disabled={disabled || compressing}
           aria-label="ファイルを添付"
           data-testid="composer-attach"
         >
-          <Paperclip className="w-[18px] h-[18px]" />
+          <Paperclip className="h-[18px] w-[18px]" />
         </Button>
 
         <QwenAudioRealtime
@@ -633,14 +659,12 @@ export function MessageInput({
           }}
         />
 
-        <span className="hidden pl-1 text-[10px] text-muted-foreground/45 lg:inline">
+        <span className="hidden pl-1 text-[10px] text-muted-foreground/55 lg:inline">
           Enterで送信 · Shift + Enterで改行
         </span>
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Right: model selector (primary) */}
         {showModelSelector && (
           <div className="hidden sm:block">
             <ModelSelector
@@ -651,48 +675,39 @@ export function MessageInput({
           </div>
         )}
 
-        {/* Tools toggle */}
         {hasTools && (
           <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
             <PopoverTrigger asChild>
-              <button
-                type="button"
+              <Chip
                 disabled={disabled || compressing}
-                className={cn(
-                  "h-8 gap-1.5 px-3 rounded-full text-xs font-medium border inline-flex items-center backdrop-blur-xl transition-colors",
-                  toolsOpen
-                    ? "text-primary border-primary/40 bg-primary/10 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
-                    : "text-muted-foreground border-border/60 bg-card/50 hover:text-foreground hover:bg-card/80",
-                  (disabled || compressing) && "opacity-50 cursor-not-allowed",
-                )}
+                selected={toolsOpen}
+                className="h-8 gap-1.5 px-3"
                 aria-label="追加ツール"
                 aria-expanded={toolsOpen}
                 data-testid="composer-tools-toggle"
               >
-                <Settings2 className="w-3.5 h-3.5" />
+                <Settings2 className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">ツール</span>
                 <ChevronDown
                   className={cn(
-                    "w-3 h-3 transition-transform",
+                    "h-3 w-3 transition-transform duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)]",
                     toolsOpen && "rotate-180",
                   )}
                 />
-              </button>
+              </Chip>
             </PopoverTrigger>
 
-            {/* Tools panel */}
             <PopoverContent
               side="top"
               align="end"
               sideOffset={10}
-              className="w-72 overflow-hidden rounded-[24px] border-border/60 bg-card/90 p-0 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06),0_24px_64px_rgb(0_0_0/0.45)] backdrop-blur-2xl sm:w-80"
+              className="w-72 overflow-hidden p-0 sm:w-80"
               data-testid="composer-tools-panel"
             >
-              <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto scrollbar-none">
-                {/* Model selector (mobile) */}
+              <div className="max-h-[60vh] space-y-4 overflow-y-auto p-3 scrollbar-none">
                 {showModelSelector && (
                   <div className="sm:hidden">
-                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                    <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       モデル
                     </label>
                     <ModelSelector
@@ -703,10 +718,9 @@ export function MessageInput({
                   </div>
                 )}
 
-                {/* Reasoning */}
                 {showReasoning && (
                   <div>
-                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                    <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       推論レベル
                     </label>
                     <ReasoningSelector
@@ -717,10 +731,9 @@ export function MessageInput({
                   </div>
                 )}
 
-                {/* Translation */}
                 {showTranslation && (
                   <div>
-                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                    <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       翻訳
                     </label>
                     <TranslationModeSelector
@@ -731,23 +744,19 @@ export function MessageInput({
                   </div>
                 )}
 
-                {/* Audit */}
                 {showAudit && (
                   <div>
-                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                    <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       監査
                     </label>
-                    <button
-                      type="button"
+                    <Chip
                       disabled={disabled || compressing}
+                      selected={auditEnabled}
                       onClick={onAuditToggle}
                       className={cn(
-                        "h-8 gap-1.5 px-3 rounded-full text-xs font-medium border inline-flex items-center backdrop-blur-xl transition-colors",
-                        auditEnabled
-                          ? "text-sky-300 border-sky-500/40 bg-sky-500/10 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
-                          : "text-muted-foreground border-border/60 bg-card/50 hover:text-foreground hover:bg-card/80",
-                        (disabled || compressing) &&
-                          "opacity-50 cursor-not-allowed",
+                        "h-8 justify-start",
+                        auditEnabled &&
+                          "[background:var(--app-status-info-container)] [border-color:var(--app-status-info)] [color:var(--app-status-info)]",
                       )}
                       title={
                         auditEnabled && auditModel
@@ -756,81 +765,72 @@ export function MessageInput({
                             ? "監査 ON（監査モデルが選択されていません）"
                             : "監査モード"
                       }
+                      aria-pressed={auditEnabled}
                       data-testid="composer-audit-toggle"
                     >
-                      <Scale className="w-3.5 h-3.5" />
+                      <Scale className="h-3.5 w-3.5" />
                       {auditEnabled ? "ON" : "OFF"}
                       {auditEnabled && auditModel && (
-                        <span className="text-sky-400/60 text-[10px] ml-1">
+                        <span className="ml-1 max-w-32 truncate text-[10px] opacity-70">
                           {auditModel}
                         </span>
                       )}
-                    </button>
+                    </Chip>
                   </div>
                 )}
 
-                {/* File format */}
                 {fileGenerationEnabled && !videoMode && (
                   <div>
-                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                    <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       ファイル出力
                     </label>
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="m3-control-group">
                       {FORMAT_BUTTONS.map(({ format, label, icon: Icon }) => {
                         const active = fileFormat === format;
                         return (
-                          <button
+                          <Chip
                             key={format}
-                            type="button"
+                            selected={active}
                             onClick={() =>
                               setFileFormat(active ? null : format)
                             }
                             disabled={disabled || compressing}
-                            className={cn(
-                              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                              active
-                                ? "bg-primary/10 border-primary/40 text-primary shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
-                                : "bg-foreground/5 border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/20",
-                              (disabled || compressing) &&
-                                "opacity-50 cursor-not-allowed",
-                            )}
+                            className="h-8"
+                            aria-pressed={active}
                             data-testid={`composer-format-${format}`}
                           >
-                            <Icon className="w-3.5 h-3.5" />
+                            <Icon className="h-3.5 w-3.5" />
                             {label}
-                          </button>
+                          </Chip>
                         );
                       })}
                     </div>
                   </div>
                 )}
 
-                {/* Video generation */}
                 {videoGenerationEnabled && (
                   <div>
-                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
+                    <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       動画生成
                     </label>
                     <div className="space-y-2">
-                      <button
-                        type="button"
+                      <Chip
+                        selected={videoMode != null}
                         onClick={() =>
                           setVideoMode((current) => (current ? null : "t2v"))
                         }
                         disabled={disabled || compressing}
                         className={cn(
-                          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                          videoMode
-                            ? "bg-violet-500/10 border-violet-500/40 text-violet-300 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.06)]"
-                            : "bg-foreground/5 border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/20",
-                          (disabled || compressing) &&
-                            "opacity-50 cursor-not-allowed",
+                          "h-8",
+                          videoMode &&
+                            "[background:var(--app-status-accent-container)] [border-color:var(--app-status-accent)] [color:var(--app-status-accent)]",
                         )}
+                        aria-pressed={videoMode != null}
                         data-testid="composer-video-toggle"
                       >
-                        <VideoIcon className="w-3.5 h-3.5" />
+                        <VideoIcon className="h-3.5 w-3.5" />
                         {videoMode ? videoMode.toUpperCase() : "動画生成"}
-                      </button>
+                      </Chip>
                       {videoMode && (
                         <div className="grid grid-cols-2 gap-2">
                           <select
@@ -838,7 +838,7 @@ export function MessageInput({
                             onChange={(event) =>
                               setVideoMode(event.target.value as VideoMode)
                             }
-                            className="h-8 rounded-xl border border-border/60 bg-foreground/5 px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                            className="m3-field h-9 px-2 text-xs outline-none"
                             aria-label="動画生成モード"
                           >
                             <option value="t2v">T2V・テキスト</option>
@@ -850,7 +850,7 @@ export function MessageInput({
                             onChange={(event) =>
                               setVideoDuration(Number(event.target.value))
                             }
-                            className="h-8 rounded-xl border border-border/60 bg-foreground/5 px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                            className="m3-field h-9 px-2 text-xs outline-none"
                             aria-label="動画の長さ"
                           >
                             {[3, 5, 8, 10, 15].map((seconds) => (
@@ -866,7 +866,7 @@ export function MessageInput({
                                 event.target.value as "720P" | "1080P",
                               )
                             }
-                            className="h-8 rounded-xl border border-border/60 bg-foreground/5 px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                            className="m3-field h-9 px-2 text-xs outline-none"
                             aria-label="動画の解像度"
                           >
                             <option value="720P">720P</option>
@@ -881,7 +881,7 @@ export function MessageInput({
                                   .value as VideoGenerationInput["ratio"],
                               )
                             }
-                            className="h-8 rounded-xl border border-border/60 bg-foreground/5 px-2 text-xs text-foreground outline-none disabled:opacity-50 focus:border-primary/50"
+                            className="m3-field h-9 px-2 text-xs outline-none disabled:opacity-50"
                             aria-label="動画の比率"
                           >
                             {[
@@ -910,22 +910,21 @@ export function MessageInput({
           </Popover>
         )}
 
-        {/* Send button */}
         <Button
           type="button"
           size="icon"
           onClick={handleSubmit}
           disabled={!canSend}
           className={cn(
-            "w-10 h-10 rounded-full flex-shrink-0 transition-all duration-300 ease-expressive",
+            "h-10 w-10 shrink-0 rounded-[var(--m3-shape-full)] transition-[background-color,color,transform,box-shadow] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)]",
             canSend
-              ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 hover:bg-primary/90 hover:scale-105"
-              : "bg-muted text-muted-foreground shadow-none",
+              ? "[background:var(--m3-primary)] [color:var(--m3-on-primary)] shadow-[var(--m3-elevation-2)]"
+              : "[background:var(--m3-surface-container-high)] text-muted-foreground shadow-none",
           )}
           aria-label="送信"
           data-testid="composer-send"
         >
-          <Send className="w-4 h-4 ml-0.5" />
+          <Send className="ml-0.5 h-4 w-4" />
         </Button>
       </div>
     </div>

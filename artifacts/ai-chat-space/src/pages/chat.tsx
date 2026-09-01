@@ -1134,14 +1134,14 @@ export function ChatPage() {
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10 text-center sm:px-8">
             <div
               className={cn(
-                "relative mb-7 flex h-20 w-20 items-center justify-center rounded-[28px] border bg-gradient-to-br shadow-[inset_0_1px_0_0_rgb(255_255_255/0.08),0_16px_40px_-12px_rgb(0_0_0/0.5)] before:absolute before:inset-0 before:-z-10 before:rounded-[1.75rem] before:blur-2xl",
+                "relative mb-7 flex h-20 w-20 items-center justify-center rounded-[var(--m3-shape-xl)] border shadow-[var(--m3-elevation-3)] before:absolute before:inset-0 before:-z-10 before:rounded-[var(--m3-shape-xl)] before:blur-2xl",
                 isPrivate
-                  ? "from-violet-500/25 to-violet-500/5 border-violet-500/30 before:bg-violet-500/15"
-                  : "from-primary/30 to-primary/5 border-primary/25 before:bg-primary/20",
+                  ? "[background:var(--app-status-accent-container)] [border-color:var(--app-status-accent)] before:[background:var(--app-status-accent-container)]"
+                  : "[background:var(--m3-primary-container)] [border-color:var(--m3-primary)] before:[background:var(--m3-primary-container)]",
               )}
             >
               {isPrivate ? (
-                <Shield className="w-9 h-9 text-violet-300" />
+                <Shield className="w-9 h-9 [color:var(--app-status-accent)]" />
               ) : (
                 <Sparkles className="w-9 h-9 text-primary" />
               )}
@@ -1162,7 +1162,7 @@ export function ChatPage() {
                 (capability) => (
                   <span
                     key={capability}
-                    className="rounded-full border border-border/70 bg-card/55 px-3 py-1.5 shadow-sm backdrop-blur"
+                    className="rounded-[var(--m3-shape-full)] border border-[var(--m3-outline-variant)] [background:var(--m3-surface-container-low)] px-3 py-1.5 shadow-[var(--m3-elevation-0)]"
                   >
                     {capability}
                   </span>
@@ -1222,7 +1222,7 @@ export function ChatPage() {
 
       {streamError && (
         <div className="mx-auto mb-2 w-full max-w-4xl px-4 md:px-6">
-          <div className="flex items-start gap-2 px-4 py-2 rounded-2xl bg-destructive/10 border border-destructive/30 text-destructive text-sm backdrop-blur-xl">
+          <div className="flex items-start gap-2 rounded-[var(--m3-shape-lg)] border [border-color:var(--m3-error)] [background:var(--m3-error-container)] px-4 py-2 text-sm [color:var(--m3-on-error-container)]">
             <span className="flex-1">エラー: {streamError}</span>
             <button
               type="button"

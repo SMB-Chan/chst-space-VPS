@@ -1,6 +1,6 @@
-import { Languages } from "lucide-react";
+import { Check, Languages } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Chip } from "@/design-system/chip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,44 +51,66 @@ export function TranslationModeSelector({
   disabled,
 }: TranslationModeSelectorProps) {
   const current =
-    TRANSLATION_MODES.find((m) => m.id === value) ?? TRANSLATION_MODES[0];
+    TRANSLATION_MODES.find((mode) => mode.id === value) ?? TRANSLATION_MODES[0];
+  const active = value !== "off";
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={disabled}>
-        <Button
-          variant="ghost"
-          size="sm"
+        <Chip
+          selected={active}
+          disabled={disabled}
           data-testid="button-translation-selector"
-          className={cn(
-            "h-8 gap-1.5 px-3 rounded-full text-xs font-medium transition-all duration-200 backdrop-blur-xl",
-            "border border-border/60 bg-card/50 text-muted-foreground hover:text-foreground hover:bg-card/80",
-            value !== "off" &&
-              "text-emerald-400/90 border-emerald-500/30 bg-emerald-500/8 hover:text-emerald-300 hover:border-emerald-500/50 hover:bg-emerald-500/12",
-            disabled && "opacity-50 cursor-not-allowed",
-          )}
+          className="h-8 justify-start"
+          aria-label={`翻訳モード: ${current.label}`}
         >
-          <Languages className="w-3 h-3" />
-          <span>翻訳 {current.id === "off" ? "" : current.label}</span>
-        </Button>
+          <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{active ? `翻訳 ${current.label}` : "翻訳"}</span>
+        </Chip>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
-          翻訳モード — 送るだけで翻訳します
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel className="font-normal">
+          <span className="block text-xs font-medium text-foreground">
+            翻訳モード
+          </span>
+          <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+            入力を指定した言語へ自動変換して送信します
+          </span>
         </DropdownMenuLabel>
-        {TRANSLATION_MODES.map((mode) => (
-          <DropdownMenuItem
-            key={mode.id}
-            onClick={() => onSelect(mode.id)}
-            className={cn(
-              "flex items-center justify-between cursor-pointer rounded-md",
-              value === mode.id && "bg-emerald-500/10 text-emerald-300",
-            )}
-          >
-            <span className="font-medium">{mode.label}</span>
-            <span className="text-xs text-muted-foreground">{mode.hint}</span>
-          </DropdownMenuItem>
-        ))}
+        {TRANSLATION_MODES.map((mode) => {
+          const selected = value === mode.id;
+          return (
+            <DropdownMenuItem
+              key={mode.id}
+              onClick={() => onSelect(mode.id)}
+              aria-current={selected ? "true" : undefined}
+              className={cn(
+                "min-h-11 cursor-pointer items-center gap-3 rounded-[var(--m3-shape-sm)]",
+                selected &&
+                  "[background:var(--m3-primary-container)] [color:var(--m3-on-primary-container)]",
+              )}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">{mode.label}</span>
+                <span
+                  className={cn(
+                    "block text-[11px] leading-relaxed text-muted-foreground",
+                    selected && "text-current/70",
+                  )}
+                >
+                  {mode.hint}
+                </span>
+              </span>
+              <Check
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-opacity",
+                  selected ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden="true"
+              />
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

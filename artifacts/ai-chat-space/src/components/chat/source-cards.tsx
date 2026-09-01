@@ -1,4 +1,6 @@
 import { ExternalLink, Globe2 } from "lucide-react";
+import { surfaceVariants } from "@/design-system/surface";
+import { cn } from "@/lib/utils";
 
 export interface Source {
   title: string;
@@ -30,45 +32,47 @@ export function SourceCards({ sources }: SourceCardsProps) {
   if (safeSources.length === 0) return null;
 
   return (
-    <div className="mt-3 space-y-1.5">
-      <p className="text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider px-0.5">
+    <div className="mt-3 space-y-2">
+      <p className="px-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
         参照元
       </p>
       <div className="flex flex-wrap gap-2">
-        {safeSources.map(({ source, url }, i) => {
+        {safeSources.map(({ source, url }, index) => {
           const domain = url.hostname.replace(/^www\./, "");
           return (
             <a
-              key={`${url.href}-${i}`}
-              id={`source-${i + 1}`}
+              key={`${url.href}-${index}`}
+              id={`source-${index + 1}`}
               href={url.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="group flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-card/60 border border-border/60 backdrop-blur-xl hover:border-primary/40 hover:bg-primary/8 transition-all duration-200 ease-emphasized text-left shadow-sm max-w-[260px] min-w-0"
+              className={cn(
+                surfaceVariants({ tone: "outlined", shape: "medium" }),
+                "m3-focus-ring group flex min-w-0 max-w-[280px] items-center gap-2.5 px-3.5 py-3 text-left transition-[background-color,border-color,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)] hover:[background:var(--m3-surface-container-high)] hover:[border-color:var(--m3-outline)] active:scale-[0.985]",
+              )}
             >
               {/* Deliberately use a local icon. Fetching favicons through a
                   third party would disclose every cited domain to that party. */}
-              <Globe2
-                className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60"
-                aria-hidden="true"
-              />
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--m3-shape-full)] [background:var(--m3-primary-container)] [color:var(--m3-on-primary-container)]">
+                <Globe2 className="h-4 w-4" aria-hidden="true" />
+              </span>
               <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-medium text-foreground leading-snug line-clamp-2 break-words">
-                  <span className="text-primary/70 font-mono text-[10px] mr-1">
-                    [{i + 1}]
+                <div className="line-clamp-2 break-words text-[12px] font-medium leading-snug text-foreground">
+                  <span className="mr-1 font-mono text-[10px] [color:var(--m3-primary)]">
+                    [{index + 1}]
                   </span>
                   {(source.title || domain).slice(0, 180)}
                 </div>
-                <div className="text-[10px] text-muted-foreground/70 truncate leading-snug">
+                <div className="mt-0.5 truncate text-[10px] leading-snug text-muted-foreground">
                   {domain}
                 </div>
-                <div className="text-[10px] text-muted-foreground/60 leading-snug">
+                <div className="mt-0.5 text-[10px] leading-snug text-muted-foreground/80">
                   公開日:{" "}
                   {source.publishedAt ? formatDate(source.publishedAt) : "不明"}{" "}
                   ・ 取得: {formatDate(source.fetchedAt)}
                 </div>
               </div>
-              <ExternalLink className="w-3 h-3 shrink-0 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
+              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-[color,transform] duration-[var(--m3-duration-short)] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:[color:var(--m3-primary)]" />
             </a>
           );
         })}

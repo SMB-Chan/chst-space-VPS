@@ -42,13 +42,13 @@ function CodeBlock({
   children: string;
 }) {
   return (
-    <div className="rounded-2xl overflow-hidden bg-background/60 border border-border/60 backdrop-blur-xl shadow-sm my-4 font-sans">
+    <div className="m3-outlined-surface my-4 overflow-hidden rounded-[var(--m3-shape-lg)] font-sans shadow-[var(--m3-elevation-1)]">
       {language ? (
         <div className="bg-muted/60 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border/60 uppercase tracking-wider">
           {language}
         </div>
       ) : null}
-      <pre className="p-4 overflow-x-auto text-sm font-mono text-foreground/90 bg-black/40">
+      <pre className="overflow-x-auto [background:var(--m3-surface-container-high)] p-4 font-mono text-sm text-foreground/90">
         <code>{children}</code>
       </pre>
     </div>
@@ -94,7 +94,7 @@ export function Markdown({ content, className }: MarkdownProps) {
                     const el = document.getElementById(href.slice(1));
                     el?.scrollIntoView({ behavior: "smooth", block: "center" });
                   }}
-                  className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-primary/10 text-primary text-[10px] font-mono font-medium hover:bg-primary/20 transition-colors align-baseline cursor-pointer border-none"
+                  className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-[var(--m3-shape-full)] bg-primary/10 text-primary text-[10px] font-mono font-medium hover:bg-primary/20 transition-colors align-baseline cursor-pointer border-none"
                 >
                   {children}
                 </button>
@@ -189,7 +189,7 @@ export function Markdown({ content, className }: MarkdownProps) {
             const isBlock = Boolean(codeClass) || text.includes("\n");
             if (isBlock) return <CodeBlock language={lang}>{text}</CodeBlock>;
             return (
-              <code className="px-1.5 py-0.5 rounded-md bg-muted/50 text-primary font-mono text-[0.85em] border border-border/50">
+              <code className="px-1.5 py-0.5 rounded-[var(--m3-shape-xs)] bg-muted/50 text-primary font-mono text-[0.85em] border border-border/50">
                 {text}
               </code>
             );
