@@ -89,6 +89,12 @@ const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_RESEARCH_STEPS = 6;
 /** Per-step timeout for a single research tool execution. */
 const RESEARCH_STEP_TIMEOUT_MS = 30_000;
+const RESEARCH_RECOVERY_SYSTEM_PROMPT = `直前の応答は、検索すると宣言しただけで実際のツール呼び出しも回答も完了していません。
+検索が必要なら、この応答で直ちに web_search または fetch_page を呼び出してください。検索が不要なら、宣言を繰り返さず今すぐ質問への回答を完成させてください。`;
+const RESEARCH_FINAL_SYNTHESIS_SYSTEM_PROMPT = `検索ツールの実行段階は終了しました。追加のツールは呼び出せません。
+これまでに取得したツール結果だけを使い、ユーザーの質問への最終回答を今すぐ完成させてください。検索するという宣言や作業予定は書かず、根拠番号を引用し、不明点は不明と明示してください。`;
+const RESEARCH_FINAL_ANSWER_FALLBACK =
+  "検索結果は取得できましたが、モデルが最終回答を生成できませんでした。条件を少し絞って、もう一度お試しください。";
 /** Minimum interval between memory maintenance runs (5 minutes). */
 const MEMORY_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
 let lastMemoryMaintenanceMs = 0;
@@ -179,6 +185,43 @@ export function shouldAttachSpecialistTools(args: {
   );
 }
 
+/**
+ * Some OpenAI-compatible providers occasionally narrate an intended search
+ * without emitting a native or textual tool call. Treat only short,
+ * citation-free planning statements as incomplete so ordinary answers that
+ * merely discuss search are not intercepted.
+ */
+export function isResearchAnnouncementOnly(text: string): boolean {
+  const normalized = splitThinkTags(text).content.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.length > 320 || /\[\d+\]/.test(normalized)) {
+    return false;
+  }
+  const announcesResearch =
+    /(?:検索|調査|調べ|確認|情報.{0,8}(?:集め|収集)|ウェブ|web\s*search|search|look\s*up|research).{0,100}(?:します|いたします|してみます|行います|使います|呼び出します|始めます|確認します|search|look\s*up|research|check)/i.test(
+      normalized,
+    ) ||
+    /(?:検索|調査|確認).{0,30}(?:してから|した上で).{0,30}(?:回答|まとめ)/.test(
+      normalized,
+    );
+  if (!announcesResearch) return false;
+  return !/(?:検索結果|調査結果|によると|判明しました|結論|回答[:：]|出典[:：])/.test(
+    normalized,
+  );
+}
+
+export function shouldSynthesizeResearchAnswer(args: {
+  executedToolCount: number;
+  continuationText: string;
+  hitStepLimitWithPendingResearch: boolean;
+}): boolean {
+  if (args.executedToolCount <= 0) return false;
+  return (
+    args.hitStepLimitWithPendingResearch ||
+    !args.continuationText.trim() ||
+    isResearchAnnouncementOnly(args.continuationText)
+  );
+}
+
 function isMemoryMutationCall(call: SpecialistToolCall): boolean {
   return (
     call.name === "memory_store" ||
@@ -216,6 +259,8 @@ const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツール
 - 複数の角度から情報を収集したい場合、異なるクエリで複数回検索できます。
 - 情報を収集したら、出典を [1] [2] などの番号で本文に引用してください。
 - 十分な情報が集まったら、収集した情報を使って回答を生成してください。
+- ツールを使うと決めた場合、「検索します」などの宣言だけで応答を終えず、同じ応答内で実際のツール呼び出しを行ってください。
+- ツール結果を受け取った後は、作業予定だけを返さず、必ずユーザーへの最終回答まで完成させてください。
 
 記憶の管理:
 - ユーザーが明示した安定的な好みや設定は memory_store で保存できます。
@@ -641,6 +686,49 @@ export async function streamChatReply(args: {
       signal: clientAbort.signal,
     });
 
+    // A few OpenAI-compatible models sometimes output only a promise to
+    // search, without a tool call. Give the same turn one bounded recovery
+    // chance instead of persisting that promise as the completed answer.
+    if (
+      !brokerToolCall &&
+      specialistTools.length > 0 &&
+      specialistToolCalls.length === 0 &&
+      isResearchAnnouncementOnly(fullResponse) &&
+      !clientAbort.signal.aborted
+    ) {
+      workingMessages.push({ role: "assistant", content: fullResponse });
+      workingMessages.push({
+        role: "system",
+        content: RESEARCH_RECOVERY_SYSTEM_PROMPT,
+      });
+      const recoveredToolCalls: SpecialistToolCall[] = [];
+      const recoveredText = await streamModelText({
+        client,
+        provider,
+        modelId,
+        reasoningLevel,
+        messages: workingMessages,
+        tools: specialistTools,
+        onToolCalls: (calls) => recoveredToolCalls.push(...calls),
+        onDelta: (added, kind) => {
+          if (clientGone()) return;
+          if (kind === "reasoning") {
+            if (!clientAbort.signal.aborted) {
+              res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
+            }
+          } else {
+            res.write(
+              `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+            );
+          }
+        },
+        shouldStop: () => clientGone() || clientAbort.signal.aborted,
+        signal: clientAbort.signal,
+      });
+      fullResponse += recoveredText;
+      specialistToolCalls.push(...recoveredToolCalls);
+    }
+
     let generatedAssets: GeneratedAsset[] = [];
     const effectiveToolCalls = brokerToolCall
       ? [brokerToolCall]
@@ -661,6 +749,9 @@ export async function streamChatReply(args: {
       publishedAt?: string | null;
     }[] = [];
     const researchEvidenceParts: string[] = [];
+    let executedResearchToolCount = 0;
+    let researchContinuationText = "";
+    let hitStepLimitWithPendingResearch = false;
 
     if (
       effectiveToolCalls.length > 0 &&
@@ -740,6 +831,7 @@ export async function streamChatReply(args: {
                 } satisfies SpecialistToolResult;
               }
             })();
+            executedResearchToolCount++;
             if (result.sources?.length) {
               const mergedEvidence = mergeResearchEvidence({
                 text: result.text ?? "",
@@ -828,6 +920,7 @@ export async function streamChatReply(args: {
             signal: clientAbort.signal,
           });
           fullResponse += continuation;
+          researchContinuationText += continuation;
 
           // Check if the LLM wants to do more research
           const nextResearchCalls = nextRoundCalls.filter(isResearchTool);
@@ -848,6 +941,12 @@ export async function streamChatReply(args: {
               }
             }
           } else {
+            if (
+              nextResearchCalls.length > 0 &&
+              researchStep >= MAX_RESEARCH_STEPS
+            ) {
+              hitStepLimitWithPendingResearch = true;
+            }
             // LLM produced a text response or hit the step limit
             if (
               nextRoundCalls.length > 0 &&
@@ -864,6 +963,59 @@ export async function streamChatReply(args: {
               }
             }
             break;
+          }
+        }
+
+        // Reaching the tool-step limit with another tool-only response, or
+        // receiving no final prose after successful tool execution, must not
+        // leave the conversation at "検索します". Run one tool-free synthesis
+        // pass over the accumulated tool results.
+        if (
+          nonResearchCalls.length === 0 &&
+          shouldSynthesizeResearchAnswer({
+            executedToolCount: executedResearchToolCount,
+            continuationText: researchContinuationText,
+            hitStepLimitWithPendingResearch,
+          }) &&
+          !clientAbort.signal.aborted
+        ) {
+          workingMessages.push({
+            role: "system",
+            content: RESEARCH_FINAL_SYNTHESIS_SYSTEM_PROMPT,
+          });
+          const finalResearchAnswer = await streamModelText({
+            client,
+            provider,
+            modelId,
+            reasoningLevel,
+            messages: workingMessages,
+            onDelta: (added, kind) => {
+              if (clientGone()) return;
+              if (kind === "reasoning") {
+                if (!clientAbort.signal.aborted) {
+                  res.write(
+                    `data: ${JSON.stringify({ status: "thinking" })}\n\n`,
+                  );
+                }
+              } else {
+                res.write(
+                  `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
+                );
+              }
+            },
+            shouldStop: () => clientGone() || clientAbort.signal.aborted,
+            signal: clientAbort.signal,
+          });
+          if (finalResearchAnswer.trim()) {
+            fullResponse += finalResearchAnswer;
+          } else if (!clientGone()) {
+            fullResponse += `\n\n${RESEARCH_FINAL_ANSWER_FALLBACK}`;
+            res.write(
+              `data: ${JSON.stringify({
+                content: `\n\n${RESEARCH_FINAL_ANSWER_FALLBACK}`,
+                status: "generating",
+              })}\n\n`,
+            );
           }
         }
       }
