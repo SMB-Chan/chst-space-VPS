@@ -3,6 +3,7 @@ import {
   applyGenerationParams,
   applyNonReasoningGenerationParams,
   applySafeGenerationParams,
+  applyStreamingToolParams,
   isUnsupportedGenerationParam,
 } from "./ai-clients";
 
@@ -66,5 +67,27 @@ describe("applyNonReasoningGenerationParams", () => {
     expect(opts.reasoning_effort).toBeUndefined();
     expect(opts.max_tokens).toBeUndefined();
     expect(opts.max_completion_tokens).toBe(8192);
+  });
+});
+
+describe("applyStreamingToolParams", () => {
+  it("enables streamed function calls for GLM without dropping thinking params", () => {
+    const opts: Record<string, unknown> = {
+      extra_body: { enable_thinking: true, thinking_budget: 4096 },
+    };
+    applyStreamingToolParams(opts, "glm-5.2", "dashscope", true);
+    expect(opts.extra_body).toEqual({
+      enable_thinking: true,
+      thinking_budget: 4096,
+      tool_stream: true,
+    });
+  });
+
+  it("does not add tool_stream when no tools are attached", () => {
+    const opts: Record<string, unknown> = {
+      extra_body: { enable_thinking: true },
+    };
+    applyStreamingToolParams(opts, "glm-5.2", "dashscope", false);
+    expect(opts.extra_body).toEqual({ enable_thinking: true });
   });
 });

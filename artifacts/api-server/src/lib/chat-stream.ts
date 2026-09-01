@@ -4,6 +4,7 @@ import {
   applyGenerationParams,
   applyNonReasoningGenerationParams,
   applySafeGenerationParams,
+  applyStreamingToolParams,
   isUnsupportedGenerationParam,
   type ChatModel,
   type ModelProvider,
@@ -152,6 +153,16 @@ export interface ArtifactSsePayload {
   size: number;
   downloadUrl?: string;
   content?: string;
+}
+
+export function shouldAttachSpecialistTools(args: {
+  translationMode?: TranslationMode;
+  hasBrokerToolCall: boolean;
+  hasWebContext: boolean;
+}): boolean {
+  return (
+    !args.translationMode && !args.hasBrokerToolCall && !args.hasWebContext
+  );
 }
 
 const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファイル（Markdown / text / CSV / JSON / HTML）を求めた場合だけ、回答とは別に次の fenced block でファイル内容を出してください。
@@ -565,13 +576,19 @@ export async function streamChatReply(args: {
     }
 
     const specialistToolCalls: SpecialistToolCall[] = [];
-    const specialistTools =
-      translationMode || brokerToolCall
-        ? []
-        : getSpecialistTools({
-            imageAttachments: imageAttachmentsForTools,
-            audioAttachments: audioAttachmentsForTools,
-          });
+    // buildWebContext already completed the search and injected its sources.
+    // Attaching the full native tool set again is redundant and causes some
+    // providers to return an empty or malformed tool-only response.
+    const specialistTools = shouldAttachSpecialistTools({
+      translationMode,
+      hasBrokerToolCall: Boolean(brokerToolCall),
+      hasWebContext: Boolean(webContext.contextText),
+    })
+      ? getSpecialistTools({
+          imageAttachments: imageAttachmentsForTools,
+          audioAttachments: audioAttachmentsForTools,
+        })
+      : [];
 
     fullResponse = await streamModelText({
       client,
@@ -1401,7 +1418,7 @@ export async function streamChatReply(args: {
   if (ownsCancellation) cancellation.dispose();
 }
 
-async function streamModelText(args: {
+export async function streamModelText(args: {
   client: OpenAI;
   provider: ModelProvider;
   modelId: string;
@@ -1434,11 +1451,28 @@ async function streamModelText(args: {
     args.provider,
     args.reasoningLevel,
   );
+  applyStreamingToolParams(
+    streamOptions as unknown as Record<string, unknown>,
+    args.modelId,
+    args.provider,
+    Boolean(args.tools?.length),
+  );
 
   let full = "";
   let reasoning = "";
   const toolCalls = new Map<number, SpecialistToolCall>();
   const maxAttempts = 2;
+  const allowedToolNames = new Set(
+    args.tools?.map((tool) => tool.function.name) ?? [],
+  );
+  const validToolCalls = (): SpecialistToolCall[] =>
+    [...toolCalls.entries()]
+      .sort(([a], [b]) => a - b)
+      .flatMap(([index, call]) =>
+        call.name && allowedToolNames.has(call.name)
+          ? [{ ...call, id: call.id || `chat-tool-${index + 1}` }]
+          : [],
+      );
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let stream: AsyncIterable<{
@@ -1469,6 +1503,12 @@ async function streamModelText(args: {
         applySafeGenerationParams(
           streamOptions as unknown as Record<string, unknown>,
           args.provider,
+        );
+        applyStreamingToolParams(
+          streamOptions as unknown as Record<string, unknown>,
+          args.modelId,
+          args.provider,
+          Boolean(streamOptions.tools?.length),
         );
         stream = (await args.client.chat.completions.create(streamOptions, {
           signal: args.signal,
@@ -1537,7 +1577,7 @@ async function streamModelText(args: {
         !args.signal?.aborted &&
         !args.shouldStop() &&
         !full.trim() &&
-        toolCalls.size === 0 &&
+        validToolCalls().length === 0 &&
         finishReason !== "content_filter";
       if (shouldRetryEmpty) {
         logger.warn(
@@ -1558,6 +1598,14 @@ async function streamModelText(args: {
           streamOptions as unknown as Record<string, unknown>,
           args.provider,
         );
+        // If a model completed with no text (including an invented or
+        // malformed tool call), the final attempt must prioritize a visible
+        // answer instead of repeating the same tool-only response.
+        delete (streamOptions as unknown as Record<string, unknown>).tools;
+        delete (streamOptions as unknown as Record<string, unknown>)
+          .tool_choice;
+        toolCalls.clear();
+        allowedToolNames.clear();
         continue;
       }
       break;
@@ -1579,12 +1627,9 @@ async function streamModelText(args: {
       );
     }
   }
-  if (toolCalls.size > 0) {
-    args.onToolCalls?.(
-      [...toolCalls.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([, call]) => call),
-    );
+  const completedToolCalls = validToolCalls();
+  if (completedToolCalls.length > 0) {
+    args.onToolCalls?.(completedToolCalls);
   }
   return splitThinkTags(full).content;
 }

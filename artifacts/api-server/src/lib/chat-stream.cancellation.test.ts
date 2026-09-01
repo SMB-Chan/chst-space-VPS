@@ -2,7 +2,12 @@ import { EventEmitter } from "node:events";
 import type OpenAI from "openai";
 import type { Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import { createResponseCancellation, streamChatReply } from "./chat-stream";
+import {
+  createResponseCancellation,
+  shouldAttachSpecialistTools,
+  streamChatReply,
+  streamModelText,
+} from "./chat-stream";
 
 class MockResponse extends EventEmitter {
   headersSent = false;
@@ -95,6 +100,54 @@ async function* delayedAnswerStream(): AsyncGenerator<{
   await new Promise((resolve) => setTimeout(resolve, 16_000));
   yield { choices: [{ delta: { content: "answer" } }] };
 }
+
+async function* unknownToolStream(): AsyncGenerator<{
+  choices: {
+    delta: {
+      tool_calls: {
+        index: number;
+        id: string;
+        function: { name: string; arguments: string };
+      }[];
+    };
+  }[];
+}> {
+  yield {
+    choices: [
+      {
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              id: "bad-call",
+              function: { name: "finance_analysis", arguments: "{}" },
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+describe("specialist tool selection", () => {
+  it("does not attach native tools after web context is already available", () => {
+    expect(
+      shouldAttachSpecialistTools({
+        hasBrokerToolCall: false,
+        hasWebContext: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps native tools available when no prebuilt web context exists", () => {
+    expect(
+      shouldAttachSpecialistTools({
+        hasBrokerToolCall: false,
+        hasWebContext: false,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("response cancellation", () => {
   it("aborts the shared signal when the response closes before streaming starts", () => {
@@ -252,6 +305,57 @@ describe("model stream recovery", () => {
     expect(response.writes.join("\n")).toContain(
       '"error":"応答が空でした。もう一度お試しください。"',
     );
+  });
+
+  it("drops an unadvertised GLM tool call and retries without tools", async () => {
+    const sentOptions: Record<string, unknown>[] = [];
+    const create = vi
+      .fn()
+      .mockImplementationOnce(async (options: Record<string, unknown>) => {
+        sentOptions.push(structuredClone(options));
+        return unknownToolStream();
+      })
+      .mockImplementationOnce(async (options: Record<string, unknown>) => {
+        sentOptions.push(structuredClone(options));
+        return answerStream();
+      });
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const onToolCalls = vi.fn();
+    const deltas: string[] = [];
+
+    const result = await streamModelText({
+      client,
+      provider: "dashscope",
+      modelId: "glm-5.2",
+      reasoningLevel: "medium",
+      messages: [{ role: "user", content: "market outlook" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "web_search",
+            description: "Search the web",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+      onToolCalls,
+      onDelta: (text, kind) => {
+        if (kind === "content") deltas.push(text);
+      },
+      shouldStop: () => false,
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(sentOptions[0]).toMatchObject({
+      extra_body: { tool_stream: true },
+    });
+    expect(sentOptions[1]?.tools).toBeUndefined();
+    expect(onToolCalls).not.toHaveBeenCalled();
+    expect(deltas.join("")).toBe("answer");
+    expect(result).toBe("answer");
   });
 
   it("emits a safe thinking heartbeat without exposing reasoning text", async () => {

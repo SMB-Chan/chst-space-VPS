@@ -278,6 +278,23 @@ export function applyNonReasoningGenerationParams(
   }
 }
 
+/** GLM requires tool_stream for function-call deltas in streaming responses. */
+export function applyStreamingToolParams(
+  opts: Record<string, unknown>,
+  modelId: string,
+  provider: ModelProvider,
+  hasTools: boolean,
+): void {
+  if (provider !== "dashscope" || !hasTools || !modelId.startsWith("glm-")) {
+    return;
+  }
+  const current =
+    opts.extra_body && typeof opts.extra_body === "object"
+      ? (opts.extra_body as Record<string, unknown>)
+      : {};
+  opts.extra_body = { ...current, tool_stream: true };
+}
+
 export function isUnsupportedGenerationParam(err: unknown): boolean {
   const status = (err as { status?: number }).status;
   const msg = err instanceof Error ? err.message : String(err);
