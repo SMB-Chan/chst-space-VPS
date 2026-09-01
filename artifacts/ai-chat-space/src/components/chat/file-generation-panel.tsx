@@ -3,9 +3,7 @@ import { Surface } from "@/design-system/surface";
 import { cn } from "@/lib/utils";
 
 export type FileGenerationPhase =
-  | "generating-file"
-  | "reviewing-layout"
-  | "revising-layout";
+  "generating-file" | "reviewing-layout" | "revising-layout";
 
 interface Step {
   id: FileGenerationPhase;
@@ -113,7 +111,9 @@ export function FileGenerationPanel({ phase }: { phase: FileGenerationPhase }) {
         />
         <div
           className="absolute left-4 top-[18px] h-px [background:var(--m3-primary)] transition-[width] duration-[var(--m3-duration-long)] ease-[var(--m3-motion-emphasized)]"
-          style={{ width: `calc((100% - 2rem) * ${Math.max(activeIndex, 0) / (STEPS.length - 1)})` }}
+          style={{
+            width: `calc((100% - 2rem) * ${Math.max(activeIndex, 0) / (STEPS.length - 1)})`,
+          }}
           aria-hidden="true"
         />
         {STEPS.map((step, index) => {
