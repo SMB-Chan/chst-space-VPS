@@ -190,7 +190,8 @@ describe("Alibaba heavy chat classification", () => {
       isHeavyAlibabaChatRequest({
         model: "qwen3.8-max",
         messages: [{ role: "user", content: "短い質問です" }],
-        extra_body: { enable_thinking: true, reasoning_effort: "medium" },
+        enable_thinking: true,
+        reasoning_effort: "medium",
       }),
     ).toBe(false);
   });
@@ -200,7 +201,18 @@ describe("Alibaba heavy chat classification", () => {
       isHeavyAlibabaChatRequest({
         model: "qwen3.8-max",
         messages: [{ role: "user", content: "x".repeat(9_000) }],
-        extra_body: { enable_thinking: true, reasoning_effort: "xhigh" },
+        enable_thinking: true,
+        reasoning_effort: "xhigh",
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps compatibility with legacy nested reasoning parameters", () => {
+    expect(
+      isHeavyAlibabaChatRequest({
+        model: "qwen3.8-max",
+        messages: [{ role: "user", content: "x".repeat(9_000) }],
+        extra_body: { reasoning_effort: "xhigh" },
       }),
     ).toBe(true);
   });

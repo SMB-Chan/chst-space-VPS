@@ -158,6 +158,18 @@ export function estimateAlibabaTokenPlanTurn(
   };
 }
 
+/**
+ * Missing console telemetry must not disable an otherwise ordinary audit.
+ * Keep fail-closed behavior for genuinely expensive shapes (long context,
+ * high reasoning, attachments, or file generation); a second short model call
+ * alone can still rely on the provider's own Token Plan enforcement.
+ */
+export function shouldBlockWithoutQuotaTelemetry(
+  estimate: AlibabaTokenPlanTurnEstimate,
+): boolean {
+  return estimate.reasons.some((reason) => reason !== "multi-model-turn");
+}
+
 export function assessAlibabaLargeTurnQuota(
   snapshot: AlibabaTokenPlanUsageSnapshot | null,
   env: NodeJS.ProcessEnv = process.env,
@@ -347,13 +359,18 @@ export async function tokenPlanQuotaPreflightGuard(
     const snapshot = await getAlibabaTokenPlanUsage(process.env);
     const assessment = assessAlibabaLargeTurnQuota(snapshot, process.env);
     if (assessment.decision === "unknown") {
-      if (isAlibabaTokenPlanQuotaFailOpen(process.env)) {
+      if (
+        isAlibabaTokenPlanQuotaFailOpen(process.env) ||
+        !shouldBlockWithoutQuotaTelemetry(estimate)
+      ) {
         logger.warn(
           {
             reasons: estimate.reasons,
             tokenPlanCalls: estimate.tokenPlanCalls,
           },
-          "Large Token Plan turn is using the explicit fail-open override",
+          isAlibabaTokenPlanQuotaFailOpen(process.env)
+            ? "Large Token Plan turn is using the explicit fail-open override"
+            : "Short Token Plan audit is proceeding without optional quota telemetry",
         );
         next();
         return;
@@ -411,10 +428,15 @@ export async function tokenPlanQuotaPreflightGuard(
     }
     next();
   } catch {
-    if (isAlibabaTokenPlanQuotaFailOpen(process.env)) {
+    if (
+      isAlibabaTokenPlanQuotaFailOpen(process.env) ||
+      !shouldBlockWithoutQuotaTelemetry(estimate)
+    ) {
       logger.warn(
         { reasons: estimate.reasons },
-        "Token Plan large-turn preflight is using the explicit fail-open override",
+        isAlibabaTokenPlanQuotaFailOpen(process.env)
+          ? "Token Plan large-turn preflight is using the explicit fail-open override"
+          : "Short Token Plan audit is proceeding after optional quota telemetry failed",
       );
       next();
       return;

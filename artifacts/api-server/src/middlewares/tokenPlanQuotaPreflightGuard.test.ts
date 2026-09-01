@@ -3,6 +3,7 @@ import {
   TOKEN_PLAN_QUOTA_RESPONSE_HEADERS,
   assessAlibabaLargeTurnQuota,
   estimateAlibabaTokenPlanTurn,
+  shouldBlockWithoutQuotaTelemetry,
   tokenPlanQuotaHeaders,
   tokenPlanQuotaPreflightGuard,
   tokenPlanQuotaStatusHeaders,
@@ -57,6 +58,19 @@ describe("Token Plan large-turn estimation", () => {
     expect(result.large).toBe(true);
     expect(result.tokenPlanCalls).toBe(2);
     expect(result.reasons).toContain("multi-model-turn");
+    expect(shouldBlockWithoutQuotaTelemetry(result)).toBe(false);
+  });
+
+  it("still requires telemetry for a long audited Token Plan turn", () => {
+    const result = estimateAlibabaTokenPlanTurn({
+      rootModelId: "qwen3.8-max",
+      auditModelId: "glm-5.2",
+      content: "x".repeat(20_000),
+    });
+    expect(result.reasons).toEqual(
+      expect.arrayContaining(["long-context", "multi-model-turn"]),
+    );
+    expect(shouldBlockWithoutQuotaTelemetry(result)).toBe(true);
   });
 
   it("does not treat a regular OpenAI root plus Alibaba audit as an early-blocking large root turn", () => {
@@ -277,6 +291,18 @@ describe("tokenPlanQuotaPreflightGuard middleware integration", () => {
         error: expect.stringContaining("残量を確認できない"),
       }),
     );
+  });
+
+  it("allows a short two-model audit when optional quota telemetry is unavailable", async () => {
+    vi.stubEnv("ALIBABA_CONSOLE_ACCESS_TOKEN", "");
+    const { res, next } = mockRes();
+    const req = {
+      body: { modelId: "qwen3.8-max", content: "短い質問" },
+      query: { auditModel: "glm-5.2", reasoning: "medium" },
+    } as never;
+    await tokenPlanQuotaPreflightGuard(req, res as never, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
   });
 
   it("passes through for large turns when fail-open override is enabled and telemetry is unavailable", async () => {
