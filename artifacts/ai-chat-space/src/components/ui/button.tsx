@@ -25,8 +25,7 @@ const buttonVariants = cva(
           "bg-[var(--m3-secondary-container)] text-[var(--m3-on-secondary-container)] hover:brightness-[1.04]",
         ghost:
           "bg-transparent text-[var(--m3-on-surface-variant)] hover:bg-[var(--m3-surface-container)] hover:text-[var(--m3-on-surface)]",
-        link:
-          "rounded-[var(--m3-shape-xs)] bg-transparent px-1 text-[var(--m3-primary)] underline-offset-4 hover:underline active:scale-100",
+        link: "rounded-[var(--m3-shape-xs)] bg-transparent px-1 text-[var(--m3-primary)] underline-offset-4 hover:underline active:scale-100",
       },
       size: {
         default: "h-10 px-5",
