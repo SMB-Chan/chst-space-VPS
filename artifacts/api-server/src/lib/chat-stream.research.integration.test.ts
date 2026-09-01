@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   executeSpecialistTool: vi.fn(),
+  findRelevantMemories: vi.fn(),
+  runMemoryMaintenance: vi.fn(),
 }));
 
 vi.mock("./web-search", () => ({
@@ -24,9 +26,9 @@ vi.mock("./skills", () => ({
 }));
 
 vi.mock("./llm-memory-tools", () => ({
-  findRelevantMemories: vi.fn(() => []),
+  findRelevantMemories: mocks.findRelevantMemories,
   formatMemoriesForPrompt: vi.fn(() => ""),
-  runMemoryMaintenance: vi.fn(),
+  runMemoryMaintenance: mocks.runMemoryMaintenance,
 }));
 
 vi.mock("./specialist-capabilities", () => ({
@@ -45,9 +47,17 @@ vi.mock("./specialist-capabilities", () => ({
       },
     },
   ]),
-  isResearchTool: vi.fn(
+  isEvidenceTool: vi.fn(
     (call: { name?: string }) =>
       call.name === "web_search" || call.name === "fetch_page",
+  ),
+  isSpecialistMutationTool: vi.fn((call: { name?: string }) =>
+    [
+      "memory_store",
+      "memory_update",
+      "memory_forget",
+      "memory_supersede",
+    ].includes(call.name ?? ""),
   ),
 }));
 
@@ -104,7 +114,12 @@ function responseHarness() {
   return { res, write, end };
 }
 
-async function runTurn(create: ReturnType<typeof vi.fn>) {
+async function runTurn(
+  create: ReturnType<typeof vi.fn>,
+  memory: Parameters<typeof streamChatReply>[0]["memory"] = {
+    enabled: false,
+  },
+) {
   const { res, write } = responseHarness();
   const onComplete = vi.fn().mockResolvedValue(undefined);
   const client = {
@@ -125,6 +140,7 @@ async function runTurn(create: ReturnType<typeof vi.fn>) {
       isClientGone: () => false,
       dispose: vi.fn(),
     },
+    memory,
     onComplete,
     publicAiError: () => "error",
   });
@@ -143,6 +159,12 @@ describe("streamChatReply research completion", () => {
       capability: "web_search",
       summary: "検索完了",
       text: "[1] 検索で確認した情報",
+    });
+    mocks.findRelevantMemories.mockResolvedValue([]);
+    mocks.runMemoryMaintenance.mockResolvedValue({
+      totalActive: 0,
+      totalSuperseded: 0,
+      totalExpired: 0,
     });
   });
 
@@ -193,6 +215,24 @@ describe("streamChatReply research completion", () => {
       expect.objectContaining({
         content: "検索上限までの根拠を使った最終回答です。[1]",
       }),
+    );
+  });
+
+  it("uses long-term memory only when a user-scoped context is enabled", async () => {
+    const privateCreate = vi
+      .fn()
+      .mockResolvedValueOnce(textStream("回答です。"));
+    await runTurn(privateCreate, { enabled: false });
+    expect(mocks.findRelevantMemories).not.toHaveBeenCalled();
+
+    const persistentCreate = vi
+      .fn()
+      .mockResolvedValueOnce(textStream("回答です。"));
+    await runTurn(persistentCreate, { enabled: true, userId: "user-123" });
+    expect(mocks.findRelevantMemories).toHaveBeenCalledWith(
+      "user-123",
+      "最新情報を調べて",
+      5,
     );
   });
 });

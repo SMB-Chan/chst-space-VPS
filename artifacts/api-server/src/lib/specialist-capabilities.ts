@@ -421,20 +421,39 @@ export interface SpecialistToolCall {
   arguments: string;
 }
 
-const RESEARCH_TOOL_NAMES = new Set(["web_search", "fetch_page"]);
+const EVIDENCE_TOOL_NAMES = new Set(["web_search", "fetch_page"]);
+const READ_ONLY_TOOL_NAMES = new Set(["memory_recall", "analyze_forms"]);
+const MUTATION_TOOL_NAMES = new Set([
+  "memory_store",
+  "memory_update",
+  "memory_forget",
+  "memory_supersede",
+]);
+const EXTERNAL_ACTION_TOOL_NAMES = new Set(["fill_form"]);
 
-export function isResearchTool(call: SpecialistToolCall): boolean {
-  return (
-    RESEARCH_TOOL_NAMES.has(call.name) ||
-    isMemoryTool(call.name) ||
-    isFormTool(call.name)
-  );
+export function isEvidenceTool(call: SpecialistToolCall): boolean {
+  return EVIDENCE_TOOL_NAMES.has(call.name);
+}
+
+export function isReadOnlySpecialistTool(call: SpecialistToolCall): boolean {
+  return READ_ONLY_TOOL_NAMES.has(call.name) || isEvidenceTool(call);
+}
+
+export function isSpecialistMutationTool(call: SpecialistToolCall): boolean {
+  return MUTATION_TOOL_NAMES.has(call.name);
+}
+
+export function isExternalActionTool(call: SpecialistToolCall): boolean {
+  return EXTERNAL_ACTION_TOOL_NAMES.has(call.name);
 }
 
 export interface SpecialistToolContext {
   imageAttachments?: { name: string; content: string }[];
   audioAttachments?: { name: string; buffer: Buffer; mime: string }[];
   signal?: AbortSignal;
+  userId?: string;
+  memoryEnabled?: boolean;
+  formSubmissionApproved?: boolean;
 }
 
 export interface SpecialistToolDefinition {
@@ -635,11 +654,19 @@ export function getSpecialistTools(
     },
   });
 
-  // Memory tools: always available for the LLM to manage its own knowledge
-  tools.push(...getMemoryToolDefinitions());
+  if (context.memoryEnabled && context.userId) {
+    tools.push(...getMemoryToolDefinitions());
+  }
 
-  // Form interaction tools: analyze and fill web forms for information gathering
-  tools.push(...getFormToolDefinitions());
+  // Submission stays unavailable until a route supplies a user-confirmation
+  // token. Analysis is read-only and can remain available independently.
+  tools.push(
+    ...getFormToolDefinitions().filter(
+      (tool) =>
+        tool.function.name !== "fill_form" ||
+        context.formSubmissionApproved === true,
+    ),
+  );
 
   return tools;
 }
@@ -865,11 +892,13 @@ export async function executeSpecialistTool(
     }
     // Memory tools: delegate to the memory tools module
     if (isMemoryTool(call.name)) {
-      return executeMemoryTool(call);
+      return executeMemoryTool(call, context);
     }
     // Form tools: delegate to the form tools module
     if (isFormTool(call.name)) {
-      return executeFormTool(call);
+      return executeFormTool(call, {
+        submissionApproved: context.formSubmissionApproved === true,
+      });
     }
     throw new Error("許可されていない専門能力です");
   } catch (error) {

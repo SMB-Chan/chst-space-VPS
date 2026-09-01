@@ -248,6 +248,12 @@ export const WipeOpenaiConversationsResponse = zod.void()
 
 
 /**
+ * @summary Delete all long-term memories for the current user
+ */
+export const WipeOpenaiMemoriesResponse = zod.void()
+
+
+/**
  * @summary Get conversation with messages
  */
 

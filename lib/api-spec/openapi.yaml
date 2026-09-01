@@ -257,6 +257,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OpenaiError"
+  /openai/memories:
+    delete:
+      operationId: wipeOpenaiMemories
+      tags: [openai]
+      summary: Delete all long-term memories for the current user
+      responses:
+        "204":
+          description: All long-term memories deleted
+        "500":
+          description: Failed to wipe long-term memories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiError"
   /openai/conversations/{id}:
     get:
       operationId: getOpenaiConversation

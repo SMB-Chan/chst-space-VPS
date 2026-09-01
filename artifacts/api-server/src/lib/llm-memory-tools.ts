@@ -195,11 +195,16 @@ function formatMemoryBrief(m: MemoryEntry): string {
 
 export async function executeMemoryTool(
   call: SpecialistToolCall,
+  context: Pick<SpecialistToolContext, "userId" | "memoryEnabled">,
 ): Promise<SpecialistToolResult> {
   try {
+    if (!context.memoryEnabled || !context.userId) {
+      throw new Error("このセッションでは長期メモリは無効です");
+    }
+    const userId = context.userId;
     if (call.name === "memory_store") {
       const args = parseArgs(memoryStoreArgs, call.arguments);
-      const entry = storeMemory(args as StoreMemoryInput);
+      const entry = await storeMemory(userId, args as StoreMemoryInput);
       return {
         ok: true,
         capability: "web-search",
@@ -210,7 +215,7 @@ export async function executeMemoryTool(
 
     if (call.name === "memory_recall") {
       const args = parseArgs(memoryRecallArgs, call.arguments);
-      const memories = recallMemories(args.query, args.limit);
+      const memories = await recallMemories(userId, args.query, args.limit);
       if (memories.length === 0) {
         return {
           ok: true,
@@ -230,7 +235,7 @@ export async function executeMemoryTool(
     if (call.name === "memory_update") {
       const args = parseArgs(memoryUpdateArgs, call.arguments);
       const { id, ...updates } = args;
-      const updated = updateMemory(id, updates);
+      const updated = await updateMemory(userId, id, updates);
       if (!updated) {
         return {
           ok: false,
@@ -249,7 +254,7 @@ export async function executeMemoryTool(
 
     if (call.name === "memory_forget") {
       const args = parseArgs(memoryForgetArgs, call.arguments);
-      const success = forgetMemory(args.id);
+      const success = await forgetMemory(userId, args.id);
       return {
         ok: success,
         capability: "web-search",
@@ -262,7 +267,7 @@ export async function executeMemoryTool(
 
     if (call.name === "memory_supersede") {
       const args = parseArgs(memorySupersedeArgs, call.arguments);
-      const success = supersedeMemory(args.old_id, args.new_id);
+      const success = await supersedeMemory(userId, args.old_id, args.new_id);
       return {
         ok: success,
         capability: "web-search",

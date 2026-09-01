@@ -88,6 +88,7 @@ app.use(
       ...Object.values(TOKEN_PLAN_QUOTA_RESPONSE_HEADERS),
       "X-Chat-Space-Token-Plan-Remaining",
       "X-Chat-Space-Token-Plan-Window",
+      "Retry-After",
     ],
   }),
 );
@@ -123,6 +124,11 @@ app.use(
 // surface. No new API contract is introduced: safe quota values are response
 // headers and the route body remains the existing model catalog.
 app.get("/api/openai/models", requireAuth, tokenPlanQuotaStatusHeaders);
+
+// Realtime session issuance creates short-lived provider credentials. It does
+// not use the large attachment parser, but it must share the same authenticated
+// request budget as chat and media generation to prevent token-minting abuse.
+app.post("/api/openai/realtime/session", requireAuth, sharedAiUsageGuard);
 
 // Attachment requests may carry base64 image data. Authenticate and acquire
 // the shared per-user AI budget before the expensive 30MB parser so anonymous

@@ -1,12 +1,12 @@
 import { pool } from "@workspace/db";
 import app from "./app";
 import { closeBrowser } from "./lib/render-fetch";
-import { closeMemoryStore } from "./lib/llm-memory-store";
 import {
   ensureAiUsageSchema,
   ensureAlibabaVideoJobsSchema,
   ensureAssetsSchema,
   ensureMessageSchema,
+  ensureLlmMemoriesSchema,
 } from "./lib/ensure-schema";
 import { createGracefulShutdown } from "./lib/graceful-shutdown";
 import { startAlibabaVideoWorker } from "./lib/alibaba-video-worker";
@@ -40,7 +40,6 @@ async function main(): Promise<void> {
       { name: "alibaba-video-worker", close: videoWorker.close },
       { name: "alibaba-realtime-websocket", close: realtimeSocket.close },
       { name: "browser-egress", close: closeBrowser },
-      { name: "llm-memory-store", close: async () => closeMemoryStore() },
       { name: "postgres", close: async () => pool.end() },
     ],
     logger,
@@ -77,6 +76,7 @@ async function main(): Promise<void> {
     await ensureAssetsSchema((sql) => pool.query(sql));
     await ensureAlibabaVideoJobsSchema((sql) => pool.query(sql));
     await ensureAiUsageSchema((sql) => pool.query(sql));
+    await ensureLlmMemoriesSchema((sql) => pool.query(sql));
     startupReadiness.markReady();
     logger.info("Server ready");
   } catch (err) {

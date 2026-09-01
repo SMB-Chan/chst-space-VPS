@@ -240,6 +240,37 @@ describe("response cancellation", () => {
     expect(onComplete).not.toHaveBeenCalled();
     cancellation.dispose();
   });
+
+  it("ends the SSE response when completion persistence fails", async () => {
+    const response = new StreamingResponse();
+    const client = {
+      chat: {
+        completions: {
+          create: vi.fn().mockResolvedValue(answerStream()),
+        },
+      },
+    } as unknown as OpenAI;
+
+    await streamChatReply({
+      res: response as unknown as Response,
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      reasoningLevel: "off",
+      userText: "hello",
+      chatMessages: [{ role: "user", content: "hello" }],
+      translationMode: "ja-en",
+      onComplete: async () => {
+        throw new Error("database unavailable");
+      },
+      publicAiError: () => "error",
+    });
+
+    expect(response.writableEnded).toBe(true);
+    expect(response.writes.join("")).toContain(
+      "メッセージの保存に失敗しました",
+    );
+  });
 });
 
 describe("model stream recovery", () => {

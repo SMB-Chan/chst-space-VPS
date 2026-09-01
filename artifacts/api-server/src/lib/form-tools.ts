@@ -91,6 +91,7 @@ function parseArgs<T>(schema: z.ZodType<T>, raw: string): T {
 
 export async function executeFormTool(
   call: SpecialistToolCall,
+  options: { submissionApproved: boolean },
 ): Promise<SpecialistToolResult> {
   try {
     if (call.name === "analyze_forms") {
@@ -147,6 +148,11 @@ export async function executeFormTool(
     }
 
     if (call.name === "fill_form") {
+      if (!options.submissionApproved) {
+        throw new Error(
+          "フォーム送信には、送信内容を表示した後のユーザーによる明示確認が必要です",
+        );
+      }
       const args = parseArgs(fillFormArgs, call.arguments);
       const result = await fillAndSubmitForm(
         args.url,

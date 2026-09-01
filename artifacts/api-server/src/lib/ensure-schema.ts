@@ -180,6 +180,29 @@ DELETE FROM ai_usage_leases WHERE expires_at <= now();
 COMMIT;
 `.trim();
 
+export const ENSURE_LLM_MEMORIES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS llm_memories (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  topic text NOT NULL,
+  content text NOT NULL,
+  source_url text,
+  learned_at timestamptz NOT NULL DEFAULT now(),
+  valid_as_of date,
+  expires_at timestamptz,
+  confidence double precision NOT NULL DEFAULT 1.0,
+  superseded_by text,
+  access_count integer NOT NULL DEFAULT 0,
+  last_accessed_at timestamptz,
+  tags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS llm_memories_user_topic_idx
+  ON llm_memories(user_id, topic);
+CREATE INDEX IF NOT EXISTS llm_memories_user_active_idx
+  ON llm_memories(user_id, superseded_by, expires_at);
+`.trim();
+
 export async function ensureMessageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -204,10 +227,17 @@ export async function ensureAiUsageSchema(
   await query(ENSURE_AI_USAGE_SCHEMA_SQL);
 }
 
+export async function ensureLlmMemoriesSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_LLM_MEMORIES_SCHEMA_SQL);
+}
+
 export async function ensureChatSchema(): Promise<void> {
   const { db } = await import("@workspace/db");
   await ensureMessageSchema((sql) => db.execute(sql));
   await ensureAssetsSchema((sql) => db.execute(sql));
   await ensureAlibabaVideoJobsSchema((sql) => db.execute(sql));
   await ensureAiUsageSchema((sql) => db.execute(sql));
+  await ensureLlmMemoriesSchema((sql) => db.execute(sql));
 }

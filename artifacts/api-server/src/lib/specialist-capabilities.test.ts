@@ -50,7 +50,10 @@ import {
   getAvailableChatModels,
   getCapabilityRegistry,
   getSpecialistTools,
-  isResearchTool,
+  isEvidenceTool,
+  isExternalActionTool,
+  isReadOnlySpecialistTool,
+  isSpecialistMutationTool,
   resetModelDiscoveryCache,
 } from "./specialist-capabilities";
 
@@ -118,6 +121,21 @@ describe("specialist capability registry", () => {
     expect(baseNames).toContain("synthesize_speech");
     expect(baseNames).not.toContain("edit_image");
     expect(baseNames).not.toContain("transcribe_audio");
+    expect(baseNames).not.toContain("memory_recall");
+    expect(baseNames).toContain("analyze_forms");
+    expect(baseNames).not.toContain("fill_form");
+
+    const memoryNames = getSpecialistTools({
+      userId: "user-1",
+      memoryEnabled: true,
+    }).map((tool) => tool.function.name);
+    expect(memoryNames).toContain("memory_recall");
+    expect(memoryNames).toContain("memory_forget");
+
+    const approvedNames = getSpecialistTools({
+      formSubmissionApproved: true,
+    }).map((tool) => tool.function.name);
+    expect(approvedNames).toContain("fill_form");
 
     const tools = getSpecialistTools({
       imageAttachments: [
@@ -149,6 +167,23 @@ describe("specialist capability registry", () => {
     expect(unauthorized.ok).toBe(false);
     expect(unauthorized.summary).toContain("許可されていない");
     expect(generateAlibabaImageMock).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit user approval before submitting a form", async () => {
+    const result = await executeSpecialistTool(
+      {
+        id: "call-form",
+        name: "fill_form",
+        arguments: JSON.stringify({
+          url: "https://example.com/search",
+          formIndex: 0,
+          fieldValues: { q: "test" },
+        }),
+      },
+      {},
+    );
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain("明示確認");
   });
 
   it("returns a bounded generated image as a specialist asset", async () => {
@@ -282,19 +317,29 @@ describe("specialist capability registry", () => {
     expect(result.summary).toContain("取得できませんでした");
   });
 
-  it("isResearchTool identifies research tools correctly", () => {
+  it("isEvidenceTool identifies only evidence-producing research tools", () => {
     expect(
-      isResearchTool({ id: "1", name: "web_search", arguments: "{}" }),
+      isEvidenceTool({ id: "1", name: "web_search", arguments: "{}" }),
     ).toBe(true);
     expect(
-      isResearchTool({ id: "2", name: "fetch_page", arguments: "{}" }),
+      isEvidenceTool({ id: "2", name: "fetch_page", arguments: "{}" }),
     ).toBe(true);
     expect(
-      isResearchTool({ id: "3", name: "generate_image", arguments: "{}" }),
+      isEvidenceTool({ id: "3", name: "generate_image", arguments: "{}" }),
     ).toBe(false);
     expect(
-      isResearchTool({ id: "4", name: "synthesize_speech", arguments: "{}" }),
+      isEvidenceTool({ id: "4", name: "memory_recall", arguments: "{}" }),
     ).toBe(false);
+  });
+
+  it("classifies read-only, mutation, and external-action tools separately", () => {
+    const call = (name: string) => ({ id: name, name, arguments: "{}" });
+    expect(isReadOnlySpecialistTool(call("memory_recall"))).toBe(true);
+    expect(isSpecialistMutationTool(call("memory_store"))).toBe(true);
+    expect(isSpecialistMutationTool(call("memory_forget"))).toBe(true);
+    expect(isExternalActionTool(call("fill_form"))).toBe(true);
+    expect(isEvidenceTool(call("memory_recall"))).toBe(false);
+    expect(isEvidenceTool(call("analyze_forms"))).toBe(false);
   });
 });
 

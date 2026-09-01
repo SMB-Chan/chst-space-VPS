@@ -22,8 +22,8 @@ import {
 import { getClientForModel } from "./ai-clients";
 import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
 import { buildWebContext } from "./web-search";
-import { composeSkillSearchQuery, matchSkills } from "./skills";
-import { extractArtifacts, type ExtractedArtifact } from "./artifacts";
+import { composeSkillSearchQuery } from "./skills";
+import { extractArtifacts } from "./artifacts";
 import { logger, safeFailureFields } from "./logger";
 import { isTransientAiError } from "./public-error";
 import {
@@ -43,24 +43,13 @@ import {
   reviewLayout,
 } from "./file-review";
 import { describeImagesForTextModel } from "./vision-bridge";
-import {
-  buildTranslationSystemPrompt,
-  type TranslationMode,
-} from "./translation";
+import type { TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
-import {
-  FACTUALITY_SYSTEM_PROMPT,
-  buildFactualityUserMessage,
-  mergeResearchEvidence,
-  parseFactualityVerification,
-  unavailableFactualityReport,
-  type FactualityReport,
-} from "./factuality";
+import type { FactualityReport, FactualitySource } from "./factuality";
 import {
   executeSpecialistTool,
   getSpecialistTools,
-  isResearchTool,
   type GeneratedAsset,
   type SpecialistToolCall,
   type SpecialistToolResult,
@@ -70,31 +59,45 @@ import {
   formatMemoriesForPrompt,
   runMemoryMaintenance,
 } from "./llm-memory-tools";
+import { planCapabilityTool } from "./capability-broker";
 import {
-  planCapabilityTool,
-  type CapabilityToolPlan,
-} from "./capability-broker";
+  isResearchAnnouncementOnly,
+  prepareInitialChatMessages,
+  shouldAttachSpecialistTools,
+  specialistCallFromPlan,
+  wantsGeneratedFile,
+} from "./chat-stream-policy";
+import {
+  persistAndEmitChatCompletion,
+  type ChatCompletionCallback,
+} from "./chat-stream-completion";
+import {
+  partitionSpecialistToolCalls,
+  runResearchLoop,
+} from "./chat-stream-research";
+import type { StreamModelTextInput } from "./chat-stream-stage-types";
+import {
+  shouldVerifySearchBackedAnswer,
+  verifySearchBackedAnswer,
+} from "./chat-stream-factuality";
+
+export {
+  isResearchAnnouncementOnly,
+  shouldAttachSpecialistTools,
+  shouldSynthesizeResearchAnswer,
+} from "./chat-stream-policy";
 
 const AUDIT_TIMEOUT_MS = 120_000;
 const AUDIT_MAX_OUTPUT_TOKENS = 2_048;
 const AUDIT_REASONING_MAX_OUTPUT_TOKENS = 4_096;
-const FACTUALITY_MAX_OUTPUT_TOKENS = 1_600;
 const AUDIT_IMAGE_TRANSCRIPT_MAX_CHARS = 2_500;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
 const SPECIALIST_TIMEOUT_MS = 120_000;
 const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
-/** Maximum research tool calls (web_search/fetch_page) per turn. */
-const MAX_RESEARCH_STEPS = 6;
-/** Per-step timeout for a single research tool execution. */
-const RESEARCH_STEP_TIMEOUT_MS = 30_000;
 const RESEARCH_RECOVERY_SYSTEM_PROMPT = `直前の応答は、検索すると宣言しただけで実際のツール呼び出しも回答も完了していません。
 検索が必要なら、この応答で直ちに web_search または fetch_page を呼び出してください。検索が不要なら、宣言を繰り返さず今すぐ質問への回答を完成させてください。`;
-const RESEARCH_FINAL_SYNTHESIS_SYSTEM_PROMPT = `検索ツールの実行段階は終了しました。追加のツールは呼び出せません。
-これまでに取得したツール結果だけを使い、ユーザーの質問への最終回答を今すぐ完成させてください。検索するという宣言や作業予定は書かず、根拠番号を引用し、不明点は不明と明示してください。`;
-const RESEARCH_FINAL_ANSWER_FALLBACK =
-  "検索結果は取得できましたが、モデルが最終回答を生成できませんでした。条件を少し絞って、もう一度お試しください。";
 /** Minimum interval between memory maintenance runs (5 minutes). */
 const MEMORY_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
 let lastMemoryMaintenanceMs = 0;
@@ -166,92 +169,7 @@ export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
 
-export interface ArtifactSsePayload {
-  id?: number;
-  filename: string;
-  mime: string;
-  size: number;
-  downloadUrl?: string;
-  content?: string;
-}
-
-export function shouldAttachSpecialistTools(args: {
-  translationMode?: TranslationMode;
-  hasBrokerToolCall: boolean;
-  hasWebContext: boolean;
-}): boolean {
-  return (
-    !args.translationMode && !args.hasBrokerToolCall && !args.hasWebContext
-  );
-}
-
-/**
- * Some OpenAI-compatible providers occasionally narrate an intended search
- * without emitting a native or textual tool call. Treat only short,
- * citation-free planning statements as incomplete so ordinary answers that
- * merely discuss search are not intercepted.
- */
-export function isResearchAnnouncementOnly(text: string): boolean {
-  const normalized = splitThinkTags(text).content.replace(/\s+/g, " ").trim();
-  if (!normalized || normalized.length > 320 || /\[\d+\]/.test(normalized)) {
-    return false;
-  }
-  const announcesResearch =
-    /(?:検索|調査|調べ|確認|情報.{0,8}(?:集め|収集)|ウェブ|web\s*search|search|look\s*up|research).{0,100}(?:します|いたします|してみます|行います|使います|呼び出します|始めます|確認します|search|look\s*up|research|check)/i.test(
-      normalized,
-    ) ||
-    /(?:検索|調査|確認).{0,30}(?:してから|した上で).{0,30}(?:回答|まとめ)/.test(
-      normalized,
-    );
-  if (!announcesResearch) return false;
-  return !/(?:検索結果|調査結果|によると|判明しました|結論|回答[:：]|出典[:：])/.test(
-    normalized,
-  );
-}
-
-export function shouldSynthesizeResearchAnswer(args: {
-  executedToolCount: number;
-  continuationText: string;
-  hitStepLimitWithPendingResearch: boolean;
-}): boolean {
-  if (args.executedToolCount <= 0) return false;
-  return (
-    args.hitStepLimitWithPendingResearch ||
-    !args.continuationText.trim() ||
-    isResearchAnnouncementOnly(args.continuationText)
-  );
-}
-
-function isMemoryMutationCall(call: SpecialistToolCall): boolean {
-  return (
-    call.name === "memory_store" ||
-    call.name === "memory_update" ||
-    call.name === "memory_supersede"
-  );
-}
-
-const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファイル（Markdown / text / CSV / JSON / HTML）を求めた場合だけ、回答とは別に次の fenced block でファイル内容を出してください。
-
-形式:
-\`\`\`artifact filename="example.md" mime="text/markdown"
-ファイル本文
-\`\`\`
-
-規則:
-- 対応するのは md / txt / csv / json / html のみ。PDF・Officeバイナリはこの形式で出さない。
-- artifact block は最大3件、各2MBまで。
-- artifact block の内容はユーザーに見せる本文ではなく、ダウンロードファイルとして保存される。
-- 通常の回答本文には artifact block を残さず、何を作ったかだけ短く書く。`;
-
-const FILE_GENERATION_SYSTEM_PROMPT = `ユーザーが PDF / Word / Excel / PowerPoint ファイルの生成を求めています。システムが自動的にファイルを生成してダウンロードボタンを表示するので、あなたは以下のように答えてください。
-
-- HTML や Markdown のコードブロック、雛形、手順を出力しない。
-- 「ユーザー側で作成してください」「ブラウザで印刷してください」「ダウンロードして作成」など、ユーザーに作業を押し付ける指示を出さない。
-- 「ファイルを生成できません」などと断らない。システムが必ず生成する。
-- 作成するファイルの概要（タイトルや主なセクション）を短く述べ、後はファイルの自動生成に任せる。`;
-
 const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツールを使って自律的に情報を収集できます。
-また、memory_store/memory_recall/memory_update/memory_forget/memory_supersede ツールを使って、あなたの長期的な記憶を管理できます。
 
 方針:
 - 最新情報・固有名詞・具体的な数値データが必要な場合、積極的に web_search を使ってください。
@@ -261,15 +179,6 @@ const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツール
 - 十分な情報が集まったら、収集した情報を使って回答を生成してください。
 - ツールを使うと決めた場合、「検索します」などの宣言だけで応答を終えず、同じ応答内で実際のツール呼び出しを行ってください。
 - ツール結果を受け取った後は、作業予定だけを返さず、必ずユーザーへの最終回答まで完成させてください。
-
-記憶の管理:
-- ユーザーが明示した安定的な好みや設定は memory_store で保存できます。
-- Web検索で得た事実は、出典URLと本文が直接支持することを確認できた場合だけ保存し、source_url、valid_as_of、控えめなconfidenceを必ず付けてください。
-- 予測、スニペットだけの事実、矛盾中、または未確認の内容は保存しないでください。
-- 同じトピックの古い記憶がある場合は、memory_supersede で古いものを置き換えてから memory_store で新しいものを保存してください。
-- 誤った情報や不要になった情報は memory_forget で削除してください。
-- 過去の記憶を参照したい場合は memory_recall を使ってください。
-- 記憶はあなたのものです。将来の会話で再利用できる重要な情報を積極的に保存してください。
 
 時間軸に関する注意:
 - あなたの知識には訓練データのカットオフがあり、最近の出来事や将来の情報は不正確な場合があります。
@@ -281,64 +190,17 @@ const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツール
 - 不要な検索は避けてください。一般的な挨拶や既知の事実には検索不要です。
 - 各ツール呼び出しの後は、結果を確認してから次のアクションを判断してください。`;
 
-function wantsArtifact(userText: string): boolean {
-  return /(ダウンロード|ファイル|保存|書き出し|エクスポート|markdown|md|csv|json|html)/i.test(
-    userText,
-  );
-}
+const MEMORY_SYSTEM_PROMPT = `
 
-function wantsGeneratedFile(userText: string): boolean {
-  return /(pdf|docx|xlsx|pptx|word|excel|powerpoint|エクセル|パワーポイント|ワード)/i.test(
-    userText,
-  );
-}
+長期メモリの管理:
+- memory_store/memory_recall/memory_update/memory_forget/memory_supersede は、現在のユーザーだけに分離された長期メモリを管理します。
+- ユーザーが明示した安定的な好みや設定だけを保存してください。秘密情報や一時的な会話内容は保存しないでください。
+- Web検索で得た事実は、出典URLと本文が直接支持する場合だけ、source_url、valid_as_of、控えめなconfidenceを付けて保存してください。
+- 予測、スニペットだけの事実、矛盾中、未確認の内容は保存しないでください。
+- 古い記憶の置換には memory_supersede、誤りや不要な記憶の削除には memory_forget を使ってください。`;
 
-function specialistCallFromPlan(
-  plan: CapabilityToolPlan,
-): SpecialistToolCall | undefined {
-  if (plan.tool === "none") return undefined;
-  // Async video generation has a separate authenticated, confirmed job API.
-  // Never downgrade a video request into an image tool call.
-  if (plan.tool === "video.generate") return undefined;
-  if (plan.tool === "audio.transcribe") {
-    return {
-      id: "capability-broker-audio-1",
-      name: "transcribe_audio",
-      arguments: JSON.stringify({
-        attachmentName: plan.attachmentName,
-        ...(plan.modelId ? { modelId: plan.modelId } : {}),
-        ...(plan.languageHints ? { languageHints: plan.languageHints } : {}),
-      }),
-    };
-  }
-  if (plan.tool === "audio.synthesize") {
-    return {
-      id: "capability-broker-audio-synthesize-1",
-      name: "synthesize_speech",
-      arguments: JSON.stringify({
-        text: plan.text,
-        ...(plan.modelId ? { modelId: plan.modelId } : {}),
-        ...(plan.voice ? { voice: plan.voice } : {}),
-        ...(plan.instruction ? { instruction: plan.instruction } : {}),
-        ...(plan.languageHint ? { languageHint: plan.languageHint } : {}),
-        ...(plan.rate !== undefined ? { rate: plan.rate } : {}),
-        ...(plan.pitch !== undefined ? { pitch: plan.pitch } : {}),
-        ...(plan.volume !== undefined ? { volume: plan.volume } : {}),
-      }),
-    };
-  }
-  return {
-    id: `capability-broker-${plan.tool.replace(".", "-")}-1`,
-    name: plan.tool === "image.edit" ? "edit_image" : "generate_image",
-    arguments: JSON.stringify({
-      prompt: plan.prompt,
-      ...(plan.imageName ? { imageName: plan.imageName } : {}),
-      ...(plan.modelId ? { modelId: plan.modelId } : {}),
-      ...(plan.size ? { size: plan.size.replace("*", "x") } : {}),
-      ...(plan.n ? { n: plan.n } : {}),
-    }),
-  };
-}
+export type ChatMemoryContext =
+  { enabled: true; userId: string } | { enabled: false };
 
 export async function streamChatReply(args: {
   req?: unknown;
@@ -370,32 +232,11 @@ export async function streamChatReply(args: {
   conversationId?: number;
   /** Explicit file format requested by the frontend. */
   requestedFileFormat?: FileFormat | null;
+  /** Long-term memory is opt-in and must always be scoped to one user. */
+  memory?: ChatMemoryContext;
   /** Shared response cancellation, created before attachment extraction. */
   cancellation?: ResponseCancellation;
-  onComplete?: (result: {
-    content: string;
-    sources: {
-      title: string;
-      url: string;
-      publishedAt?: string | null;
-      fetchedAt?: string | null;
-    }[];
-    audit?: { content: string; modelId: string };
-    factuality?: FactualityReport;
-    artifacts?: ExtractedArtifact[];
-    generatedFiles?: GeneratedFile[];
-    generatedAssets?: GeneratedAsset[];
-  }) => Promise<{
-    artifacts?: {
-      sourceIndex: number;
-      id: number;
-      filename: string;
-      mime: string;
-      size: number;
-    }[];
-    assets?: { id: number; filename: string; mimeType: string; size: number }[];
-    quotaExceeded?: boolean;
-  } | void>;
+  onComplete?: ChatCompletionCallback;
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
   const {
@@ -417,6 +258,7 @@ export async function streamChatReply(args: {
     includeArtifactContent = false,
     conversationId,
     requestedFileFormat,
+    memory = { enabled: false },
     cancellation: providedCancellation,
     onComplete,
     publicAiError,
@@ -453,29 +295,12 @@ export async function streamChatReply(args: {
 
   let fullResponse = "";
   try {
-    // Clone the caller's message array so injected system prompts do not leak
-    // back to the caller or to downstream consumers.
-    const workingMessages = [...chatMessages];
-    if (translationMode) {
-      workingMessages.push({
-        role: "system",
-        content: buildTranslationSystemPrompt(translationMode),
-      });
-    }
-    if (!translationMode && wantsArtifact(userText)) {
-      workingMessages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
-    }
-    if (
-      !translationMode &&
-      (wantsGeneratedFile(userText) || requestedFileFormat)
-    ) {
-      workingMessages.push({
-        role: "system",
-        content: FILE_GENERATION_SYSTEM_PROMPT,
-      });
-    }
-
-    const skills = translationMode ? [] : matchSkills(userText);
+    const { messages: workingMessages, skills } = prepareInitialChatMessages({
+      chatMessages,
+      userText,
+      translationMode,
+      requestedFileFormat,
+    });
     if (skills.length > 0 && !clientGone()) {
       res.write(
         `data: ${JSON.stringify({
@@ -483,9 +308,6 @@ export async function streamChatReply(args: {
           skills: skills.map((s) => ({ id: s.id, label: s.label })),
         })}\n\n`,
       );
-      for (const skill of skills) {
-        workingMessages.push({ role: "system", content: skill.prompt });
-      }
     }
 
     // Vision bridge: a non-vision main model gets image content as a text
@@ -592,13 +414,21 @@ export async function streamChatReply(args: {
     // than redundantly calling web_search again (which wastes latency and
     // risks timeout).
     if (!translationMode && !webContext.contextText) {
-      workingMessages.push({ role: "system", content: RESEARCH_SYSTEM_PROMPT });
+      workingMessages.push({
+        role: "system",
+        content:
+          RESEARCH_SYSTEM_PROMPT + (memory.enabled ? MEMORY_SYSTEM_PROMPT : ""),
+      });
     }
 
     // Auto-inject relevant LLM memories based on the user's message
-    if (!translationMode) {
+    if (!translationMode && memory.enabled) {
       try {
-        const relevantMemories = findRelevantMemories(userText, 5);
+        const relevantMemories = await findRelevantMemories(
+          memory.userId,
+          userText,
+          5,
+        );
         if (relevantMemories.length > 0) {
           const memoryPrompt = formatMemoriesForPrompt(relevantMemories);
           workingMessages.push({
@@ -610,7 +440,16 @@ export async function streamChatReply(args: {
         const now = Date.now();
         if (now - lastMemoryMaintenanceMs > MEMORY_MAINTENANCE_INTERVAL_MS) {
           lastMemoryMaintenanceMs = now;
-          runMemoryMaintenance();
+          void runMemoryMaintenance(memory.userId).catch((error) => {
+            logger.warn(
+              safeFailureFields(
+                error,
+                "chat-stream",
+                "MEMORY_MAINTENANCE_FAILED",
+              ),
+              "Memory maintenance failed",
+            );
+          });
         }
       } catch {
         // Memory store failures should not break the chat flow
@@ -657,6 +496,8 @@ export async function streamChatReply(args: {
       ? getSpecialistTools({
           imageAttachments: imageAttachmentsForTools,
           audioAttachments: audioAttachmentsForTools,
+          userId: memory.enabled ? memory.userId : undefined,
+          memoryEnabled: memory.enabled,
         })
       : [];
 
@@ -734,290 +575,44 @@ export async function streamChatReply(args: {
       ? [brokerToolCall]
       : specialistToolCalls;
 
-    // Separate research tools (web_search/fetch_page) from non-research
-    // specialist tools. Research tools enter an agentic loop; non-research
-    // tools execute once after the loop.
-    const researchCalls = effectiveToolCalls.filter(isResearchTool);
-    const nonResearchCalls = effectiveToolCalls.filter(
-      (c) =>
-        !isResearchTool(c) &&
-        !(researchCalls.length > 0 && isMemoryMutationCall(c)),
-    );
-    const allResearchSources: {
-      title: string;
-      url: string;
-      publishedAt?: string | null;
-    }[] = [];
-    const researchEvidenceParts: string[] = [];
-    let executedResearchToolCount = 0;
-    let researchContinuationText = "";
-    let hitStepLimitWithPendingResearch = false;
+    const { researchCalls, nonResearchCalls } =
+      partitionSpecialistToolCalls(effectiveToolCalls);
+    let allResearchSources: FactualitySource[] = [];
+    let researchEvidenceParts: string[] = [];
 
     if (
       effectiveToolCalls.length > 0 &&
       !clientAbort.signal.aborted &&
       !translationMode
     ) {
-      // --- Research agent loop ---
       if (researchCalls.length > 0 && !brokerToolCall) {
-        let researchStep = 0;
-        let currentResearchCalls = researchCalls;
-
-        while (
-          currentResearchCalls.length > 0 &&
-          researchStep < MAX_RESEARCH_STEPS &&
-          !clientAbort.signal.aborted
-        ) {
-          researchStep++;
-          if (!clientGone()) {
-            res.write(
-              `data: ${JSON.stringify({
-                status: "researching",
-                step: researchStep,
-                maxSteps: MAX_RESEARCH_STEPS,
-                toolCount: currentResearchCalls.length,
-              })}\n\n`,
-            );
-          }
-
-          // Execute all research tool calls for this round
-          const toolResults: {
-            call: SpecialistToolCall;
-            result: Awaited<ReturnType<typeof executeSpecialistTool>>;
-          }[] = [];
-          for (const toolCall of currentResearchCalls) {
-            if (clientGone() || clientAbort.signal.aborted) break;
+        const research = await runResearchLoop({
+          client,
+          provider,
+          modelId,
+          reasoningLevel,
+          messages: workingMessages,
+          tools: specialistTools,
+          initialCalls: researchCalls,
+          hasPendingNonResearchCalls: nonResearchCalls.length > 0,
+          imageAttachments: imageAttachmentsForTools,
+          audioAttachments: audioAttachmentsForTools,
+          userId: memory.enabled ? memory.userId : undefined,
+          memoryEnabled: memory.enabled,
+          signal: clientAbort.signal,
+          clientGone,
+          emit: (event) => {
             if (!clientGone()) {
-              res.write(
-                `data: ${JSON.stringify({
-                  status: "specialist",
-                  capability: toolCall.name,
-                  phase: "running",
-                })}\n\n`,
-              );
+              res.write(`data: ${JSON.stringify(event)}\n\n`);
             }
-            let result = await (async () => {
-              try {
-                return await withTimeout(
-                  (signal) =>
-                    executeSpecialistTool(toolCall, {
-                      imageAttachments: imageAttachmentsForTools,
-                      audioAttachments: audioAttachmentsForTools,
-                      signal,
-                    }),
-                  RESEARCH_STEP_TIMEOUT_MS,
-                  "Research step",
-                  clientAbort.signal,
-                );
-              } catch (toolError) {
-                if (clientAbort.signal.aborted) throw toolError;
-                logger.warn(
-                  safeFailureFields(
-                    toolError,
-                    "chat-stream",
-                    "RESEARCH_TOOL_FAILED",
-                  ),
-                  `Research tool ${toolCall.name} failed; returning error to model`,
-                );
-                return {
-                  ok: false,
-                  capability:
-                    toolCall.name as SpecialistToolResult["capability"],
-                  summary:
-                    toolError instanceof Error
-                      ? toolError.message
-                      : "ツール実行中にエラーが発生しました",
-                  text: "",
-                } satisfies SpecialistToolResult;
-              }
-            })();
-            executedResearchToolCount++;
-            if (result.sources?.length) {
-              const mergedEvidence = mergeResearchEvidence({
-                text: result.text ?? "",
-                sources: result.sources,
-                accumulatedSources: allResearchSources,
-              });
-              allResearchSources.splice(
-                0,
-                allResearchSources.length,
-                ...mergedEvidence.sources,
-              );
-              result = { ...result, text: mergedEvidence.text };
-            }
-            if (result.text?.trim()) {
-              researchEvidenceParts.push(result.text);
-            }
-            toolResults.push({ call: toolCall, result });
-            if (!clientGone()) {
-              res.write(
-                `data: ${JSON.stringify({
-                  status: result.ok ? "specialist" : "specialist_warning",
-                  capability: result.capability,
-                  phase: result.ok ? "completed" : "failed",
-                  message: result.summary,
-                })}\n\n`,
-              );
-            }
-          }
-
-          // Feed tool results back to the LLM
-          const assistantToolCalls = toolResults.map(({ call }) => ({
-            id: call.id,
-            type: "function" as const,
-            function: { name: call.name, arguments: call.arguments },
-          }));
-          workingMessages.push({
-            role: "assistant",
-            content: null,
-            tool_calls: assistantToolCalls,
-          } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
-          for (const { call, result } of toolResults) {
-            workingMessages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              content: JSON.stringify({
-                ok: result.ok,
-                capability: result.capability,
-                summary: result.summary,
-                text: result.text,
-              }),
-            });
-          }
-
-          // Stream sources incrementally
-          if (allResearchSources.length > 0 && !clientGone()) {
-            res.write(
-              `data: ${JSON.stringify({ sources: allResearchSources })}\n\n`,
-            );
-          }
-
-          // Ask the LLM to continue (may produce more tool calls or a response)
-          const nextRoundCalls: SpecialistToolCall[] = [];
-          const continuation = await streamModelText({
-            client,
-            provider,
-            modelId,
-            reasoningLevel,
-            messages: workingMessages,
-            tools: specialistTools,
-            onToolCalls: (calls) => nextRoundCalls.push(...calls),
-            onDelta: (added, kind) => {
-              if (clientGone()) return;
-              if (kind === "reasoning") {
-                if (!clientAbort.signal.aborted) {
-                  res.write(
-                    `data: ${JSON.stringify({ status: "thinking" })}\n\n`,
-                  );
-                }
-              } else {
-                res.write(
-                  `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
-                );
-              }
-            },
-            shouldStop: () => clientGone() || clientAbort.signal.aborted,
-            signal: clientAbort.signal,
-          });
-          fullResponse += continuation;
-          researchContinuationText += continuation;
-
-          // Check if the LLM wants to do more research
-          const nextResearchCalls = nextRoundCalls.filter(isResearchTool);
-          if (
-            nextResearchCalls.length > 0 &&
-            researchStep < MAX_RESEARCH_STEPS
-          ) {
-            currentResearchCalls = nextResearchCalls;
-            // Any non-research calls from intermediate rounds are deferred
-            // to after the research loop completes.
-            for (const c of nextRoundCalls) {
-              if (
-                !isResearchTool(c) &&
-                !isMemoryMutationCall(c) &&
-                !nonResearchCalls.includes(c)
-              ) {
-                nonResearchCalls.push(c);
-              }
-            }
-          } else {
-            if (
-              nextResearchCalls.length > 0 &&
-              researchStep >= MAX_RESEARCH_STEPS
-            ) {
-              hitStepLimitWithPendingResearch = true;
-            }
-            // LLM produced a text response or hit the step limit
-            if (
-              nextRoundCalls.length > 0 &&
-              !nextRoundCalls.every(isResearchTool)
-            ) {
-              for (const c of nextRoundCalls) {
-                if (
-                  !isResearchTool(c) &&
-                  !isMemoryMutationCall(c) &&
-                  !nonResearchCalls.includes(c)
-                ) {
-                  nonResearchCalls.push(c);
-                }
-              }
-            }
-            break;
-          }
-        }
-
-        // Reaching the tool-step limit with another tool-only response, or
-        // receiving no final prose after successful tool execution, must not
-        // leave the conversation at "検索します". Run one tool-free synthesis
-        // pass over the accumulated tool results.
-        if (
-          nonResearchCalls.length === 0 &&
-          shouldSynthesizeResearchAnswer({
-            executedToolCount: executedResearchToolCount,
-            continuationText: researchContinuationText,
-            hitStepLimitWithPendingResearch,
-          }) &&
-          !clientAbort.signal.aborted
-        ) {
-          workingMessages.push({
-            role: "system",
-            content: RESEARCH_FINAL_SYNTHESIS_SYSTEM_PROMPT,
-          });
-          const finalResearchAnswer = await streamModelText({
-            client,
-            provider,
-            modelId,
-            reasoningLevel,
-            messages: workingMessages,
-            onDelta: (added, kind) => {
-              if (clientGone()) return;
-              if (kind === "reasoning") {
-                if (!clientAbort.signal.aborted) {
-                  res.write(
-                    `data: ${JSON.stringify({ status: "thinking" })}\n\n`,
-                  );
-                }
-              } else {
-                res.write(
-                  `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
-                );
-              }
-            },
-            shouldStop: () => clientGone() || clientAbort.signal.aborted,
-            signal: clientAbort.signal,
-          });
-          if (finalResearchAnswer.trim()) {
-            fullResponse += finalResearchAnswer;
-          } else if (!clientGone()) {
-            fullResponse += `\n\n${RESEARCH_FINAL_ANSWER_FALLBACK}`;
-            res.write(
-              `data: ${JSON.stringify({
-                content: `\n\n${RESEARCH_FINAL_ANSWER_FALLBACK}`,
-                status: "generating",
-              })}\n\n`,
-            );
-          }
-        }
+          },
+          streamText: streamModelText,
+          withTimeout,
+        });
+        fullResponse += research.responseText;
+        allResearchSources = research.sources;
+        researchEvidenceParts = research.evidenceParts;
+        nonResearchCalls.push(...research.deferredCalls);
       }
 
       // --- Non-research specialist tool execution (single call) ---
@@ -1059,6 +654,8 @@ export async function streamChatReply(args: {
                 executeSpecialistTool(toolCall, {
                   imageAttachments: imageAttachmentsForTools,
                   audioAttachments: audioAttachmentsForTools,
+                  userId: memory.enabled ? memory.userId : undefined,
+                  memoryEnabled: memory.enabled,
                   signal,
                 }),
               SPECIALIST_TIMEOUT_MS,
@@ -1178,6 +775,8 @@ export async function streamChatReply(args: {
                 executeSpecialistTool(toolCall, {
                   imageAttachments: imageAttachmentsForTools,
                   audioAttachments: audioAttachmentsForTools,
+                  userId: memory.enabled ? memory.userId : undefined,
+                  memoryEnabled: memory.enabled,
                   signal,
                 }),
               SPECIALIST_TIMEOUT_MS,
@@ -1286,128 +885,38 @@ export async function streamChatReply(args: {
         webContext.contextText || researchEvidenceParts.join("\n\n");
       let audit: { content: string; modelId: string } | undefined;
       let factuality: FactualityReport | undefined;
-      const shouldVerifyFactuality =
-        !translationMode &&
-        responseSources.length > 0 &&
-        Boolean(factualitySourceText.trim()) &&
-        !wantsGeneratedFile(userText) &&
-        !requestedFileFormat;
+      const shouldVerifyFactuality = shouldVerifySearchBackedAnswer({
+        translationMode: Boolean(translationMode),
+        sourceCount: responseSources.length,
+        sourceText: factualitySourceText,
+        generatesFile:
+          wantsGeneratedFile(userText) || Boolean(requestedFileFormat),
+      });
 
-      // Search-backed answers receive an automatic, compact process-based
-      // verification pass. When audit mode selected a separate model, reuse it
-      // here instead of paying for a second generic audit call.
+      // Search-backed answers use the dedicated verification stage. A selected
+      // audit model is reused as the verifier to avoid a second generic audit.
       if (shouldVerifyFactuality && !clientAbort.signal.aborted) {
-        const verifierModel =
-          auditModel && auditModel.id !== modelId
-            ? auditModel
-            : { id: modelId, provider };
-        try {
-          const verifier =
-            verifierModel.id === modelId
-              ? { client, provider }
-              : getClientForModel(verifierModel.id, verifierModel.provider);
-          if (!clientGone()) {
-            res.write(
-              `data: ${JSON.stringify({ status: "verifying", model: verifierModel.id })}\n\n`,
-            );
-          }
-          const verificationText = await withTimeout(
-            (signal) =>
-              streamModelText({
-                client: verifier.client,
-                provider: verifier.provider,
-                modelId: verifierModel.id,
-                reasoningLevel: "off",
-                maxOutputTokens: FACTUALITY_MAX_OUTPUT_TOKENS,
-                messages: [
-                  { role: "system", content: FACTUALITY_SYSTEM_PROMPT },
-                  {
-                    role: "user",
-                    content: buildFactualityUserMessage({
-                      question: userText,
-                      answer: fullResponse,
-                      sourceText: factualitySourceText,
-                    }),
-                  },
-                ],
-                onDelta: () => {
-                  // Verification JSON remains server-side until validated.
-                },
-                shouldStop: () => clientGone() || clientAbort.signal.aborted,
-                signal,
-              }),
-            AUDIT_TIMEOUT_MS,
-            "Factuality verification",
-            clientAbort.signal,
-          );
-          const parsed = parseFactualityVerification({
-            raw: verificationText,
-            modelId: verifierModel.id,
-            sourceCount: responseSources.length,
-          });
-          if (parsed) {
-            const patched = applyValidatedAuditPatch(
-              fullResponse,
-              JSON.stringify({
-                note: parsed.report.summary,
-                operations: parsed.operations,
-              }),
-            );
-            if (patched.applied) {
-              fullResponse = patched.content;
-              if (!clientGone()) {
-                res.write(
-                  `data: ${JSON.stringify({ status: "revising", patch: patched.operations })}\n\n`,
-                );
-              }
-            } else if (
-              parsed.operations.length > 0 &&
-              patched.reason &&
-              !clientGone()
-            ) {
-              res.write(
-                `data: ${JSON.stringify({
-                  status: "search_warning",
-                  message: `${patched.reason} 検証結果のみ表示します。`,
-                })}\n\n`,
-              );
+        const verified = await verifySearchBackedAnswer({
+          client,
+          provider,
+          modelId,
+          auditModel,
+          question: userText,
+          answer: fullResponse,
+          sourceText: factualitySourceText,
+          sourceCount: responseSources.length,
+          signal: clientAbort.signal,
+          clientGone,
+          emit: (event) => {
+            if (!clientGone()) {
+              res.write(`data: ${JSON.stringify(event)}\n\n`);
             }
-            factuality = {
-              ...parsed.report,
-              corrected: patched.applied,
-            };
-            if (
-              parsed.report.status !== "verified" &&
-              parsed.report.claims.length > 0 &&
-              !patched.applied
-            ) {
-              const notice =
-                "\n\n> **根拠上の注意:** 上記には、取得した資料だけでは確認できない主張が含まれます。根拠チェックの詳細を確認してください。";
-              fullResponse += notice;
-              if (!clientGone()) {
-                res.write(
-                  `data: ${JSON.stringify({ content: notice, status: "revising" })}\n\n`,
-                );
-              }
-            }
-          } else {
-            factuality = unavailableFactualityReport(verifierModel.id);
-          }
-        } catch (err) {
-          if (clientAbort.signal.aborted) throw err;
-          logger.warn(
-            safeFailureFields(
-              err,
-              "chat-stream",
-              "FACTUALITY_VERIFICATION_FAILED",
-            ),
-            "Factuality verification failed; preserving the sourced answer",
-          );
-          factuality = unavailableFactualityReport(verifierModel.id);
-        }
-        if (factuality && !clientGone()) {
-          res.write(`data: ${JSON.stringify({ factuality })}\n\n`);
-        }
+          },
+          streamText: streamModelText,
+          withTimeout,
+        });
+        fullResponse = verified.content;
+        factuality = verified.factuality;
       }
 
       // A user stop aborts the shared signal, so no audit or revision work
@@ -1631,120 +1140,23 @@ export async function streamChatReply(args: {
       // must not create a durable message or generated asset.
       if (clientAbort.signal.aborted) return;
 
-      let completion:
-        | {
-            artifacts?: {
-              sourceIndex: number;
-              id: number;
-              filename: string;
-              mime: string;
-              size: number;
-            }[];
-            assets?: {
-              id: number;
-              filename: string;
-              mimeType: string;
-              size: number;
-            }[];
-            quotaExceeded?: boolean;
-          }
-        | void
-        | undefined;
-      try {
-        completion = onComplete
-          ? await onComplete({
-              content: fullResponse,
-              sources: responseSources,
-              audit,
-              factuality,
-              artifacts: extracted.artifacts,
-              generatedFiles: generatedFile ? [generatedFile] : undefined,
-              generatedAssets:
-                generatedAssets.length > 0 ? generatedAssets : undefined,
-            })
-          : undefined;
-      } catch (err) {
-        logger.error(
-          safeFailureFields(
-            err,
-            "chat-stream",
-            "CHAT_COMPLETION_PERSIST_FAILED",
-          ),
-          "Failed to persist chat completion",
-        );
-        if (!clientGone()) {
-          res.write(
-            `data: ${JSON.stringify({
-              error: "メッセージの保存に失敗しました。もう一度お試しください。",
-            })}\n\n`,
-          );
-        }
-        return;
-      }
-
-      if (completion?.quotaExceeded && !clientGone()) {
-        res.write(
-          `data: ${JSON.stringify({
-            status: "file_warning",
-            message:
-              "保存容量の上限により、一部の生成ファイルを保存できませんでした。",
-          })}\n\n`,
-        );
-      }
-
-      if (completion?.assets?.length && !clientGone()) {
-        for (const asset of completion.assets) {
-          res.write(
-            `data: ${JSON.stringify({
-              file: {
-                id: asset.id,
-                filename: asset.filename,
-                mimeType: asset.mimeType,
-                size: asset.size,
-              },
-            })}\n\n`,
-          );
-        }
-      }
-
-      if (
-        generatedAssets.length > 0 &&
-        !completion?.assets?.length &&
-        !clientGone()
-      ) {
-        const inlineAssets = generatedAssets.map((asset) => ({
-          filename: asset.filename,
-          mime: asset.mimeType,
-          size: asset.size,
-          content: `data:${asset.mimeType};base64,${asset.buffer.toString("base64")}`,
-        }));
-        res.write(`data: ${JSON.stringify({ artifacts: inlineAssets })}\n\n`);
-      }
-
-      if (extracted.artifacts.length > 0 && !clientGone()) {
-        const saved = completion?.artifacts ?? [];
-        const payload: ArtifactSsePayload[] = extracted.artifacts.map(
-          (artifact, index) => {
-            const persisted = saved.find((item) => item.sourceIndex === index);
-            const base: ArtifactSsePayload = {
-              id: persisted?.id,
-              filename: persisted?.filename ?? artifact.filename,
-              mime: persisted?.mime ?? artifact.mime,
-              size: persisted?.size ?? artifact.size,
-              downloadUrl: persisted
-                ? `/api/openai/artifacts/${persisted.id}`
-                : undefined,
-            };
-            if (includeArtifactContent) base.content = artifact.content;
-            return base;
-          },
-        );
-        res.write(`data: ${JSON.stringify({ artifacts: payload })}\n\n`);
-      }
-
-      if (!clientGone()) {
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      }
+      const completionEmitted = await persistAndEmitChatCompletion({
+        res,
+        clientGone,
+        onComplete,
+        includeArtifactContent,
+        input: {
+          content: fullResponse,
+          sources: responseSources,
+          audit,
+          factuality,
+          artifacts: extracted.artifacts,
+          generatedFiles: generatedFile ? [generatedFile] : undefined,
+          generatedAssets:
+            generatedAssets.length > 0 ? generatedAssets : undefined,
+        },
+      });
+      if (!completionEmitted) return;
     }
   } catch (err) {
     logger.error(
@@ -1754,13 +1166,15 @@ export async function streamChatReply(args: {
     if (!clientGone()) {
       res.write(`data: ${JSON.stringify({ error: publicAiError(err) })}\n\n`);
     }
+  } finally {
+    // Every early-return path (client cancellation, persistence failure, etc.)
+    // must release the keepalive timer and terminate the SSE response.
+    clearInterval(heartbeat);
+    if (!res.writableEnded) {
+      res.end();
+    }
+    if (ownsCancellation) cancellation.dispose();
   }
-
-  if (!res.writableEnded) {
-    res.end();
-  }
-  clearInterval(heartbeat);
-  if (ownsCancellation) cancellation.dispose();
 }
 
 function applyOutputTokenLimit(
@@ -1782,26 +1196,9 @@ function applyOutputTokenLimit(
   }
 }
 
-export async function streamModelText(args: {
-  client: OpenAI;
-  provider: ModelProvider;
-  modelId: string;
-  reasoningLevel: ReasoningLevel;
-  maxOutputTokens?: number;
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-  tools?: {
-    type: "function";
-    function: {
-      name: string;
-      description: string;
-      parameters: Record<string, unknown>;
-    };
-  }[];
-  onToolCalls?: (calls: SpecialistToolCall[]) => void;
-  onDelta: (text: string, kind: "content" | "reasoning") => void;
-  shouldStop: () => boolean;
-  signal?: AbortSignal;
-}): Promise<string> {
+export async function streamModelText(
+  args: StreamModelTextInput,
+): Promise<string> {
   const streamOptions: Parameters<
     typeof args.client.chat.completions.create
   >[0] = {

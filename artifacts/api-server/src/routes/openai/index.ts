@@ -85,6 +85,7 @@ import {
 import { logSafeHttpError } from "../../lib/http-error-observability";
 import { publicAiError } from "../../lib/public-error";
 import { parseStoredFactuality } from "../../lib/factuality";
+import { deleteAllMemories } from "../../lib/llm-memory-store";
 
 const router = Router();
 
@@ -1025,6 +1026,16 @@ router.delete("/openai/conversations", requireAuth, async (req, res) => {
   }
 });
 
+router.delete("/openai/memories", requireAuth, async (req, res) => {
+  try {
+    await deleteAllMemories(getUserId(req));
+    res.status(204).send();
+  } catch (err) {
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
+    res.status(500).json({ error: "Failed to wipe memories" });
+  }
+});
+
 router.delete(
   "/openai/conversations/:conversationId",
   requireAuth,
@@ -1246,6 +1257,7 @@ router.post(
         conversationId,
         requestedFileFormat,
         cancellation,
+        memory: { enabled: true, userId },
         publicAiError,
         onComplete: async ({
           content,
@@ -1436,6 +1448,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       translationMode,
       includeArtifactContent: true,
       cancellation,
+      memory: { enabled: false },
       publicAiError,
     });
   } catch (err) {

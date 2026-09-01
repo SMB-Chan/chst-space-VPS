@@ -84,12 +84,19 @@ export function SettingsPage() {
     setWiping(true);
     setWipeError(null);
     try {
-      const res = await fetch(`${BASE}/api/openai/conversations`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok && res.status !== 204) {
-        throw new Error(`削除に失敗しました (HTTP ${res.status})`);
+      const responses = await Promise.all(
+        ["conversations", "memories"].map((resource) =>
+          fetch(`${BASE}/api/openai/${resource}`, {
+            method: "DELETE",
+            credentials: "include",
+          }),
+        ),
+      );
+      const failed = responses.find(
+        (response) => !response.ok && response.status !== 204,
+      );
+      if (failed) {
+        throw new Error(`削除に失敗しました (HTTP ${failed.status})`);
       }
       await queryClient.invalidateQueries({
         queryKey: getListOpenaiConversationsQueryKey(),
@@ -232,12 +239,12 @@ export function SettingsPage() {
 
         <SettingsSection
           title="プライベートセッション"
-          description="ナビゲーションの「プライベート」から始める会話はサーバーに保存されません。タブを閉じると履歴は消えます。通常の会話はアカウントに紐づいて残ります。"
+          description="ナビゲーションの「プライベート」から始める会話はサーバーに保存されず、長期メモリの参照・保存も行いません。タブを閉じると履歴は消えます。通常の会話はアカウントに紐づいて残ります。"
         />
 
         <SettingsSection
-          title="メモリの消去"
-          description="このアカウントに保存されている会話とメッセージをすべて削除します。元に戻せません。既定モデルの設定は端末に残ります。"
+          title="保存データの消去"
+          description="このアカウントに保存されている会話、メッセージ、長期メモリをすべて削除します。元に戻せません。既定モデルの設定は端末に残ります。"
           destructive
         >
           <Button
@@ -246,11 +253,11 @@ export function SettingsPage() {
             onClick={() => setWipeOpen(true)}
           >
             <Trash2 className="h-4 w-4" />
-            すべての会話を削除
+            会話と長期メモリを削除
           </Button>
           {wipeDone && (
             <p className="text-xs text-[var(--m3-on-surface-variant)]">
-              会話を削除しました。
+              会話と長期メモリを削除しました。
             </p>
           )}
           {wipeError && (
@@ -263,10 +270,10 @@ export function SettingsPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              保存済みの会話をすべて削除しますか？
+              保存データをすべて削除しますか？
             </AlertDialogTitle>
             <AlertDialogDescription>
-              このアカウントの履歴とメッセージが消えます。この操作は取り消せません。
+              このアカウントの履歴、メッセージ、長期メモリが消えます。この操作は取り消せません。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

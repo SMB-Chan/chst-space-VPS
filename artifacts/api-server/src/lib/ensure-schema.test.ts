@@ -3,9 +3,11 @@ import {
   ENSURE_AI_USAGE_SCHEMA_SQL,
   ENSURE_ASSETS_SCHEMA_SQL,
   ENSURE_MESSAGES_SCHEMA_SQL,
+  ENSURE_LLM_MEMORIES_SCHEMA_SQL,
   ensureAiUsageSchema,
   ensureAssetsSchema,
   ensureMessageSchema,
+  ensureLlmMemoriesSchema,
 } from "./ensure-schema";
 
 describe("ensureMessageSchema", () => {
@@ -35,6 +37,27 @@ describe("ensureMessageSchema", () => {
     await ensureMessageSchema(query);
     expect(query).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(ENSURE_MESSAGES_SCHEMA_SQL);
+  });
+});
+
+describe("ensureLlmMemoriesSchema", () => {
+  it("creates a user-scoped PostgreSQL memory table and indexes", () => {
+    expect(ENSURE_LLM_MEMORIES_SCHEMA_SQL).toContain(
+      "CREATE TABLE IF NOT EXISTS llm_memories",
+    );
+    expect(ENSURE_LLM_MEMORIES_SCHEMA_SQL).toContain("user_id text NOT NULL");
+    expect(ENSURE_LLM_MEMORIES_SCHEMA_SQL).toContain(
+      "llm_memories_user_topic_idx",
+    );
+    expect(ENSURE_LLM_MEMORIES_SCHEMA_SQL).toContain(
+      "llm_memories_user_active_idx",
+    );
+  });
+
+  it("runs the SQL through the provided query function", async () => {
+    const query = vi.fn().mockResolvedValue(undefined);
+    await ensureLlmMemoriesSchema(query);
+    expect(query).toHaveBeenCalledWith(ENSURE_LLM_MEMORIES_SCHEMA_SQL);
   });
 });
 

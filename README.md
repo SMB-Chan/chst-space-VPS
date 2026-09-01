@@ -15,8 +15,8 @@
 - 文書・音声の解析: PDF / ZIP / Word（docx）/ Excel（xlsx）/ PowerPoint（pptx）と音声（MP3 / WAV / M4A / OGG / FLAC / WebM）をサーバー側で決定論的にテキスト抽出（音声は設定済みプロバイダで文字起こし）して会話に渡します。ファイル由来のコードは実行しません
 - 添付制限: 最大5件、画像・文書・音声1件10MB、テキスト1件1MB、テキスト合計2MB、全添付合計20MB（SVG・旧形式 .doc/.xls/.ppt 非対応）
 - 長期会話の過去画像は最新の履歴を優先し、合計10MiB・最大4枚まで再送（現在のユーザーメッセージ画像はこの履歴枠の対象外）
-- 会話履歴の保存・削除、メモリ一括消去
-- プライベートセッション（サーバーに残さない。PDF / Office生成は通常会話のみ）
+- 会話履歴とユーザー単位の長期メモリをPostgreSQLへ保存し、設定画面から一括消去
+- プライベートセッション（サーバーに残さず、長期メモリも参照・更新しない。PDF / Office生成は通常会話のみ）
 - PWA（ホーム画面追加）と既定モデルの端末保存
 - 金融の質問で「金融分析」スキルを自動適用（最新データ検索 + 分析フォーマット）
 - 中立監査モード（別モデルが点検し、使用中のモデルが最終報告へ書き直す）
@@ -27,13 +27,13 @@
 
 ## スタック
 
-| 層 | 技術 |
-| --- | --- |
-| フロント | Vite, React 19, wouter, TanStack Query, Clerk, Tailwind |
-| API | Express 5 |
-| DB | PostgreSQL + Drizzle ORM |
-| 検証 | Zod, drizzle-zod |
-| ワークスペース | pnpm workspaces, TypeScript 5.9 |
+| 層             | 技術                                                    |
+| -------------- | ------------------------------------------------------- |
+| フロント       | Vite, React 19, wouter, TanStack Query, Clerk, Tailwind |
+| API            | Express 5                                               |
+| DB             | PostgreSQL + Drizzle ORM                                |
+| 検証           | Zod, drizzle-zod                                        |
+| ワークスペース | pnpm workspaces, TypeScript 6.0                         |
 
 ## 構成
 
@@ -96,7 +96,7 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - `DASHSCOPE_API_KEY` — Qwen 等を使う場合（任意）
 - `ALIBABA_SPECIALIST_API_KEY` / `ALIBABA_SPECIALIST_WORKSPACE_ID` — 通常のAlibaba Model Studioワークスペース資格情報（任意。画像生成・画像編集・Qwen Audio TTS／Realtimeのカスタムバックエンド専門能力用。Token Plan Personal/Teamキーは使用せず、未設定時はcatalog-only）
 - `ALIBABA_SPECIALIST_HTTP_BASE_URL` / `ALIBABA_SPECIALIST_TTS_WS_URL` / `ALIBABA_SPECIALIST_REALTIME_WS_URL` — 専門能力用の許可済みHTTPS/WSSエンドポイント（任意。詳細は[`.env.example`](./.env.example)）
-- `AI_REQUESTS_PER_MINUTE` — ユーザー単位・PostgreSQL共有のAIリクエスト上限（既定20/60秒、0で無効）
+- `AI_REQUESTS_PER_MINUTE` — チャット・メディア生成・リアルタイムセッション発行に対する、ユーザー単位・PostgreSQL共有のAIリクエスト上限（既定20/60秒、0で無効）
 - `AI_MAX_CONCURRENT_REQUESTS` — ユーザー単位・全Autoscaleインスタンス共有の同時AI生成上限（既定2、0で無効）
 - `AI_CONCURRENCY_LEASE_TTL_MS` — 同時実行leaseの失効時間（既定90000ms。実行中はheartbeat更新）
 - `TRANSCRIBE_MODEL` — 音声添付の文字起こしモデル（任意。既定は `gpt-4o-mini-transcribe`、利用不可なら `whisper-1` へ自動フォールバックし、DashScope 設定時は paraformer-v2 も試行）
@@ -109,6 +109,8 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - ZIPはセントラルディレクトリ事前検査と展開バイト数の実測で二重に上限をかけ（計64MB・1000エントリ・テキスト抽出は50件/各4MB）、パス走査・絶対パス・入れ子アーカイブは抽出対象から除外します。
 - 大容量JSONパーサーはチャット送信経路だけに限定し、認証とPostgreSQL共有AI利用量ガードを先に実行します。
 - AI利用量ガードは認証ユーザー単位でPostgreSQLを共有状態として使い、固定request windowと期限付きconcurrency leaseを全Autoscaleインスタンス間で共有します。DB側の利用量判定が利用不能な場合はAI生成をfail-closedします。
+- 長期メモリの全操作は認証ユーザーIDを必須とし、PostgreSQL上でも`user_id`条件で分離します。プライベートセッションではメモリツール自体をモデルへ公開しません。会話へ渡すメモリは、内部の指示に従わない「信頼できない参考データ」として明示的に包みます。
+- 旧`data/llm-memory/memories.db`は所有ユーザーを特定できないため自動移行せず、新実装からは読み込みません。既存環境ではバックアップ要否を判断したうえで、運用者が安全に廃棄してください。
 - Web取得はDNS再束縛を含むSSRF防御を行い、展開後の本文をページ1MB・検索結果2MBで打ち切ります。
 - 現行の画像添付は互換性のため会話メッセージ内へdata URLとして保存されます。モデルへの過去画像再送は最新10MiB・4枚に制限しています。より大規模な添付保存が必要になった場合は参照型ストレージへの移行を検討します。
 - PDF / Office 等の生成binaryは現在PostgreSQLへtransactionalに保存し、既定50MiB/userの共通生成ファイルquotaで制限しています。保持・削除・object storageへの移行条件は [`docs/generated-binary-storage-policy.md`](./docs/generated-binary-storage-policy.md) を参照してください。
