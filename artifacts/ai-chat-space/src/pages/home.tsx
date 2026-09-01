@@ -115,11 +115,11 @@ export function HomePage() {
             </div>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-[var(--m3-on-surface-variant)] lg:justify-start">
               <span className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                <ShieldCheck className="h-3.5 w-3.5 [color:var(--app-status-success)]" />
                 会話データを安全に保存
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Globe2 className="h-3.5 w-3.5 text-sky-500" />
+                <Globe2 className="h-3.5 w-3.5 [color:var(--app-status-info)]" />
                 出典つきWebリサーチ
               </span>
             </div>
@@ -133,7 +133,7 @@ export function HomePage() {
             >
               <div className="flex items-center justify-between border-b border-[var(--m3-outline-variant)] px-4 py-3">
                 <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  <div className="h-2.5 w-2.5 rounded-[var(--m3-shape-full)] [background:var(--app-status-success)]" />
                   <span className="text-xs font-medium">Research session</span>
                 </div>
                 <Chip asChild>

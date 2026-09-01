@@ -261,10 +261,11 @@ function useTokenPlanQuotaHint(enabled: boolean): TokenPlanQuotaHint | null {
 }
 
 function quotaTone(remaining: number): string {
-  if (remaining <= 20) return "border-red-500/40 bg-red-500/10 text-red-400";
+  if (remaining <= 20)
+    return "[border-color:var(--m3-error)] [background:var(--m3-error-container)] [color:var(--m3-on-error-container)]";
   if (remaining <= 35)
-    return "border-amber-500/40 bg-amber-500/10 text-amber-400";
-  return "border-emerald-500/35 bg-emerald-500/10 text-emerald-400";
+    return "[border-color:var(--app-status-warning)] [background:var(--app-status-warning-container)] [color:var(--app-status-warning)]";
+  return "[border-color:var(--app-status-success)] [background:var(--app-status-success-container)] [color:var(--app-status-success)]";
 }
 
 function formatQuotaPercent(value: number): string {
@@ -358,10 +359,10 @@ export function ModelSelector({
           size="sm"
           data-testid="button-model-selector"
           className={cn(
-            "h-8 gap-1.5 px-3 rounded-full text-xs font-medium transition-all duration-200 backdrop-blur-xl",
+            "h-8 gap-1.5 px-3 rounded-[var(--m3-shape-full)] text-xs font-medium transition-all duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
             "border border-border/60 bg-card/50 text-muted-foreground hover:text-foreground hover:bg-card/80",
             current.provider === "dashscope" &&
-              "text-amber-400/80 border-amber-500/30 bg-amber-500/8 hover:text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/12",
+              "[color:var(--app-status-accent)] [border-color:var(--app-status-accent)] [background:var(--app-status-accent-container)] hover:[color:var(--app-status-accent)] hover:[border-color:var(--app-status-accent)] hover:[background:var(--app-status-accent-container)]",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >
@@ -371,7 +372,7 @@ export function ModelSelector({
             <span
               title={quota ? quotaTitle(quota) : undefined}
               className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[10px] leading-none tabular-nums",
+                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] leading-none tabular-nums",
                 quotaTone(triggerQuota),
               )}
             >
@@ -396,7 +397,7 @@ export function ModelSelector({
             onClick={() => onSelect(model.id)}
             data-testid={`model-option-${model.id}`}
             className={cn(
-              "flex items-center justify-between cursor-pointer rounded-md",
+              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]"
               selectedModel === model.id && "bg-primary/10 text-primary",
             )}
           >
@@ -409,13 +410,13 @@ export function ModelSelector({
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuLabel className="flex items-center gap-2 text-xs text-amber-400/70 font-normal">
+        <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
           <span>{PROVIDER_LABELS["dashscope"]}</span>
           {quota?.weeklyRemainingPercent !== undefined ? (
             <span
               title={quotaTitle(quota)}
               className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[10px] tabular-nums",
+                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums"
                 quotaTone(quota.weeklyRemainingPercent),
               )}
             >
@@ -426,7 +427,7 @@ export function ModelSelector({
             <span
               title={quotaTitle(quota)}
               className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[10px] tabular-nums",
+                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums"
                 quotaTone(quota.fiveHourRemainingPercent),
               )}
             >
@@ -440,8 +441,9 @@ export function ModelSelector({
             onClick={() => onSelect(model.id)}
             data-testid={`model-option-${model.id}`}
             className={cn(
-              "flex items-center justify-between cursor-pointer rounded-md",
-              selectedModel === model.id && "bg-amber-500/10 text-amber-400",
+              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]"
+              selectedModel === model.id &&
+                "[background:var(--app-status-accent-container)] [color:var(--app-status-accent)]",
             )}
           >
             <span className="font-medium">{model.label}</span>

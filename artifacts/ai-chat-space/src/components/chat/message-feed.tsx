@@ -6,6 +6,7 @@ import {
   getGetOpenaiAssetUrl,
 } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/design-system/surface";
 import { SafeMarkdown } from "./safe-markdown";
 import { SourceCards } from "./source-cards";
 import {
@@ -159,19 +160,20 @@ function VideoJobCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border px-4 py-4 shadow-sm",
+        surfaceVariants({ tone: "outlined", shape: "large" }),
+        "px-4 py-4 shadow-[var(--m3-elevation-1)]",
         busy
-          ? "border-violet-500/30 bg-violet-500/5"
+          ? "[background:var(--app-status-accent-container)] [border-color:var(--app-status-accent)]"
           : job.status === "FAILED" || job.status === "UNKNOWN"
-            ? "border-amber-500/30 bg-amber-500/5"
-            : "border-border bg-card",
+            ? "[background:var(--app-status-warning-container)] [border-color:var(--app-status-warning)]"
+            : "",
       )}
     >
       <div className="flex items-center gap-2 text-sm">
         {busy ? (
-          <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
+          <Loader2 className="h-4 w-4 animate-spin [color:var(--app-status-accent)]" />
         ) : (
-          <Video className="h-4 w-4 text-violet-500" />
+          <Video className="h-4 w-4 [color:var(--app-status-accent)]" />
         )}
         <span className="font-medium">HappyHorse 動画生成</span>
         <span className="text-xs text-muted-foreground">
@@ -181,7 +183,7 @@ function VideoJobCard({
           <button
             type="button"
             onClick={onCancel}
-            className="ml-auto inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/20"
+            className="ml-auto inline-flex items-center gap-1 rounded-[var(--m3-shape-full)] border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/20"
           >
             <Ban className="h-3 w-3" /> キャンセル
           </button>
@@ -197,7 +199,7 @@ function VideoJobCard({
         </p>
       ) : null}
       {job.failureMessage ? (
-        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+        <p className="mt-2 text-xs [color:var(--app-status-warning)]">
           {job.failureMessage}
         </p>
       ) : null}
@@ -207,13 +209,16 @@ function VideoJobCard({
             controls
             preload="metadata"
             src={asset.downloadUrl || getGetOpenaiAssetUrl(asset.id)}
-            className="w-full max-w-2xl rounded-xl border border-border bg-black"
+            className="w-full max-w-2xl rounded-[var(--m3-shape-lg)] border border-[var(--m3-outline-variant)] bg-black"
             aria-label={`生成動画 ${asset.filename}`}
           />
           <a
             href={asset.downloadUrl || getGetOpenaiAssetUrl(asset.id)}
             download={asset.filename}
-            className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-primary/40 hover:bg-primary/5"
+            className={cn(
+              surfaceVariants({ tone: "outlined", shape: "small" }),
+              "m3-focus-ring inline-flex w-fit items-center gap-2 px-3 py-2 text-sm transition-colors hover:[background:var(--m3-surface-container-high)] hover:[border-color:var(--m3-outline)]",
+            )}
           >
             <Download className="h-4 w-4 text-primary" />
             <span className="max-w-[240px] truncate">{asset.filename}</span>
@@ -249,10 +254,11 @@ function SpecialistProgress({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+        surfaceVariants({ tone: "outlined", shape: "small" }),
+        "flex items-center gap-2 px-3 py-2 text-xs",
         failed
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-          : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+          ? "[background:var(--app-status-warning-container)] [border-color:var(--app-status-warning)] [color:var(--app-status-warning)]"
+          : "[background:var(--app-status-accent-container)] [border-color:var(--app-status-accent)] [color:var(--app-status-accent)]",
       )}
     >
       {failed || completed ? (
@@ -269,9 +275,9 @@ function SpecialistProgress({
 function PhaseDots() {
   return (
     <span className="inline-flex items-center gap-0.5" aria-hidden>
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.3s]" />
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
+      <span className="w-1.5 h-1.5 rounded-[var(--m3-shape-full)] bg-current animate-bounce [animation-delay:-0.3s]" />
+      <span className="w-1.5 h-1.5 rounded-[var(--m3-shape-full)] bg-current animate-bounce [animation-delay:-0.15s]" />
+      <span className="w-1.5 h-1.5 rounded-[var(--m3-shape-full)] bg-current animate-bounce" />
     </span>
   );
 }
@@ -288,11 +294,16 @@ function AuditCard({
   const [open, setOpen] = useState(!!live);
   if (!content && !live) return null;
   return (
-    <div className="w-full rounded-xl border border-sky-500/25 bg-sky-500/5 overflow-hidden">
+    <div
+      className={cn(
+        surfaceVariants({ tone: "outlined", shape: "medium" }),
+        "w-full overflow-hidden [background:var(--app-status-info-container)] [border-color:var(--app-status-info)]",
+      )}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-sky-300/90 hover:bg-sky-500/10"
+        className="m3-focus-ring flex w-full items-center gap-2 px-3 py-2 text-xs [color:var(--app-status-info)] transition-colors hover:bg-foreground/[0.04]"
       >
         <span className="font-medium">{live ? "監査中" : "点検メモ"}</span>
         {modelId ? <span className="opacity-70">{modelId}</span> : null}
@@ -325,7 +336,7 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
             <img
               src={artifact.downloadUrl}
               alt={artifact.filename}
-              className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain"
+              className="max-h-80 w-auto max-w-full rounded-[var(--m3-shape-lg)] border border-[var(--m3-outline-variant)] object-contain"
             />
           ) : null}
           {artifact.mime.startsWith("audio/") && artifact.downloadUrl ? (
@@ -341,13 +352,14 @@ function ArtifactCards({ artifacts }: { artifacts: ChatArtifact[] }) {
             href={artifact.downloadUrl}
             download={artifact.filename}
             className={cn(
-              "flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-colors",
+              surfaceVariants({ tone: "outlined", shape: "medium" }),
+              "flex items-center gap-3 px-3 py-3 shadow-[var(--m3-elevation-1)] transition-colors",
               artifact.downloadUrl
                 ? "hover:border-primary/40 hover:bg-primary/5"
                 : "opacity-70 pointer-events-none",
             )}
           >
-            <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--m3-shape-sm)] [background:var(--m3-primary-container)] [color:var(--m3-on-primary-container)]">
               {artifact.mime.startsWith("audio/") ? (
                 <Volume2 className="w-[1.125rem] h-[1.125rem]" />
               ) : (
@@ -386,7 +398,7 @@ function FileDownloadButton({
         <img
           src={downloadUrl}
           alt={filename ?? "生成画像"}
-          className="max-h-80 w-auto max-w-full rounded-xl border border-border object-contain"
+          className="max-h-80 w-auto max-w-full rounded-[var(--m3-shape-lg)] border border-[var(--m3-outline-variant)] object-contain"
         />
       ) : null}
       {mimeType?.startsWith("audio/") ? (
@@ -401,7 +413,10 @@ function FileDownloadButton({
       <a
         href={downloadUrl}
         download={filename}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm text-foreground shadow-sm hover:bg-primary/5 hover:border-primary/30 transition-colors"
+        className={cn(
+          surfaceVariants({ tone: "outlined", shape: "small" }),
+          "m3-focus-ring inline-flex items-center gap-2 px-3 py-2 text-sm shadow-[var(--m3-elevation-1)] transition-colors hover:[background:var(--m3-surface-container-high)] hover:[border-color:var(--m3-outline)]",
+        )}
       >
         {mimeType?.startsWith("audio/") ? (
           <Volume2 className="w-4 h-4 text-primary" />
@@ -456,8 +471,8 @@ function GenerationBadge({
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
       <span className="relative flex h-2 w-2">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-[var(--m3-shape-full)] bg-primary opacity-60" />
+        <span className="relative inline-flex rounded-[var(--m3-shape-full)] h-2 w-2 bg-primary" />
       </span>
       <span>{label}</span>
       <PhaseDots />
@@ -534,7 +549,7 @@ export function MessageFeed({
               block: "end",
             });
           }}
-          className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-full border border-border/80 bg-card/90 px-3 py-1.5 text-xs text-foreground shadow-lg backdrop-blur-xl"
+          className="m3-floating-surface m3-focus-ring sticky top-2 z-10 mx-auto flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-3 py-1.5 text-xs"
         >
           <ArrowDown className="h-3.5 w-3.5" /> 最新へ戻る
         </button>
@@ -599,7 +614,7 @@ export function MessageFeed({
                     </AvatarFallback>
                   </Avatar>
                 ) : (
-                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/20 bg-gradient-to-br from-primary/15 to-sky-500/10 shadow-sm">
+                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/20 [background:var(--m3-primary-container)] shadow-sm">
                     <AvatarFallback className="bg-transparent text-primary">
                       <Sparkles className="w-4 h-4" />
                     </AvatarFallback>
@@ -624,7 +639,7 @@ export function MessageFeed({
                   <span>{isUser ? "You" : "AI Space"}</span>
                   {!isUser && message.modelId ? (
                     <>
-                      <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
+                      <span className="h-1 w-1 rounded-[var(--m3-shape-full)] bg-muted-foreground/30" />
                       <span className="normal-case tracking-normal text-muted-foreground/55">
                         {getModelLabel(message.modelId)}
                       </span>
@@ -636,7 +651,10 @@ export function MessageFeed({
                     {attachments.map((attachment, index) => (
                       <div
                         key={`${attachment.name}-${index}`}
-                        className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-card/60 border border-border/60 text-sm text-muted-foreground shadow-sm backdrop-blur-xl max-w-full"
+                        className={cn(
+                          surfaceVariants({ tone: "low", shape: "full" }),
+                          "flex max-w-full items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground shadow-[var(--m3-elevation-0)]",
+                        )}
                       >
                         <Paperclip className="w-4 h-4 text-primary shrink-0" />
                         <span className="font-medium text-foreground truncate">
@@ -650,7 +668,12 @@ export function MessageFeed({
                 {!isUser &&
                 message.id === STREAMING_ASSISTANT_ID &&
                 !displayContent ? (
-                  <div className="surface-panel rounded-[1.35rem] rounded-tl-md px-5 py-4">
+                  <div
+                    className={cn(
+                      surfaceVariants({ tone: "container", shape: "large" }),
+                      "rounded-tl-[var(--m3-shape-xs)] px-5 py-4",
+                    )}
+                  >
                     <GenerationBadge
                       phase={streamingPhase}
                       researchStep={researchStep}
@@ -659,10 +682,10 @@ export function MessageFeed({
                 ) : (
                   <div
                     className={cn(
-                      "break-words rounded-[1.35rem] px-4 py-3 text-[15px] leading-relaxed [overflow-wrap:anywhere] md:px-5 md:py-4",
+                      "break-words rounded-[var(--m3-shape-lg)] px-4 py-3 text-[15px] leading-relaxed [overflow-wrap:anywhere] md:px-5 md:py-4",
                       isUser
-                        ? "rounded-tr-md bg-primary text-primary-foreground font-sans font-normal shadow-lg shadow-primary/15"
-                        : "surface-panel rounded-tl-md font-sans text-foreground prose-p:leading-loose",
+                        ? "rounded-tr-[var(--m3-shape-xs)] bg-primary text-primary-foreground font-sans font-normal shadow-[var(--m3-elevation-2)]"
+                        : "m3-surface-container rounded-tl-[var(--m3-shape-xs)] font-sans text-foreground prose-p:leading-loose",
                     )}
                   >
                     {isUser ? (
@@ -718,7 +741,7 @@ export function MessageFeed({
                     <button
                       type="button"
                       onClick={onStop}
-                      className="inline-flex items-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
+                      className="inline-flex items-center gap-2 rounded-[var(--m3-shape-full)] border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
                       aria-label="この回答を停止"
                     >
                       <Square className="h-3 w-3 fill-current" /> 停止
@@ -728,13 +751,13 @@ export function MessageFeed({
                 {!isUser &&
                   message.id === STREAMING_ASSISTANT_ID &&
                   streamingWarning && (
-                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <div className="flex items-start gap-2 rounded-[var(--m3-shape-sm)] border [border-color:var(--app-status-warning)] [background:var(--app-status-warning-container)] px-3 py-2 text-xs [color:var(--app-status-warning)]">
                       <span className="shrink-0">⚠️</span>
                       <span className="flex-1">{streamingWarning}</span>
                       <button
                         type="button"
                         onClick={onDismissWarning}
-                        className="shrink-0 rounded p-0.5 hover:bg-amber-500/20"
+                        className="m3-focus-ring shrink-0 rounded-[var(--m3-shape-xs)] p-0.5 transition-colors hover:bg-foreground/[0.08]"
                         aria-label="警告を閉じる"
                       >
                         <span aria-hidden>×</span>
@@ -831,7 +854,7 @@ export function MessageFeed({
                           setCopiedId(message.id);
                           setTimeout(() => setCopiedId(null), 2000);
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label="メッセージをコピー"
                       >
                         {copiedId === message.id ? (
@@ -852,7 +875,7 @@ export function MessageFeed({
                           <button
                             type="button"
                             onClick={onRegenerate}
-                            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             aria-label="回答を再生成"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />

@@ -480,7 +480,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   {location === "/private" ? (
-                    <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+                    <LockKeyhole className="h-3.5 w-3.5 shrink-0 [color:var(--app-status-accent)]" />
                   ) : (
                     <MessageSquareText className="h-3.5 w-3.5 shrink-0 text-[var(--m3-primary)]" />
                   )}
@@ -495,8 +495,8 @@ export function ChatLayout({ children }: ChatLayoutProps) {
             </div>
             <div className="hidden items-center gap-2 text-[10px] text-[var(--m3-on-surface-variant)] sm:flex">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-35" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-[var(--m3-shape-full)] [background:var(--app-status-success)] opacity-35" />
+                <span className="relative inline-flex h-2 w-2 rounded-[var(--m3-shape-full)] [background:var(--app-status-success)]" />
               </span>
               Ready
             </div>
