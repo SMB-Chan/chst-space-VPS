@@ -321,6 +321,7 @@ describe("model stream recovery", () => {
         provider: "dashscope",
         modelId,
         reasoningLevel: "medium",
+        maxOutputTokens: 2048,
         messages: [{ role: "user", content: "market outlook" }],
         onDelta: () => undefined,
         shouldStop: () => false,
@@ -328,6 +329,7 @@ describe("model stream recovery", () => {
 
       expect(create).toHaveBeenCalledTimes(2);
       expect(sentOptions[1]).toMatchObject({
+        max_tokens: 2048,
         incremental_output: true,
         enable_thinking: false,
       });

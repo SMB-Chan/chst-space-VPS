@@ -66,6 +66,9 @@ import {
 } from "./capability-broker";
 
 const AUDIT_TIMEOUT_MS = 120_000;
+const AUDIT_MAX_OUTPUT_TOKENS = 2_048;
+const AUDIT_REASONING_MAX_OUTPUT_TOKENS = 4_096;
+const AUDIT_IMAGE_TRANSCRIPT_MAX_CHARS = 2_500;
 const FILE_GENERATION_TIMEOUT_MS = 300_000;
 const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
@@ -1153,7 +1156,7 @@ export async function streamChatReply(args: {
                 }
               }
               auditUserContent = imageTranscript
-                ? `${auditUserText}\n\n添付画像の内容（画像認識モデルによる転記）:\n${imageTranscript.slice(0, 6000)}`
+                ? `${auditUserText}\n\n添付画像の内容（画像認識モデルによる転記）:\n${imageTranscript.slice(0, AUDIT_IMAGE_TRANSCRIPT_MAX_CHARS)}`
                 : `${auditUserText}\n\n（画像添付が${auditImageUrls.length}件ありますが、画像の読み取りに失敗したため監査対象外です。）`;
             }
           }
@@ -1164,6 +1167,10 @@ export async function streamChatReply(args: {
                 provider: auditor.provider,
                 modelId: auditModel.id,
                 reasoningLevel: auditReasoningLevel,
+                maxOutputTokens:
+                  auditReasoningLevel === "off"
+                    ? AUDIT_MAX_OUTPUT_TOKENS
+                    : AUDIT_REASONING_MAX_OUTPUT_TOKENS,
                 messages: [
                   { role: "system", content: AUDIT_SYSTEM_PROMPT },
                   {
@@ -1207,6 +1214,14 @@ export async function streamChatReply(args: {
                 })}\n\n`,
               );
             }
+          } else if (!clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({
+                status: "search_warning",
+                message:
+                  "監査モデルが有効な差分を返さなかったため、初稿を保持しました。",
+              })}\n\n`,
+            );
           }
         } catch (err) {
           logger.warn(
@@ -1418,11 +1433,31 @@ export async function streamChatReply(args: {
   if (ownsCancellation) cancellation.dispose();
 }
 
+function applyOutputTokenLimit(
+  options: Record<string, unknown>,
+  provider: ModelProvider,
+  maxOutputTokens: number | undefined,
+): void {
+  if (
+    maxOutputTokens === undefined ||
+    !Number.isSafeInteger(maxOutputTokens) ||
+    maxOutputTokens <= 0
+  ) {
+    return;
+  }
+  if (provider === "openai") {
+    options.max_completion_tokens = maxOutputTokens;
+  } else {
+    options.max_tokens = maxOutputTokens;
+  }
+}
+
 export async function streamModelText(args: {
   client: OpenAI;
   provider: ModelProvider;
   modelId: string;
   reasoningLevel: ReasoningLevel;
+  maxOutputTokens?: number;
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   tools?: {
     type: "function";
@@ -1450,6 +1485,11 @@ export async function streamModelText(args: {
     args.modelId,
     args.provider,
     args.reasoningLevel,
+  );
+  applyOutputTokenLimit(
+    streamOptions as unknown as Record<string, unknown>,
+    args.provider,
+    args.maxOutputTokens,
   );
   applyStreamingToolParams(
     streamOptions as unknown as Record<string, unknown>,
@@ -1503,6 +1543,11 @@ export async function streamModelText(args: {
         applySafeGenerationParams(
           streamOptions as unknown as Record<string, unknown>,
           args.provider,
+        );
+        applyOutputTokenLimit(
+          streamOptions as unknown as Record<string, unknown>,
+          args.provider,
+          args.maxOutputTokens,
         );
         applyStreamingToolParams(
           streamOptions as unknown as Record<string, unknown>,
@@ -1597,6 +1642,11 @@ export async function streamModelText(args: {
         applyNonReasoningGenerationParams(
           streamOptions as unknown as Record<string, unknown>,
           args.provider,
+        );
+        applyOutputTokenLimit(
+          streamOptions as unknown as Record<string, unknown>,
+          args.provider,
+          args.maxOutputTokens,
         );
         // If a model completed with no text (including an invented or
         // malformed tool call), the final attempt must prioritize a visible

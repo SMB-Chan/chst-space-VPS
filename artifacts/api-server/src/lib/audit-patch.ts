@@ -8,12 +8,12 @@ export type AuditPatch = {
   operations: AuditPatchOperation[];
 };
 
-const MAX_OPERATIONS = 8;
-const MAX_FIND_CHARS = 2000;
-const MAX_REPLACEMENT_CHARS = 4000;
-const MAX_TOTAL_REPLACEMENT_CHARS = 8000;
+const MAX_OPERATIONS = 4;
+const MAX_FIND_CHARS = 1000;
+const MAX_REPLACEMENT_CHARS = 2000;
+const MAX_TOTAL_REPLACEMENT_CHARS = 4000;
 const MAX_FINAL_CHARS = 20_000;
-const MAX_NOTE_CHARS = 2000;
+const MAX_NOTE_CHARS = 800;
 
 function unwrapJson(raw: string): string {
   const trimmed = raw.trim();
@@ -154,6 +154,15 @@ export function applyValidatedAuditPatch(
       content.slice(0, operation.start) +
       operation.replacement +
       content.slice(operation.end);
+  }
+  const minimumUsefulChars = Math.max(1, Math.ceil(draft.trim().length * 0.25));
+  if (content.trim().length < minimumUsefulChars) {
+    return {
+      content: draft,
+      note,
+      applied: false,
+      reason: "監査パッチで回答が実質的に空になるため拒否しました。",
+    };
   }
   const operations = located.map(({ find, replacement }) => ({
     find,

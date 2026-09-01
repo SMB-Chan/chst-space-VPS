@@ -1,9 +1,9 @@
 export type ClientPatchOperation = { find: string; replacement: string };
 
-const MAX_OPERATIONS = 8;
-const MAX_FIND_CHARS = 2000;
-const MAX_REPLACEMENT_CHARS = 4000;
-const MAX_TOTAL_REPLACEMENT_CHARS = 8000;
+const MAX_OPERATIONS = 4;
+const MAX_FIND_CHARS = 1000;
+const MAX_REPLACEMENT_CHARS = 2000;
+const MAX_TOTAL_REPLACEMENT_CHARS = 4000;
 const MAX_FINAL_CHARS = 20_000;
 
 export function applyClientPatch(
@@ -58,5 +58,7 @@ export function applyClientPatch(
       operation.replacement +
       result.slice(operation.end);
   }
+  const minimumUsefulChars = Math.max(1, Math.ceil(draft.trim().length * 0.25));
+  if (result.trim().length < minimumUsefulChars) return null;
   return result;
 }

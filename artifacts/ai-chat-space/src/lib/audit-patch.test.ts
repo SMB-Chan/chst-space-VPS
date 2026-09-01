@@ -48,4 +48,15 @@ describe("applyClientPatch", () => {
       ]),
     ).toBeNull();
   });
+
+  it("rejects a patch that would erase the visible answer", () => {
+    const draft = "短い初稿ですが、ユーザーに見せる有効な回答です。";
+    expect(
+      applyClientPatch(draft, [{ find: draft, replacement: "" }]),
+    ).toBeNull();
+    const longDraft = "a".repeat(1_000);
+    expect(
+      applyClientPatch(longDraft, [{ find: longDraft, replacement: "short" }]),
+    ).toBeNull();
+  });
 });
