@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { registerServiceWorker } from "./pwa";
 
 import "./index.css";
+import "./design-system/tokens.css";
 
 const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, "");
 if (baseUrl) {
