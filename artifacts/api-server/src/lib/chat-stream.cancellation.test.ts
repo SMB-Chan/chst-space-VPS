@@ -143,6 +143,37 @@ async function* unknownToolStream(): AsyncGenerator<{
   };
 }
 
+async function* textualToolStream(): AsyncGenerator<{
+  choices: { delta: { content: string } }[];
+}> {
+  yield { choices: [{ delta: { content: "<tool_" } }] };
+  yield {
+    choices: [
+      {
+        delta: {
+          content:
+            'call>{"name":"web_search","arguments":{"query":"market outlook"}}</tool_call>',
+        },
+      },
+    ],
+  };
+}
+
+async function* unknownTextualToolStream(): AsyncGenerator<{
+  choices: { delta: { content: string } }[];
+}> {
+  yield {
+    choices: [
+      {
+        delta: {
+          content:
+            '<tool_call>{"name":"finance_analysis","arguments":{}}</tool_call>',
+        },
+      },
+    ],
+  };
+}
+
 describe("specialist tool selection", () => {
   it("does not attach native tools after web context is already available", () => {
     expect(
@@ -411,6 +442,97 @@ describe("model stream recovery", () => {
     expect(sentOptions[1]?.tools).toBeUndefined();
     expect(sentOptions[1]?.tool_stream).toBeUndefined();
     expect(sentOptions[1]?.enable_thinking).toBe(false);
+    expect(onToolCalls).not.toHaveBeenCalled();
+    expect(deltas.join("")).toBe("answer");
+    expect(result).toBe("answer");
+  });
+
+  it("normalizes a textual DeepSeek tool call without leaking markup", async () => {
+    const create = vi.fn().mockResolvedValue(textualToolStream());
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const onToolCalls = vi.fn();
+    const deltas: string[] = [];
+
+    const result = await streamModelText({
+      client,
+      provider: "dashscope",
+      modelId: "deepseek-v4-flash-0731",
+      reasoningLevel: "medium",
+      messages: [{ role: "user", content: "market outlook" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "web_search",
+            description: "Search the web",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+      onToolCalls,
+      onDelta: (text, kind) => {
+        if (kind === "content") deltas.push(text);
+      },
+      shouldStop: () => false,
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(onToolCalls).toHaveBeenCalledWith([
+      {
+        id: "text-tool-1",
+        name: "web_search",
+        arguments: '{"query":"market outlook"}',
+      },
+    ]);
+    expect(deltas.join("")).toBe("");
+    expect(result).toBe("");
+  });
+
+  it("drops an unknown textual GLM tool call and retries visibly", async () => {
+    const sentOptions: Record<string, unknown>[] = [];
+    const create = vi
+      .fn()
+      .mockImplementationOnce(async (options: Record<string, unknown>) => {
+        sentOptions.push(structuredClone(options));
+        return unknownTextualToolStream();
+      })
+      .mockImplementationOnce(async (options: Record<string, unknown>) => {
+        sentOptions.push(structuredClone(options));
+        return answerStream();
+      });
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const onToolCalls = vi.fn();
+    const deltas: string[] = [];
+
+    const result = await streamModelText({
+      client,
+      provider: "dashscope",
+      modelId: "glm-5.2",
+      reasoningLevel: "medium",
+      messages: [{ role: "user", content: "market outlook" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "web_search",
+            description: "Search the web",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+      onToolCalls,
+      onDelta: (text, kind) => {
+        if (kind === "content") deltas.push(text);
+      },
+      shouldStop: () => false,
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(sentOptions[1]?.tools).toBeUndefined();
     expect(onToolCalls).not.toHaveBeenCalled();
     expect(deltas.join("")).toBe("answer");
     expect(result).toBe("answer");

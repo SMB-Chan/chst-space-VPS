@@ -11,10 +11,12 @@ import {
   type ReasoningLevel,
 } from "./ai-clients";
 import {
+  extractTextToolCalls,
   mergeStreamDelta,
   splitThinkTags,
   readReasoningDelta,
   readContentDelta,
+  visibleTextBeforeToolMarkup,
   type StreamDelta,
 } from "./stream-delta";
 import { getClientForModel } from "./ai-clients";
@@ -1499,20 +1501,25 @@ export async function streamModelText(args: {
   );
 
   let full = "";
+  let emittedContent = "";
   let reasoning = "";
   const toolCalls = new Map<number, SpecialistToolCall>();
   const maxAttempts = 2;
   const allowedToolNames = new Set(
     args.tools?.map((tool) => tool.function.name) ?? [],
   );
-  const validToolCalls = (): SpecialistToolCall[] =>
-    [...toolCalls.entries()]
+  const validToolCalls = (): SpecialistToolCall[] => {
+    const seen = new Set<string>();
+    return [...toolCalls.entries()]
       .sort(([a], [b]) => a - b)
-      .flatMap(([index, call]) =>
-        call.name && allowedToolNames.has(call.name)
-          ? [{ ...call, id: call.id || `chat-tool-${index + 1}` }]
-          : [],
-      );
+      .flatMap(([index, call]) => {
+        if (!call.name || !allowedToolNames.has(call.name)) return [];
+        const signature = `${call.name}\u0000${call.arguments}`;
+        if (seen.has(signature)) return [];
+        seen.add(signature);
+        return [{ ...call, id: call.id || `chat-tool-${index + 1}` }];
+      });
+  };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let stream: AsyncIterable<{
@@ -1612,10 +1619,41 @@ export async function streamModelText(args: {
         const contentDelta = readContentDelta(delta);
         if (contentDelta) {
           const merged = mergeStreamDelta(full, contentDelta);
-          const added = merged.slice(full.length);
           full = merged;
-          if (added) args.onDelta(added, "content");
+          const safeVisibleContent = visibleTextBeforeToolMarkup(full);
+          if (safeVisibleContent.startsWith(emittedContent)) {
+            const added = safeVisibleContent.slice(emittedContent.length);
+            emittedContent = safeVisibleContent;
+            if (added) args.onDelta(added, "content");
+          }
         }
+      }
+      const extractedTextCalls = extractTextToolCalls(full, allowedToolNames);
+      if (extractedTextCalls.sawToolMarkup) {
+        for (const call of extractedTextCalls.calls) {
+          const indexes = [...toolCalls.keys()];
+          const nextIndex = indexes.length > 0 ? Math.max(...indexes) + 1 : 0;
+          toolCalls.set(nextIndex, call);
+        }
+        if (extractedTextCalls.calls.length > 0) {
+          // Any prose before a textual call may already have streamed. Keep
+          // only that prefix; the research loop will produce the final answer
+          // after the normalized call is executed.
+          full = emittedContent;
+        } else {
+          full = extractedTextCalls.content;
+          if (full.startsWith(emittedContent)) {
+            const added = full.slice(emittedContent.length);
+            emittedContent = full;
+            if (added) args.onDelta(added, "content");
+          }
+        }
+      } else if (full.startsWith(emittedContent)) {
+        // Flush a short suffix that was temporarily held because it matched
+        // the beginning of a tool tag but proved to be ordinary text.
+        const added = full.slice(emittedContent.length);
+        emittedContent = full;
+        if (added) args.onDelta(added, "content");
       }
       const shouldRetryEmpty =
         attempt < maxAttempts &&
@@ -1656,6 +1694,8 @@ export async function streamModelText(args: {
           .tool_choice;
         toolCalls.clear();
         allowedToolNames.clear();
+        full = "";
+        emittedContent = "";
         continue;
       }
       break;
