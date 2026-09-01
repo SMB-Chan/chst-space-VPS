@@ -218,7 +218,8 @@ export function SettingsPage() {
                 <Smartphone className="h-4 w-4" />
               </span>
               <span>
-                ブラウザの共有メニューや「ホーム画面に追加」からインストールできます。Chrome / Edge / Safari に対応しています。
+                ブラウザの共有メニューや「ホーム画面に追加」からインストールできます。Chrome
+                / Edge / Safari に対応しています。
               </span>
             </div>
           )}
