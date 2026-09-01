@@ -397,7 +397,7 @@ export function ModelSelector({
             onClick={() => onSelect(model.id)}
             data-testid={`model-option-${model.id}`}
             className={cn(
-              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]"
+              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]",
               selectedModel === model.id && "bg-primary/10 text-primary",
             )}
           >
@@ -416,7 +416,7 @@ export function ModelSelector({
             <span
               title={quotaTitle(quota)}
               className={cn(
-                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums"
+                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums",
                 quotaTone(quota.weeklyRemainingPercent),
               )}
             >
@@ -427,7 +427,7 @@ export function ModelSelector({
             <span
               title={quotaTitle(quota)}
               className={cn(
-                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums"
+                "rounded-[var(--m3-shape-full)] border px-1.5 py-0.5 text-[10px] tabular-nums",
                 quotaTone(quota.fiveHourRemainingPercent),
               )}
             >
@@ -441,7 +441,7 @@ export function ModelSelector({
             onClick={() => onSelect(model.id)}
             data-testid={`model-option-${model.id}`}
             className={cn(
-              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]"
+              "flex items-center justify-between cursor-pointer rounded-[var(--m3-shape-xs)]",
               selectedModel === model.id &&
                 "[background:var(--app-status-accent-container)] [color:var(--app-status-accent)]",
             )}
