@@ -21,6 +21,28 @@ export function normalizeQuery(query: string): string {
 /** Maximum length accepted for an LLM-generated search query. */
 export const MAX_SEARCH_QUERY_CHARS = 200;
 
+export type SearchIntent =
+  "weather" | "movies" | "news" | "finance" | "general";
+
+/** Classify only the broad intent needed for cheap query/result tuning. */
+export function classifySearchIntent(query: string): SearchIntent {
+  if (/天気|天候|気温|降水|雨|雪|台風|気象|weather|forecast/i.test(query)) {
+    return "weather";
+  }
+  if (
+    /映画|上映|映画館|シネマ|興行|movie|film|cinema|showtimes?/i.test(query)
+  ) {
+    return "movies";
+  }
+  if (/ニュース|速報|報道|news|breaking|headlines?/i.test(query)) {
+    return "news";
+  }
+  if (/株価|為替|相場|金利|決算|stock|forex|market price/i.test(query)) {
+    return "finance";
+  }
+  return "general";
+}
+
 /**
  * Secret-shaped substrings that must never leave the process inside a search
  * query (a prompt-injected page could otherwise trick the follow-up-search
@@ -68,6 +90,7 @@ export function expandSearchQueries(baseQuery: string): string[] {
   const hasNews = /ニュース|news|速報|headlines?/i.test(normalized);
   const hasJapanese =
     /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(normalized);
+  const intent = classifySearchIntent(normalized);
 
   const hasPast =
     /去年|昨年|一昨年|先月|先週|\d+年前|以来|前回|当時|以前|過去|last year|ago|since|historical/i.test(
@@ -78,10 +101,35 @@ export function expandSearchQueries(baseQuery: string): string[] {
       normalized,
     );
 
-  // Only add angle variants when the query does not already contain them.
-  if (!hasLatest && !hasNews) {
+  // Domain-specific variants avoid sending unrelated generic "news" queries
+  // for weather forecasts or movie showtimes.
+  if (intent === "weather") {
+    if (!/気象庁|jma\.go\.jp/i.test(normalized)) {
+      variants.add(
+        hasJapanese ? `${normalized} 気象庁` : `${normalized} official`,
+      );
+    }
+    if (!/時間別|hourly/i.test(normalized)) {
+      variants.add(
+        hasJapanese ? `${normalized} 時間別予報` : `${normalized} hourly`,
+      );
+    }
+  } else if (intent === "movies") {
+    if (!/上映スケジュール|showtimes?/i.test(normalized)) {
+      variants.add(
+        hasJapanese
+          ? `${normalized} 上映スケジュール`
+          : `${normalized} showtimes`,
+      );
+    }
+    if (!/映画館|cinema/i.test(normalized)) {
+      variants.add(
+        hasJapanese ? `${normalized} 映画館` : `${normalized} cinema`,
+      );
+    }
+  } else if (!hasLatest && !hasNews) {
     variants.add(hasJapanese ? `${normalized} 最新` : `${normalized} latest`);
-    if (hasJapanese) {
+    if (hasJapanese && intent === "news") {
       variants.add(`${normalized} ニュース`);
     }
   }
@@ -98,6 +146,9 @@ export function expandSearchQueries(baseQuery: string): string[] {
 }
 
 const AUTHORITY_DOMAINS = new Set([
+  "jma.go.jp",
+  "tenki.jp",
+  "weathernews.jp",
   "go.jp",
   "gov",
   "edu",
@@ -179,6 +230,51 @@ function domainScore(url: string): number {
   return score;
 }
 
+function searchableTerms(query: string): string[] {
+  const stopWords = new Set([
+    "今日",
+    "明日",
+    "現在",
+    "最新",
+    "情報",
+    "比較",
+    "して",
+    "くれる",
+    "ください",
+    "教えて",
+  ]);
+  const chunks = query
+    .toLowerCase()
+    .replace(/[?？!！。、,.()（）「」『』【】]/g, " ")
+    .split(/[\s　]+|(?:の|は|を|が|へ|と|で|や|も|から|まで)/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 1 && !stopWords.has(term));
+  return [...new Set(chunks)];
+}
+
+function intentRelevanceScore(result: SearchResult, query: string): number {
+  const intent = classifySearchIntent(query);
+  const combined =
+    `${result.title} ${result.snippet} ${result.url}`.toLowerCase();
+  if (intent === "weather") {
+    const directForecastMatch =
+      /気温|降水|警報|注意報|台風|気象|予報|forecast|jma\.go\.jp|tenki\.jp|weathernews\.jp|weather\.yahoo\.co\.jp/i.test(
+        combined,
+      );
+    if (directForecastMatch) return 10;
+    if (/アプリ|おすすめ|ランキング|まとめ/.test(combined)) return -14;
+    return /天気|天候|雨|雪|weather/i.test(combined) ? 4 : -14;
+  }
+  if (intent === "movies") {
+    return /映画|上映|映画館|シネマ|興行|movie|film|cinema|showtime/i.test(
+      combined,
+    )
+      ? 8
+      : -10;
+  }
+  return 0;
+}
+
 function recencyScore(text: string, now = new Date()): number {
   const combined = `${text}`;
   const jstYear = Number(
@@ -226,10 +322,13 @@ export function scoreSearchResult(
   // Snippet match.
   if (snippet.includes(query)) score += 6;
 
-  // Word overlap.
-  const queryWords = query.split(/\s+/).filter((w) => w.length > 1);
+  // Term overlap. Japanese particles are separators too, so a natural query
+  // such as "東京の天気" contributes both "東京" and "天気".
+  const queryWords = searchableTerms(query);
   const matchedWords = queryWords.filter((w) => combined.includes(w));
   score += matchedWords.length * 2;
+
+  score += intentRelevanceScore(result, originalQuery);
 
   // Domain authority and quality penalties.
   score += domainScore(result.url);
@@ -314,8 +413,16 @@ export function mergeSearchResults(
     merged.push({ ...r, score: scoreSearchResult(r, originalQuery) });
   }
 
-  merged.sort((a, b) => b.score - a.score);
-  return selectDiverseScoredResults(merged, maxResults);
+  const intent = classifySearchIntent(originalQuery);
+  const intentFiltered =
+    intent === "weather" || intent === "movies"
+      ? merged.filter(
+          (result) => intentRelevanceScore(result, originalQuery) > 0,
+        )
+      : merged;
+
+  intentFiltered.sort((a, b) => b.score - a.score);
+  return selectDiverseScoredResults(intentFiltered, maxResults);
 }
 
 /**
