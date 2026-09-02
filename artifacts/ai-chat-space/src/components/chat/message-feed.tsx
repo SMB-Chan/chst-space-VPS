@@ -286,10 +286,12 @@ function AuditCard({
   content,
   modelId,
   live,
+  citationScope,
 }: {
   content: string;
   modelId?: string | null;
   live?: boolean;
+  citationScope: string;
 }) {
   const [open, setOpen] = useState(!!live);
   if (!content && !live) return null;
@@ -317,7 +319,7 @@ function AuditCard({
       </button>
       {open && content ? (
         <div className="px-3 pb-3 text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]">
-          <SafeMarkdown content={content} />
+          <SafeMarkdown content={content} citationScope={citationScope} />
         </div>
       ) : null}
     </div>
@@ -563,6 +565,7 @@ export function MessageFeed({
             : null;
           let displayContent = parsedUser?.displayContent ?? message.content;
           const attachments = parsedUser?.attachments ?? [];
+          const citationScope = `message-${message.id}`;
 
           // For assistant messages: prefer DB-persisted sources; fall back to parsing
           // the legacy inline "参照元:" Markdown block so old messages still show cards.
@@ -694,7 +697,10 @@ export function MessageFeed({
                       </div>
                     ) : (
                       <>
-                        <SafeMarkdown content={displayContent} />
+                        <SafeMarkdown
+                          content={displayContent}
+                          citationScope={citationScope}
+                        />
                         {message.id === STREAMING_ASSISTANT_ID &&
                           (streamingPhase === "generating" ||
                             streamingPhase === "revising") && (
@@ -780,6 +786,7 @@ export function MessageFeed({
                         message.id === STREAMING_ASSISTANT_ID &&
                         streamingPhase === "auditing"
                       }
+                      citationScope={citationScope}
                     />
                   )}
 
@@ -800,7 +807,10 @@ export function MessageFeed({
 
                 {!isUser && sources && sources.length > 0 && (
                   <div className="w-full px-1">
-                    <SourceCards sources={sources} />
+                    <SourceCards
+                      sources={sources}
+                      citationScope={citationScope}
+                    />
                   </div>
                 )}
 
