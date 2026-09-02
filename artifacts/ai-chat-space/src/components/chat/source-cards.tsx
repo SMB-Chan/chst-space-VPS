@@ -1,6 +1,7 @@
 import { ExternalLink, Globe2 } from "lucide-react";
 import { surfaceVariants } from "@/design-system/surface";
 import { cn } from "@/lib/utils";
+import { citationSourceId } from "./citation-links";
 
 export interface Source {
   title: string;
@@ -11,6 +12,7 @@ export interface Source {
 
 interface SourceCardsProps {
   sources: Source[];
+  citationScope: string;
 }
 
 function normalizeSourceUrl(raw: string): URL | null {
@@ -24,7 +26,7 @@ function normalizeSourceUrl(raw: string): URL | null {
   }
 }
 
-export function SourceCards({ sources }: SourceCardsProps) {
+export function SourceCards({ sources, citationScope }: SourceCardsProps) {
   const safeSources = sources.flatMap((source) => {
     const url = normalizeSourceUrl(source.url);
     return url ? [{ source, url }] : [];
@@ -42,7 +44,7 @@ export function SourceCards({ sources }: SourceCardsProps) {
           return (
             <a
               key={`${url.href}-${index}`}
-              id={`source-${index + 1}`}
+              id={citationSourceId(citationScope, index + 1)}
               href={url.href}
               target="_blank"
               rel="noopener noreferrer"

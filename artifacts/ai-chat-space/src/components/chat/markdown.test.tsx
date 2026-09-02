@@ -6,6 +6,7 @@ describe("Markdown", () => {
   it("renders GFM tables, task-unrelated lists, and emphasis", () => {
     const html = renderToStaticMarkup(
       <Markdown
+        citationScope="message-test"
         content={[
           "# Title",
           "",
@@ -30,6 +31,7 @@ describe("Markdown", () => {
   it("does not execute raw HTML", () => {
     const html = renderToStaticMarkup(
       <Markdown
+        citationScope="message-test"
         content={'<img src=x onerror="alert(1)"><script>alert(1)</script>hello'}
       />,
     );
@@ -42,6 +44,7 @@ describe("Markdown", () => {
     const html = renderToStaticMarkup(
       <Markdown
         content={"![tracking pixel](https://tracker.example/pixel.gif?x=1)"}
+        citationScope="message-test"
       />,
     );
     expect(html).not.toContain("<img");
@@ -51,7 +54,10 @@ describe("Markdown", () => {
 
   it("does not make non-http links clickable", () => {
     const html = renderToStaticMarkup(
-      <Markdown content={"[bad](javascript:alert(1))"} />,
+      <Markdown
+        content={"[bad](javascript:alert(1))"}
+        citationScope="message-test"
+      />,
     );
     expect(html).not.toContain("javascript:");
   });
@@ -59,6 +65,7 @@ describe("Markdown", () => {
   it("transforms [N] citations in prose but not inside code blocks", () => {
     const html = renderToStaticMarkup(
       <Markdown
+        citationScope="message-test"
         content={[
           "The answer is known [1].",
           "",
@@ -78,5 +85,6 @@ describe("Markdown", () => {
     // Count buttons: only the prose [1] should produce one, not code [1] or inline [2]
     const buttonCount = (html.match(/<button/g) ?? []).length;
     expect(buttonCount).toBe(1);
+    expect(html).toContain('data-source-target="source-message-test-1"');
   });
 });

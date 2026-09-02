@@ -4,6 +4,7 @@ import { Markdown } from "./markdown";
 interface SafeMarkdownProps {
   content: string;
   className?: string;
+  citationScope: string;
 }
 
 interface SafeMarkdownState {
@@ -44,10 +45,18 @@ class MarkdownErrorBoundary extends Component<
   }
 }
 
-export function SafeMarkdown({ content, className }: SafeMarkdownProps) {
+export function SafeMarkdown({
+  content,
+  className,
+  citationScope,
+}: SafeMarkdownProps) {
   return (
     <MarkdownErrorBoundary content={content}>
-      <Markdown content={content} className={className} />
+      <Markdown
+        content={content}
+        className={className}
+        citationScope={citationScope}
+      />
     </MarkdownErrorBoundary>
   );
 }

@@ -3,10 +3,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
+import { citationSourceId } from "./citation-links";
 
 interface MarkdownProps {
   content: string;
   className?: string;
+  citationScope: string;
 }
 
 const sanitizeSchema = {
@@ -55,19 +57,27 @@ function CodeBlock({
   );
 }
 
-function citeSourceLinks(content: string): string {
+function citeSourceLinks(content: string, citationScope: string): string {
   // Split on fenced code blocks and inline code so citation
   // transforms only apply to prose, not to code examples like `[1]`.
   const parts = content.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
   return parts
     .map((part, index) =>
-      index % 2 === 0 ? part.replace(/\[(\d+)\]/g, "[[$1]](#source-$1)") : part,
+      index % 2 === 0
+        ? part.replace(/\[(\d+)\]/g, (_match, number: string) => {
+            const target = citationSourceId(citationScope, Number(number));
+            return `[[${number}]](#${target})`;
+          })
+        : part,
     )
     .join("");
 }
 
-export function Markdown({ content, className }: MarkdownProps) {
-  const processedContent = useMemo(() => citeSourceLinks(content), [content]);
+export function Markdown({ content, className, citationScope }: MarkdownProps) {
+  const processedContent = useMemo(
+    () => citeSourceLinks(content, citationScope),
+    [citationScope, content],
+  );
   const remarkPlugins = useMemo(() => [remarkGfm], []);
   const rehypePlugins = useMemo(
     () => [[rehypeSanitize, sanitizeSchema]] as const,
@@ -94,6 +104,8 @@ export function Markdown({ content, className }: MarkdownProps) {
                     const el = document.getElementById(href.slice(1));
                     el?.scrollIntoView({ behavior: "smooth", block: "center" });
                   }}
+                  data-source-target={href.slice(1)}
+                  aria-label={`参照元${String(children)}へ移動`}
                   className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-[var(--m3-shape-full)] bg-primary/10 text-primary text-[10px] font-mono font-medium hover:bg-primary/20 transition-colors align-baseline cursor-pointer border-none"
                 >
                   {children}
