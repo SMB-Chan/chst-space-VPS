@@ -80,9 +80,9 @@ describe("AI stream retry policy", () => {
         AI_STREAM_RETRY_BASE_MS: "-1",
       }),
     ).toEqual({
-      maxAttempts: 3,
-      baseDelayMs: 400,
-      maxDelayMs: 3_000,
+      maxAttempts: 5,
+      baseDelayMs: 750,
+      maxDelayMs: 6_000,
     });
   });
 

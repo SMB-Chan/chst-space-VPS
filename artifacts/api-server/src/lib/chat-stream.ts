@@ -103,6 +103,7 @@ const LAYOUT_REVIEW_TIMEOUT_MS = 60_000;
 const VISION_BRIDGE_TIMEOUT_MS = 90_000;
 const SPECIALIST_TIMEOUT_MS = 120_000;
 const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+const DEGRADED_DASHSCOPE_MAX_OUTPUT_TOKENS = 4_096;
 const RESEARCH_RECOVERY_SYSTEM_PROMPT = `直前の応答は、検索すると宣言しただけで実際のツール呼び出しも回答も完了していません。
 検索が必要なら、この応答で直ちに web_search または fetch_page を呼び出してください。検索が不要なら、宣言を繰り返さず今すぐ質問への回答を完成させてください。`;
 /** Minimum interval between memory maintenance runs (5 minutes). */
@@ -1536,6 +1537,32 @@ export async function streamModelText(
       toolCalls.clear();
       full = "";
       emittedContent = "";
+      // Repeating the exact same expensive DashScope request five times can
+      // keep hitting the same short-lived transport failure. Preserve the
+      // selected model, messages and tools, but make later attempts cheaper:
+      // disable hidden reasoning and reduce the output reservation.
+      const degradedRetry =
+        args.provider === "dashscope" && transientRetryCount >= 2;
+      if (degradedRetry) {
+        applyNonReasoningGenerationParams(
+          streamOptions as unknown as Record<string, unknown>,
+          args.provider,
+        );
+        applyOutputTokenLimit(
+          streamOptions as unknown as Record<string, unknown>,
+          args.provider,
+          Math.min(
+            args.maxOutputTokens ?? DEGRADED_DASHSCOPE_MAX_OUTPUT_TOKENS,
+            DEGRADED_DASHSCOPE_MAX_OUTPUT_TOKENS,
+          ),
+        );
+        applyStreamingToolParams(
+          streamOptions as unknown as Record<string, unknown>,
+          args.modelId,
+          args.provider,
+          Boolean(streamOptions.tools?.length),
+        );
+      }
       const retryDelayMs = getAiRetryDelayMs(err, attempt, retryConfig);
       logger.warn(
         {
@@ -1546,6 +1573,7 @@ export async function streamModelText(
           attempt,
           maxAttempts,
           retryDelayMs,
+          degradedRetry,
         },
         "Retrying interrupted model stream with backoff before visible output",
       );

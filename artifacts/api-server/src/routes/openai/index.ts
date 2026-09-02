@@ -1291,11 +1291,16 @@ router.post(
         },
         onFailure: async ({ content, sources }) => {
           if (cancellation.signal.aborted) return;
+          const interruptedContent = content.trim()
+            ? content
+            : sources.length > 0
+              ? "検索結果は取得できましたが、AI接続が中断したため最終回答を生成できませんでした。下の出典を参照するか、もう一度お試しください。"
+              : undefined;
           await persistInterruptedChatTurn({
             userId,
             conversationId,
             userContent: newMessage.storedContent,
-            assistantContent: content,
+            assistantContent: interruptedContent,
             modelId,
             sources,
           });

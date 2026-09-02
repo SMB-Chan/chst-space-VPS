@@ -337,6 +337,47 @@ describe("model stream recovery", () => {
     expect(result).toBe("answer");
   });
 
+  it("degrades later DashScope retries to a smaller non-thinking request", async () => {
+    vi.stubEnv("AI_STREAM_MAX_ATTEMPTS", "3");
+    vi.stubEnv("AI_STREAM_RETRY_BASE_MS", "0");
+    const sentOptions: Record<string, unknown>[] = [];
+    const streams = [
+      transientFailureStream(),
+      transientFailureStream(),
+      answerStream(),
+    ];
+    const create = vi.fn().mockImplementation(async (options) => {
+      sentOptions.push(structuredClone(options));
+      return streams[sentOptions.length - 1];
+    });
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    await expect(
+      streamModelText({
+        client,
+        provider: "dashscope",
+        modelId: "qwen3.7-plus",
+        reasoningLevel: "high",
+        messages: [{ role: "user", content: "hello" }],
+        onDelta: () => undefined,
+        shouldStop: () => false,
+      }),
+    ).resolves.toBe("answer");
+
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(sentOptions[0]).toMatchObject({
+      enable_thinking: true,
+      max_tokens: 8192,
+    });
+    expect(sentOptions[2]).toMatchObject({
+      enable_thinking: false,
+      incremental_output: true,
+      max_tokens: 4096,
+    });
+  });
+
   it("surfaces a transient failure after exhausting the configured attempts", async () => {
     vi.stubEnv("AI_STREAM_MAX_ATTEMPTS", "3");
     vi.stubEnv("AI_STREAM_RETRY_BASE_MS", "0");

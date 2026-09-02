@@ -25,9 +25,9 @@ export interface AiStreamRetryConfig {
   maxDelayMs: number;
 }
 
-const DEFAULT_MAX_ATTEMPTS = 3;
-const DEFAULT_BASE_DELAY_MS = 400;
-const DEFAULT_MAX_DELAY_MS = 3_000;
+const DEFAULT_MAX_ATTEMPTS = 5;
+const DEFAULT_BASE_DELAY_MS = 750;
+const DEFAULT_MAX_DELAY_MS = 6_000;
 const MAX_PROVIDER_RETRY_AFTER_MS = 10_000;
 
 function errorChain(error: unknown): unknown[] {
