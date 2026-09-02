@@ -260,7 +260,7 @@ describe("mergeSearchResults", () => {
         {
           title: "おすすめ天気アプリ10選",
           url: "https://apps.example.com/weather-ranking",
-          snippet: "人気アプリの機能を比較",
+          snippet: "降水確率や気温予報を確認できる人気アプリの機能を比較",
         },
         {
           title: "北海道映画祭イベント",
@@ -273,6 +273,9 @@ describe("mergeSearchResults", () => {
 
     expect(merged.map((result) => result.url)).not.toContain(
       "https://events.example.com/movie",
+    );
+    expect(merged.map((result) => result.url)).not.toContain(
+      "https://apps.example.com/weather-ranking",
     );
     expect(merged[0]?.url).toBe("https://www.jma.go.jp/bosai/forecast/");
   });
