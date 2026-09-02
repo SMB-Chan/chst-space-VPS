@@ -93,6 +93,7 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - `CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` — 認証
 - `FRONTEND_URL` — APIへアクセスできるブラウザOrigin。カンマ区切り可。本番のクロスOrigin構成では必須
 - `AI_INTEGRATIONS_OPENAI_BASE_URL` / `AI_INTEGRATIONS_OPENAI_API_KEY` — OpenAI 互換エンドポイント
+- `AI_STREAM_MAX_ATTEMPTS` / `AI_STREAM_RETRY_BASE_MS` / `AI_STREAM_RETRY_MAX_MS` — ストリーム開始時の一時的な接続障害に対する最大試行回数とバックオフ（既定3回・400ms・3000ms。応答本文の送信後は二重表示防止のため再試行しない）
 - `DASHSCOPE_API_KEY` — Qwen 等を使う場合（任意）
 - `ALIBABA_SPECIALIST_API_KEY` / `ALIBABA_SPECIALIST_WORKSPACE_ID` — 通常のAlibaba Model Studioワークスペース資格情報（任意。画像生成・画像編集・Qwen Audio TTS／Realtimeのカスタムバックエンド専門能力用。Token Plan Personal/Teamキーは使用せず、未設定時はcatalog-only）
 - `ALIBABA_SPECIALIST_HTTP_BASE_URL` / `ALIBABA_SPECIALIST_TTS_WS_URL` / `ALIBABA_SPECIALIST_REALTIME_WS_URL` — 専門能力用の許可済みHTTPS/WSSエンドポイント（任意。詳細は[`.env.example`](./.env.example)）

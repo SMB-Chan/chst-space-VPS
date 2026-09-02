@@ -1,13 +1,17 @@
 import { EventEmitter } from "node:events";
 import type OpenAI from "openai";
 import type { Response } from "express";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createResponseCancellation,
   shouldAttachSpecialistTools,
   streamChatReply,
   streamModelText,
 } from "./chat-stream";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 class MockResponse extends EventEmitter {
   headersSent = false;
@@ -275,6 +279,7 @@ describe("response cancellation", () => {
 
 describe("model stream recovery", () => {
   it("retries a transient failure before visible output", async () => {
+    vi.stubEnv("AI_STREAM_RETRY_BASE_MS", "0");
     const response = new StreamingResponse();
     const create = vi
       .fn()
@@ -300,6 +305,92 @@ describe("model stream recovery", () => {
     expect(response.writes.join("\n")).toContain('"content":"answer"');
     expect(response.writes.join("\n")).toContain('"done":true');
     expect(response.writes.join("\n")).not.toContain('"error"');
+  });
+
+  it("recovers on the final configured attempt", async () => {
+    vi.stubEnv("AI_STREAM_MAX_ATTEMPTS", "3");
+    vi.stubEnv("AI_STREAM_RETRY_BASE_MS", "0");
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(transientFailureStream())
+      .mockResolvedValueOnce(transientFailureStream())
+      .mockResolvedValueOnce(answerStream());
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const deltas: string[] = [];
+
+    const result = await streamModelText({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      reasoningLevel: "off",
+      messages: [{ role: "user", content: "hello" }],
+      onDelta: (delta, phase) => {
+        if (phase === "content") deltas.push(delta);
+      },
+      shouldStop: () => false,
+    });
+
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(deltas).toEqual(["answer"]);
+    expect(result).toBe("answer");
+  });
+
+  it("surfaces a transient failure after exhausting the configured attempts", async () => {
+    vi.stubEnv("AI_STREAM_MAX_ATTEMPTS", "3");
+    vi.stubEnv("AI_STREAM_RETRY_BASE_MS", "0");
+    const create = vi
+      .fn()
+      .mockImplementation(async () => transientFailureStream());
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    await expect(
+      streamModelText({
+        client,
+        provider: "openai",
+        modelId: "gpt-5.6-terra",
+        reasoningLevel: "off",
+        messages: [{ role: "user", content: "hello" }],
+        onDelta: () => undefined,
+        shouldStop: () => false,
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(create).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not start another attempt when cancelled during backoff", async () => {
+    vi.stubEnv("AI_STREAM_MAX_ATTEMPTS", "3");
+    const controller = new AbortController();
+    const delayedFailure = Object.assign(new Error("upstream unavailable"), {
+      status: 503,
+      headers: { "retry-after-ms": "10000" },
+    });
+    const create = vi.fn().mockImplementation(async () =>
+      (async function* () {
+        throw delayedFailure;
+      })(),
+    );
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    const resultPromise = streamModelText({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      reasoningLevel: "off",
+      messages: [{ role: "user", content: "hello" }],
+      onDelta: () => undefined,
+      shouldStop: () => false,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(resultPromise).resolves.toBe("");
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry after visible output to avoid duplicate text", async () => {

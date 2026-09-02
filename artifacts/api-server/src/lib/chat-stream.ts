@@ -80,6 +80,12 @@ import {
   shouldVerifySearchBackedAnswer,
   verifySearchBackedAnswer,
 } from "./chat-stream-factuality";
+import {
+  getAiRetryDelayMs,
+  getAiStreamRetryConfig,
+  safeAiFailureFields,
+  waitForAiRetry,
+} from "./ai-retry";
 
 export {
   isResearchAnnouncementOnly,
@@ -1229,7 +1235,10 @@ export async function streamModelText(
   let emittedContent = "";
   let reasoning = "";
   const toolCalls = new Map<number, SpecialistToolCall>();
-  const maxAttempts = 2;
+  const retryConfig = getAiStreamRetryConfig();
+  const maxAttempts = retryConfig.maxAttempts;
+  let emptyRetryUsed = false;
+  let transientRetryCount = 0;
   const allowedToolNames = new Set(
     args.tools?.map((tool) => tool.function.name) ?? [],
   );
@@ -1382,12 +1391,14 @@ export async function streamModelText(
       }
       const shouldRetryEmpty =
         attempt < maxAttempts &&
+        !emptyRetryUsed &&
         !args.signal?.aborted &&
         !args.shouldStop() &&
         !full.trim() &&
         validToolCalls().length === 0 &&
         finishReason !== "content_filter";
       if (shouldRetryEmpty) {
+        emptyRetryUsed = true;
         logger.warn(
           {
             component: "chat-stream",
@@ -1423,23 +1434,71 @@ export async function streamModelText(
         emittedContent = "";
         continue;
       }
+      if (transientRetryCount > 0) {
+        logger.info(
+          {
+            component: "chat-stream",
+            errorCode: "MODEL_STREAM_RECOVERED",
+            provider: args.provider,
+            modelId: args.modelId,
+            attempts: attempt,
+            transientRetryCount,
+          },
+          "Model stream recovered after a transient connection failure",
+        );
+      }
       break;
     } catch (err) {
       if (args.signal?.aborted) break;
-      const canRetry =
-        attempt < maxAttempts && !full && isTransientAiError(err);
-      if (!canRetry) throw err;
+      const transient = isTransientAiError(err);
+      const canRetry = attempt < maxAttempts && !emittedContent && transient;
+      if (!canRetry) {
+        if (transient) {
+          logger.warn(
+            {
+              ...safeFailureFields(
+                err,
+                "chat-stream",
+                emittedContent
+                  ? "MODEL_STREAM_PARTIAL_INTERRUPTION"
+                  : "MODEL_STREAM_RETRY_EXHAUSTED",
+              ),
+              ...safeAiFailureFields(err),
+              provider: args.provider,
+              modelId: args.modelId,
+              attempt,
+              maxAttempts,
+              hadVisibleContent: Boolean(emittedContent),
+            },
+            emittedContent
+              ? "Model stream connection failed after visible output"
+              : "Model stream transient retries were exhausted",
+          );
+        }
+        throw err;
+      }
+      transientRetryCount += 1;
       reasoning = "";
       // Tool calls are only handed to the executor after the stream finishes,
       // so incomplete fragments are safe to discard before a retry.
       toolCalls.clear();
+      full = "";
+      emittedContent = "";
+      const retryDelayMs = getAiRetryDelayMs(err, attempt, retryConfig);
       logger.warn(
         {
           ...safeFailureFields(err, "chat-stream", "MODEL_STREAM_RETRY"),
+          ...safeAiFailureFields(err),
+          provider: args.provider,
+          modelId: args.modelId,
           attempt,
+          maxAttempts,
+          retryDelayMs,
         },
-        "Retrying interrupted model stream before visible output",
+        "Retrying interrupted model stream with backoff before visible output",
       );
+      const retryReady = await waitForAiRetry(retryDelayMs, args.signal);
+      if (!retryReady) break;
     }
   }
   const completedToolCalls = validToolCalls();
