@@ -80,6 +80,13 @@ function textStream(text: string) {
   return modelStream([{ delta: { content: text }, finish_reason: "stop" }]);
 }
 
+function partialFailureStream(text: string) {
+  return (async function* () {
+    yield { choices: [{ delta: { content: text } }] };
+    throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+  })();
+}
+
 function toolStream(id: string, query: string) {
   return modelStream([
     {
@@ -122,6 +129,7 @@ async function runTurn(
 ) {
   const { res, write } = responseHarness();
   const onComplete = vi.fn().mockResolvedValue(undefined);
+  const onFailure = vi.fn().mockResolvedValue(undefined);
   const client = {
     chat: { completions: { create } },
   } as unknown as OpenAI;
@@ -142,11 +150,13 @@ async function runTurn(
     },
     memory,
     onComplete,
+    onFailure,
     publicAiError: () => "error",
   });
 
   return {
     onComplete,
+    onFailure,
     sse: write.mock.calls.map(([payload]) => String(payload)).join(""),
   };
 }
@@ -216,6 +226,25 @@ describe("streamChatReply research completion", () => {
         content: "検索上限までの根拠を使った最終回答です。[1]",
       }),
     );
+  });
+
+  it("preserves the question and visible partial answer when research continuation disconnects", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(toolStream("search-1", "latest information"))
+      .mockResolvedValueOnce(
+        partialFailureStream("検索結果に基づく回答の途中です。"),
+      );
+
+    const result = await runTurn(create);
+
+    expect(result.onComplete).not.toHaveBeenCalled();
+    expect(result.onFailure).toHaveBeenCalledWith({
+      content: "検索結果に基づく回答の途中です。",
+      sources: [],
+    });
+    expect(result.sse).toContain('"turnSaved":true');
+    expect(result.sse).toContain('"error":"error"');
   });
 
   it("uses long-term memory only when a user-scoped context is enabled", async () => {

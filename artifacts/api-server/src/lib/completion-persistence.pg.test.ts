@@ -7,6 +7,7 @@ const describePostgres = process.env.DATABASE_URL ? describe : describe.skip;
 const testUsers = new Set<string>();
 let pool: (typeof import("@workspace/db"))["pool"];
 let persistChatCompletion: (typeof import("./completion-persistence"))["persistChatCompletion"];
+let persistInterruptedChatTurn: (typeof import("./completion-persistence"))["persistInterruptedChatTurn"];
 let deleteOwnedMessagesAndAssets: (typeof import("./completion-persistence"))["deleteOwnedMessagesAndAssets"];
 
 function userId(label: string): string {
@@ -65,8 +66,11 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     ({ pool } = await import("@workspace/db"));
     await ensureMessageSchema((sql) => pool.query(sql));
     await ensureAssetsSchema((sql) => pool.query(sql));
-    ({ persistChatCompletion, deleteOwnedMessagesAndAssets } =
-      await import("./completion-persistence"));
+    ({
+      persistChatCompletion,
+      persistInterruptedChatTurn,
+      deleteOwnedMessagesAndAssets,
+    } = await import("./completion-persistence"));
   });
 
   afterAll(async () => {
@@ -116,6 +120,66 @@ describePostgres("completion persistence PostgreSQL invariants", () => {
     expect(assetRows.rows[0]?.count).toBe(1);
     expect(await tableCount("messages", firstConversation)).toBe(2);
     expect(await tableCount("messages", secondConversation)).toBe(2);
+  });
+
+  it("preserves an interrupted user turn and its visible partial answer", async () => {
+    const user = userId("interrupted-turn");
+    const conversationId = await createConversation(user, "interrupted-turn");
+
+    await persistInterruptedChatTurn({
+      userId: user,
+      conversationId,
+      userContent: "latest information",
+      assistantContent: "partial sourced answer [1]",
+      modelId: "integration-model",
+      sources: [{ title: "Source", url: "https://example.com/source" }],
+    });
+
+    const result = await pool.query<{
+      role: string;
+      content: string;
+      sources: string | null;
+    }>(
+      `SELECT role, content, sources FROM messages
+        WHERE conversation_id = $1 ORDER BY id`,
+      [conversationId],
+    );
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]).toMatchObject({
+      role: "user",
+      content: "latest information",
+    });
+    expect(result.rows[1]).toMatchObject({
+      role: "assistant",
+      content: "partial sourced answer [1]",
+    });
+    expect(JSON.parse(result.rows[1]?.sources ?? "null")).toEqual([
+      { title: "Source", url: "https://example.com/source" },
+    ]);
+  });
+
+  it("preserves the user prompt when interruption occurs before output", async () => {
+    const user = userId("interrupted-before-output");
+    const conversationId = await createConversation(
+      user,
+      "interrupted-before-output",
+    );
+
+    await persistInterruptedChatTurn({
+      userId: user,
+      conversationId,
+      userContent: "do not lose this prompt",
+      modelId: "integration-model",
+    });
+
+    const result = await pool.query<{ role: string; content: string }>(
+      `SELECT role, content FROM messages
+        WHERE conversation_id = $1 ORDER BY id`,
+      [conversationId],
+    );
+    expect(result.rows).toEqual([
+      { role: "user", content: "do not lose this prompt" },
+    ]);
   });
 
   it("rolls back messages and an accepted binary when a later artifact insert fails", async () => {

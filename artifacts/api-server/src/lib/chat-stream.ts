@@ -70,6 +70,7 @@ import {
 import {
   persistAndEmitChatCompletion,
   type ChatCompletionCallback,
+  type ChatCompletionInput,
 } from "./chat-stream-completion";
 import {
   partitionSpecialistToolCalls,
@@ -208,6 +209,11 @@ const MEMORY_SYSTEM_PROMPT = `
 export type ChatMemoryContext =
   { enabled: true; userId: string } | { enabled: false };
 
+export type ChatFailureCallback = (input: {
+  content: string;
+  sources: ChatCompletionInput["sources"];
+}) => Promise<void>;
+
 export async function streamChatReply(args: {
   req?: unknown;
   res: Response;
@@ -243,6 +249,8 @@ export async function streamChatReply(args: {
   /** Shared response cancellation, created before attachment extraction. */
   cancellation?: ResponseCancellation;
   onComplete?: ChatCompletionCallback;
+  /** Persist the user turn and any visible partial answer after a non-cancelled failure. */
+  onFailure?: ChatFailureCallback;
   publicAiError: (err: unknown) => string;
 }): Promise<void> {
   const {
@@ -267,6 +275,7 @@ export async function streamChatReply(args: {
     memory = { enabled: false },
     cancellation: providedCancellation,
     onComplete,
+    onFailure,
     publicAiError,
   } = args;
 
@@ -300,6 +309,29 @@ export async function streamChatReply(args: {
   heartbeat.unref();
 
   let fullResponse = "";
+  let streamedResponse = "";
+  let failureSources: ChatCompletionInput["sources"] = [];
+  const persistInterruptedTurn = async (): Promise<boolean> => {
+    if (clientAbort.signal.aborted || !onFailure) return false;
+    const durableContent =
+      streamedResponse.trim().length >= fullResponse.trim().length
+        ? streamedResponse
+        : fullResponse;
+    try {
+      await onFailure({ content: durableContent, sources: failureSources });
+      return true;
+    } catch (persistenceError) {
+      logger.error(
+        safeFailureFields(
+          persistenceError,
+          "chat-stream",
+          "INTERRUPTED_TURN_PERSIST_FAILED",
+        ),
+        "Failed to persist interrupted chat turn",
+      );
+      return false;
+    }
+  };
   try {
     const { messages: workingMessages, skills } = prepareInitialChatMessages({
       chatMessages,
@@ -389,6 +421,8 @@ export async function streamChatReply(args: {
             signal: clientAbort.signal,
           },
         );
+
+    failureSources = webContext.sources;
 
     if (webContext.contextText) {
       const today = new Intl.DateTimeFormat("en-CA", {
@@ -524,6 +558,7 @@ export async function streamChatReply(args: {
             res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
           }
         } else {
+          streamedResponse += added;
           res.write(
             `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
           );
@@ -564,6 +599,7 @@ export async function streamChatReply(args: {
               res.write(`data: ${JSON.stringify({ status: "thinking" })}\n\n`);
             }
           } else {
+            streamedResponse += added;
             res.write(
               `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
             );
@@ -609,6 +645,12 @@ export async function streamChatReply(args: {
           clientGone,
           emit: (event) => {
             if (!clientGone()) {
+              if (typeof event.content === "string") {
+                streamedResponse += event.content;
+              }
+              if (Array.isArray(event.sources)) {
+                failureSources = event.sources;
+              }
               res.write(`data: ${JSON.stringify(event)}\n\n`);
             }
           },
@@ -744,6 +786,7 @@ export async function streamChatReply(args: {
                 );
               }
             } else {
+              streamedResponse += added;
               res.write(
                 `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
               );
@@ -861,6 +904,7 @@ export async function streamChatReply(args: {
                 );
               }
             } else {
+              streamedResponse += added;
               res.write(
                 `data: ${JSON.stringify({ content: added, status: "generating" })}\n\n`,
               );
@@ -875,8 +919,9 @@ export async function streamChatReply(args: {
 
     if (!fullResponse.trim()) {
       if (!clientGone()) {
+        const turnSaved = await persistInterruptedTurn();
         res.write(
-          `data: ${JSON.stringify({ error: "応答が空でした。もう一度お試しください。" })}\n\n`,
+          `data: ${JSON.stringify({ error: "応答が空でした。もう一度お試しください。", turnSaved })}\n\n`,
         );
       }
     } else {
@@ -887,6 +932,7 @@ export async function streamChatReply(args: {
             !webContext.sources.some((existing) => existing.url === source.url),
         ),
       ];
+      failureSources = responseSources;
       const factualitySourceText =
         webContext.contextText || researchEvidenceParts.join("\n\n");
       let audit: { content: string; modelId: string } | undefined;
@@ -915,6 +961,9 @@ export async function streamChatReply(args: {
           clientGone,
           emit: (event) => {
             if (!clientGone()) {
+              if (typeof event.content === "string") {
+                streamedResponse += event.content;
+              }
               res.write(`data: ${JSON.stringify(event)}\n\n`);
             }
           },
@@ -1170,7 +1219,10 @@ export async function streamChatReply(args: {
       "Error streaming AI response",
     );
     if (!clientGone()) {
-      res.write(`data: ${JSON.stringify({ error: publicAiError(err) })}\n\n`);
+      const turnSaved = await persistInterruptedTurn();
+      res.write(
+        `data: ${JSON.stringify({ error: publicAiError(err), turnSaved })}\n\n`,
+      );
     }
   } finally {
     // Every early-return path (client cancellation, persistence failure, etc.)

@@ -66,7 +66,7 @@ async function streamMessage(
   reasoning: ReasoningLevel,
   onChunk: (text: string) => void,
   onDone: () => void,
-  onError: (err: Error) => void,
+  onError: (err: Error, turnSaved?: boolean) => void,
   onStatus: (status: string | null, query?: string) => void,
   onSpecialist: (event: {
     capability: string;
@@ -329,7 +329,7 @@ async function streamMessage(
       }
       if (typeof parsed.error === "string" && parsed.error) {
         failed = true;
-        onError(new Error(parsed.error));
+        onError(new Error(parsed.error), parsed.turnSaved === true);
         return;
       }
       if (parsed.done) callDoneOnce();
@@ -976,26 +976,68 @@ export function ChatPage() {
           setOptimisticUserMessage(null);
         }
       },
-      (err) => {
+      (err, turnSaved) => {
         setIsStreaming(false);
         setSearchStatus(null);
         setResearchStep(null);
-        setStreamingSources([]);
-        setStreamingArtifacts([]);
-        setStreamingFiles([]);
-        setStreamingAudit("");
-        setStreamingFactuality(null);
         setSpecialistProgress(null);
         setStreamError(err.message);
-        if (!isPrivate && targetId) {
+
+        if (isPrivate) {
+          const now = new Date().toISOString();
+          const partialContent = stripArtifactBlocks(
+            streamSnapshotRef.current.content,
+          );
+          setPrivateMessages((previous) => [
+            ...previous,
+            {
+              id: OPTIMISTIC_USER_ID - previous.length - 1,
+              conversationId: 0,
+              role: "user",
+              content: finalContent,
+              createdAt: now,
+            },
+            ...(streamSnapshotRef.current.content.trim()
+              ? [
+                  {
+                    id: STREAMING_ASSISTANT_ID - previous.length - 1,
+                    conversationId: 0,
+                    role: "assistant" as const,
+                    content: partialContent,
+                    sources:
+                      streamSnapshotRef.current.sources.length > 0
+                        ? streamSnapshotRef.current.sources
+                        : null,
+                    createdAt: now,
+                  } as OpenaiMessage,
+                ]
+              : []),
+          ]);
+          setStreamingContent("");
+          setStreamingSources([]);
+          setStreamingArtifacts([]);
+          setStreamingFiles([]);
+          setStreamingAudit("");
+          setStreamingFactuality(null);
+          setOptimisticUserMessage(null);
+        } else if (turnSaved && targetId) {
           void queryClient
             .invalidateQueries({
               queryKey: getGetOpenaiConversationQueryKey(targetId),
             })
-            .finally(() => setOptimisticUserMessage(null));
-        } else {
-          setOptimisticUserMessage(null);
+            .finally(() => {
+              setStreamingContent("");
+              setStreamingSources([]);
+              setStreamingArtifacts([]);
+              setStreamingFiles([]);
+              setStreamingAudit("");
+              setStreamingFactuality(null);
+              setOptimisticUserMessage(null);
+            });
         }
+        // If persistence also failed, retain the optimistic question and any
+        // streamed answer locally. A transient backend error must never erase
+        // text the user has already submitted or seen.
       },
       (status, query) => {
         setSearchStatus(status ? { kind: status, query } : null);

@@ -51,6 +51,7 @@ import { normalizeConversationTitle } from "../../lib/conversation-title";
 import {
   deleteOwnedMessagesAndAssets,
   persistChatCompletion,
+  persistInterruptedChatTurn,
 } from "../../lib/completion-persistence";
 import {
   createHistoricalImageBudget,
@@ -1287,6 +1288,17 @@ router.post(
             artifacts: persisted.artifacts,
             quotaExceeded: persisted.quotaExceeded,
           };
+        },
+        onFailure: async ({ content, sources }) => {
+          if (cancellation.signal.aborted) return;
+          await persistInterruptedChatTurn({
+            userId,
+            conversationId,
+            userContent: newMessage.storedContent,
+            assistantContent: content,
+            modelId,
+            sources,
+          });
         },
       });
     } catch (err) {

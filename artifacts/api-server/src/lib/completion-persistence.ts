@@ -51,6 +51,15 @@ export interface PersistChatCompletionInput {
   extractedArtifacts?: ExtractedArtifact[];
 }
 
+export interface PersistInterruptedChatTurnInput {
+  userId: string;
+  conversationId: number;
+  userContent: string;
+  assistantContent?: string;
+  modelId: string;
+  sources?: { title: string; url: string }[];
+}
+
 function parseQuotaBytes(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === "")
     return DEFAULT_MAX_USER_GENERATED_FILE_BYTES;
@@ -306,6 +315,55 @@ export async function persistChatCompletion(
       artifacts: persistedArtifacts,
       quotaExceeded,
     };
+  });
+}
+
+/**
+ * Preserve a user turn when generation fails after the request has started.
+ * The user message is always written; a partially streamed assistant answer is
+ * written only when one exists. Keeping this separate from completed-turn
+ * persistence prevents failed turns from acquiring generated assets or audit
+ * metadata that never reached a durable completion boundary.
+ */
+export async function persistInterruptedChatTurn(
+  input: PersistInterruptedChatTurnInput,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [ownedConversation] = await tx
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.userId, input.userId),
+        ),
+      )
+      .limit(1);
+    if (!ownedConversation) {
+      throw new Error("Conversation is no longer available for persistence");
+    }
+
+    const partial = input.assistantContent?.trim();
+    await tx.insert(messages).values([
+      {
+        conversationId: input.conversationId,
+        role: "user",
+        content: input.userContent,
+      },
+      ...(partial
+        ? [
+            {
+              conversationId: input.conversationId,
+              role: "assistant" as const,
+              content: partial,
+              modelId: input.modelId,
+              sources: input.sources?.length
+                ? JSON.stringify(input.sources)
+                : undefined,
+            },
+          ]
+        : []),
+    ]);
   });
 }
 
