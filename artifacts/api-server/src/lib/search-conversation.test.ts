@@ -58,12 +58,24 @@ describe("needsConversationAwareSearchPlan", () => {
 });
 
 describe("buildSearchFallbackQuery", () => {
-  it("inherits the last user question when a follow-up planner fails", () => {
+  it("keeps only location, dates, and weather intent when the planner fails", () => {
+    const query = buildSearchFallbackQuery(
+      "天候情報を比較してくれるか？",
+      "ユーザー: 今日と明日、広島で映画を見るならどちら？\nアシスタント: 比較します。",
+      new Date("2026-09-02T06:00:00.000Z"),
+    );
+
+    expect(query).toBe("広島 2026-09-02 2026-09-03 天気予報 比較");
+    expect(query).not.toContain("映画");
+  });
+
+  it("does not invent a location when weather context has none", () => {
     expect(
       buildSearchFallbackQuery(
-        "天候情報を比較してくれるか？",
-        "ユーザー: 今日と明日、広島で映画を見るならどちら？\nアシスタント: 比較します。",
+        "今日と明日の天気を比較してくれるか？",
+        "ユーザー: 映画を見るならどちら？",
+        new Date("2026-09-02T06:00:00.000Z"),
       ),
-    ).toContain("今日と明日、広島");
+    ).toBe("");
   });
 });

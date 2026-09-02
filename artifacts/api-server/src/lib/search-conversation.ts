@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { classifySearchIntent } from "./search-enhance";
 
 const MAX_CONTEXT_TURNS = 6;
 const MAX_CONTEXT_CHARS = 3_000;
@@ -97,6 +98,7 @@ export function needsConversationAwareSearchPlan(
 export function buildSearchFallbackQuery(
   userMessage: string,
   recentConversation: string,
+  now = new Date(),
 ): string {
   const current = compactTurnText(userMessage);
   if (!needsConversationAwareSearchPlan(current, recentConversation)) {
@@ -108,5 +110,78 @@ export function buildSearchFallbackQuery(
     .filter((line) => line.startsWith("ユーザー: "))
     .at(-1)
     ?.slice("ユーザー: ".length);
+
+  if (classifySearchIntent(current) === "weather") {
+    const source = [previousUser, current].filter(Boolean).join(" ");
+    const locations = extractLocationHints(source);
+    if (locations.length === 0) return "";
+
+    const dates = extractJstDateHints(source, now);
+    return [
+      ...locations,
+      ...dates,
+      "天気予報",
+      /比較|比べ|どちら/.test(current) ? "比較" : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 200);
+  }
+
   return [previousUser, current].filter(Boolean).join(" ").slice(0, 200);
+}
+
+function extractLocationHints(text: string): string[] {
+  const locations = new Set<string>();
+  const addMatches = (pattern: RegExp) => {
+    for (const match of text.matchAll(pattern)) {
+      const candidate = match[1]?.trim();
+      if (candidate && !/^(?:今日|明日|昨日|今夜|天気|天候)$/.test(candidate)) {
+        locations.add(candidate);
+      }
+    }
+  };
+
+  addMatches(
+    /([\p{Script=Han}々ヶ\p{Script=Katakana}ー]{2,14}(?:都|道|府|県|市|区|町|村))/gu,
+  );
+  addMatches(
+    /(?:^|[、。\s])([\p{Script=Han}々ヶ\p{Script=Katakana}ー]{2,12})(?=(?:で|の|は)(?:今日|明日|明後日|今夜|映画|天気|天候|上映|外出|イベント))/gu,
+  );
+  addMatches(
+    /(?:^|[、。\s])([\p{Script=Han}々ヶ\p{Script=Katakana}ー]{2,12})(?=について)/gu,
+  );
+  return [...locations].slice(0, 2);
+}
+
+function extractJstDateHints(text: string, now: Date): string[] {
+  const dates = new Set<string>();
+  const jstParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(jstParts.find((item) => item.type === type)?.value);
+  const baseUtc = Date.UTC(part("year"), part("month") - 1, part("day"));
+  const atOffset = (offset: number) =>
+    new Date(baseUtc + offset * 86_400_000).toISOString().slice(0, 10);
+
+  const relativeDates: Array<[RegExp, number]> = [
+    [/昨日/, -1],
+    [/今日|きょう/, 0],
+    [/明日/, 1],
+    [/明後日/, 2],
+  ];
+  for (const [pattern, offset] of relativeDates) {
+    if (pattern.test(text)) dates.add(atOffset(offset));
+  }
+  for (const match of text.matchAll(
+    /\b(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\b/g,
+  )) {
+    const [, year, month, day] = match;
+    dates.add(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`);
+  }
+  return [...dates];
 }

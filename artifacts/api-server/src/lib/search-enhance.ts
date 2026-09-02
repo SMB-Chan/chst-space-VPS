@@ -257,12 +257,14 @@ function intentRelevanceScore(result: SearchResult, query: string): number {
   const combined =
     `${result.title} ${result.snippet} ${result.url}`.toLowerCase();
   if (intent === "weather") {
+    // Recommendation/listicle pages are not forecast sources even when their
+    // snippets mention features such as precipitation probability.
+    if (/アプリ|おすすめ|ランキング|まとめ/.test(combined)) return -14;
     const directForecastMatch =
       /気温|降水|警報|注意報|台風|気象|予報|forecast|jma\.go\.jp|tenki\.jp|weathernews\.jp|weather\.yahoo\.co\.jp/i.test(
         combined,
       );
     if (directForecastMatch) return 10;
-    if (/アプリ|おすすめ|ランキング|まとめ/.test(combined)) return -14;
     return /天気|天候|雨|雪|weather/i.test(combined) ? 4 : -14;
   }
   if (intent === "movies") {

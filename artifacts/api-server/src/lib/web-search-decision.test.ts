@@ -71,7 +71,9 @@ describe("decideSearch", () => {
     );
 
     expect(result.search).toBe(true);
-    expect(result.query).toContain("今日と明日、広島");
+    expect(result.query).toContain("広島");
+    expect(result.query).toContain("天気予報");
+    expect(result.query).not.toContain("映画");
     expect(result.usedFallback).toBe(true);
   });
 });
