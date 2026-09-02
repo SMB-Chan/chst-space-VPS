@@ -22,6 +22,7 @@ import {
 import { getClientForModel } from "./ai-clients";
 import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
 import { buildWebContext } from "./web-search";
+import { buildRecentSearchConversation } from "./search-conversation";
 import { composeSkillSearchQuery } from "./skills";
 import { extractArtifacts } from "./artifacts";
 import { logger, safeFailureFields } from "./logger";
@@ -419,6 +420,10 @@ export async function streamChatReply(args: {
           },
           {
             forceQuery: composeSkillSearchQuery(userText, skills),
+            recentConversation: buildRecentSearchConversation(
+              chatMessages,
+              userText,
+            ),
             signal: clientAbort.signal,
           },
         );

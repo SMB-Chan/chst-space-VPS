@@ -49,21 +49,23 @@ describe("sanitizeSearchQuery", () => {
 });
 
 describe("expandSearchQueries", () => {
-  it("adds latest variant for plain queries", () => {
-    expect(expandSearchQueries("東京 天気")).toContain("東京 天気 最新");
+  it("adds authoritative forecast variants for weather queries", () => {
+    expect(expandSearchQueries("東京 天気")).toContain("東京 天気 気象庁");
+    expect(expandSearchQueries("東京 天気")).toContain("東京 天気 時間別予報");
     expect(expandSearchQueries("東京 天気")).toContain("東京 天気");
+    expect(expandSearchQueries("東京 天気")).not.toContain(
+      "東京 天気 ニュース",
+    );
   });
 
-  it("does not duplicate latest when already present", () => {
-    const variants = expandSearchQueries("東京 天気 最新");
-    expect(variants).toHaveLength(1);
-    expect(variants[0]).toBe("東京 天気 最新");
+  it("does not duplicate weather angles already present", () => {
+    const variants = expandSearchQueries("東京 天気 気象庁 時間別予報");
+    expect(variants).toEqual(["東京 天気 気象庁 時間別予報"]);
   });
 
   it("adds news variant for Japanese queries", () => {
-    const variants = expandSearchQueries("円安");
-    expect(variants).toContain("円安 最新");
-    expect(variants).toContain("円安 ニュース");
+    const variants = expandSearchQueries("半導体 ニュース");
+    expect(variants).toContain("半導体 ニュース");
   });
 
   it("caps variants at 4", () => {
@@ -178,6 +180,23 @@ describe("scoreSearchResult", () => {
       scoreSearchResult(plain, "ニュース"),
     );
   });
+
+  it("ranks a direct weather forecast above unrelated event content", () => {
+    const forecast = {
+      title: "広島県の天気予報",
+      url: "https://www.jma.go.jp/bosai/forecast/",
+      snippet: "今日と明日の降水確率、気温、警報を掲載しています。",
+    };
+    const event = {
+      title: "北海道の映画イベントまとめ",
+      url: "https://events.example.com/hokkaido",
+      snippet: "今日開催される話題の映画イベントです。",
+    };
+
+    expect(scoreSearchResult(forecast, "広島 今日 明日 天気")).toBeGreaterThan(
+      scoreSearchResult(event, "広島 今日 明日 天気"),
+    );
+  });
 });
 
 describe("mergeSearchResults", () => {
@@ -192,10 +211,10 @@ describe("mergeSearchResults", () => {
       {
         title: "B",
         url: "https://example.com/b",
-        snippet: "exact match 東京の天気",
+        snippet: "exact match 東京情報",
       },
     ];
-    const merged = mergeSearchResults(results, "東京の天気");
+    const merged = mergeSearchResults(results, "東京情報");
     expect(merged).toHaveLength(2);
     expect(merged[0].url).toBe("https://example.com/b");
   });
@@ -228,6 +247,34 @@ describe("mergeSearchResults", () => {
     ];
 
     expect(selectDiverseScoredResults(ranked, 4)).toEqual(ranked);
+  });
+
+  it("removes non-weather pages from weather results", () => {
+    const merged = mergeSearchResults(
+      [
+        {
+          title: "広島の天気予報",
+          url: "https://www.jma.go.jp/bosai/forecast/",
+          snippet: "今日と明日の気温と降水確率",
+        },
+        {
+          title: "おすすめ天気アプリ10選",
+          url: "https://apps.example.com/weather-ranking",
+          snippet: "人気アプリの機能を比較",
+        },
+        {
+          title: "北海道映画祭イベント",
+          url: "https://events.example.com/movie",
+          snippet: "上映作品の紹介",
+        },
+      ],
+      "広島 今日 明日 天気",
+    );
+
+    expect(merged.map((result) => result.url)).not.toContain(
+      "https://events.example.com/movie",
+    );
+    expect(merged[0]?.url).toBe("https://www.jma.go.jp/bosai/forecast/");
   });
 });
 
