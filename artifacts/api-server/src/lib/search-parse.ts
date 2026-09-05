@@ -82,8 +82,39 @@ export function inferSearchQuery(text: string): {
   if (!trimmed || SMALLTALK_RE.test(trimmed))
     return { needed: false, query: "" };
   if (/^https?:\/\/\S+$/i.test(trimmed)) return { needed: false, query: "" };
-  const query = trimmed.slice(0, 80);
-  return { needed: STRONG_SEARCH_RE.test(trimmed), query };
+  return {
+    needed: STRONG_SEARCH_RE.test(trimmed),
+    query: buildStandaloneQuery(trimmed),
+  };
+}
+
+/** Trailing request phrases that carry no search value ("...を教えてください"). */
+const REQUEST_TAIL_RE =
+  /(?:よろしくお願いします|お願いします|を)?(?:教えて|おしえて|調べて|検索して|見せて|まとめて|要約して|説明して|解説して|リストアップして)(?:ください|くれる|もらえますか|もらえませんか|いただけますか)?[。.!?！？\s]*$/;
+
+/**
+ * Turn a standalone user message into a compact query without a model: prefer
+ * the sentence that carries the freshness/strong keyword, then strip trailing
+ * request phrasing. Conversational and follow-up messages bypass this via
+ * needsConversationAwareSearchPlan and reach the planner LLM instead.
+ */
+function buildStandaloneQuery(trimmed: string): string {
+  const fallback = trimmed.slice(0, 80);
+  const sentences = trimmed
+    .split(/(?<=[。！？!?])\s*/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const source =
+    sentences.length > 1
+      ? (sentences.find((sentence) => STRONG_SEARCH_RE.test(sentence)) ??
+        sentences[0])
+      : trimmed;
+  const query = source
+    .replace(REQUEST_TAIL_RE, "")
+    .replace(/[。.,、]\s*$/, "")
+    .trim()
+    .slice(0, 80);
+  return query || fallback;
 }
 
 export function parseSearchHtml(html: string): SearchResult[] {

@@ -1,9 +1,9 @@
 import type OpenAI from "openai";
 import { classifySearchIntent } from "./search-enhance";
 
-const MAX_CONTEXT_TURNS = 6;
-const MAX_CONTEXT_CHARS = 3_000;
-const MAX_TURN_CHARS = 900;
+const MAX_CONTEXT_TURNS = 8;
+const MAX_CONTEXT_CHARS = 4_000;
+const MAX_TURN_CHARS = 1_200;
 
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -72,7 +72,7 @@ export function buildRecentSearchConversation(
 }
 
 const FOLLOW_UP_LANGUAGE_RE =
-  /^(?:では|じゃあ|それ(?:では|なら|について)?|これ(?:では|なら|について)?|その|同じ|両方|どちら)|比較して|比べて|詳しく|もう少し|続けて|どう(?:なの|ですか)|してくれる|してもらえる/i;
+  /^(?:では|じゃあ|それ(?:では|なら|について)?|これ(?:では|なら|について)?|その|同じ|両方|どちら)|比較して|比べて|詳しく|もう少し|続けて|要約して|まとめて|説明して|解説して|どう(?:なの|ですか)|してくれる|してもらえる/i;
 
 /** True when the current message cannot safely stand alone as a query. */
 export function needsConversationAwareSearchPlan(
@@ -84,7 +84,7 @@ export function needsConversationAwareSearchPlan(
 
   const looksLikeQuestion =
     /[?？]$/.test(message) ||
-    /(?:教えて|調べて|比較して|比べて|してくれる|してもらえる|でしょうか|ですか|なのか|どちら|適している)/.test(
+    /(?:教えて|調べて|比較して|比べて|要約して|まとめて|説明して|解説して|してくれる|してもらえる|でしょうか|ですか|なのか|どちら|適している)/.test(
       message,
     );
   if (looksLikeQuestion) return true;
@@ -128,8 +128,18 @@ export function buildSearchFallbackQuery(
       .slice(0, 200);
   }
 
-  return [previousUser, current].filter(Boolean).join(" ").slice(0, 200);
+  // Raw concatenation produces sentence-shaped noise; trim trailing request
+  // phrasing and cap each side so the query stays keyword-shaped.
+  return [previousUser, current]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => part.replace(REQUEST_TAIL_RE, "").trim().slice(0, 120))
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 200);
 }
+
+const REQUEST_TAIL_RE =
+  /(?:よろしくお願いします|お願いします|を)?(?:教えて|おしえて|調べて|検索して|見せて|まとめて|要約して|説明して|解説して)(?:ください|くれる|もらえますか|もらえませんか|いただけますか)?[。.!?！？\s]*$/;
 
 function extractLocationHints(text: string): string[] {
   const locations = new Set<string>();
