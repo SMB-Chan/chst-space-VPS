@@ -4,6 +4,7 @@ import {
   recallMemories,
   updateMemory,
   forgetMemory,
+  invalidateMemory,
   supersedeMemory,
   findRelevantMemories,
   runMemoryMaintenance,
@@ -18,28 +19,33 @@ import type {
   SpecialistToolResult,
 } from "./specialist-capabilities";
 
-const memoryStoreArgs = z.object({
-  topic: z.string().trim().min(1).max(200),
-  content: z.string().trim().min(1).max(4000),
-  source_url: z.string().trim().max(2000).optional(),
-  valid_as_of: z.string().trim().max(20).optional(),
-  expires_at: z.string().trim().max(30).optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  tags: z.array(z.string().trim().min(1).max(50)).max(10).optional(),
-});
+import {
+  memoryStoreSchema,
+  memoryUpdateSchema,
+  memoryIdSchema,
+  memoryInvalidateSchema,
+} from "./llm-memory-schema";
+
+const memoryStoreArgs = memoryStoreSchema;
 
 const memoryRecallArgs = z.object({
   query: z.string().trim().min(1).max(200),
   limit: z.number().int().min(1).max(20).optional(),
 });
 
-const memoryUpdateArgs = z.object({
-  id: z.string().trim().min(1).max(50),
-  topic: z.string().trim().min(1).max(200).optional(),
-  content: z.string().trim().min(1).max(4000).optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  expires_at: z.string().trim().max(30).optional(),
-  tags: z.array(z.string().trim().min(1).max(50)).max(10).optional(),
+const memoryUpdateArgs = z
+  .object({
+    id: memoryIdSchema,
+    expected_revision: z.number().int().positive(),
+  })
+  .passthrough()
+  .transform(({ id, ...updates }) => ({
+    id,
+    ...memoryUpdateSchema.parse(updates),
+  }));
+const memoryInvalidateArgs = memoryInvalidateSchema.extend({
+  id: memoryIdSchema,
+  expected_revision: z.number().int().positive(),
 });
 
 const memoryForgetArgs = z.object({
@@ -59,7 +65,7 @@ export function getMemoryToolDefinitions(): SpecialistToolDefinition[] {
         name: "memory_store",
         description:
           "新しい知識をあなたの記憶に保存します。Web検索で得た重要な情報や、ユーザーから学んだ事実を保存してください。" +
-          "トピックは短く具体的にし、内容は要約して書いてください。同じトピックの古い記憶がある場合はmemory_supersedeを使って置き換えてください。",
+          "kindで本人の発言・出典付き事実・推測・未確認を区別してください。推測と未確認は回答の自動参照対象になりません。sourced_factにはsource_urlとvalid_as_ofが必要です。内容は短く要約してください。",
         parameters: {
           type: "object",
           properties: {
@@ -71,9 +77,37 @@ export function getMemoryToolDefinitions(): SpecialistToolDefinition[] {
               type: "string",
               description: "記憶する内容（要約された事実）",
             },
+            kind: {
+              type: "string",
+              enum: [
+                "user_statement",
+                "sourced_fact",
+                "inference",
+                "unverified",
+              ],
+              description:
+                "情報の由来。ユーザーが明言した内容はuser_statement、出典付き事実はsourced_fact。自己判断で検証済みに昇格しない。",
+            },
+            category: {
+              type: "string",
+              enum: ["preference", "decision", "progress", "knowledge"],
+            },
             source_url: {
               type: "string",
-              description: "情報の出典URL",
+              description: "本文を確認したHTTP(S)出典URL",
+            },
+            source_ref: {
+              type: "string",
+              description: "会話や資料の参照ID（任意）",
+            },
+            valid_as_of: {
+              type: "string",
+              description: "情報の基準日 YYYY-MM-DD",
+            },
+            expires_at: {
+              type: "string",
+              description:
+                "有効期限（タイムゾーン付きISO 8601日時）。時事情報は短く設定。",
             },
             confidence: {
               type: "number",
@@ -85,7 +119,7 @@ export function getMemoryToolDefinitions(): SpecialistToolDefinition[] {
               description: "分類タグ（最大10個）",
             },
           },
-          required: ["topic", "content"],
+          required: ["topic", "content", "kind", "category"],
           additionalProperties: false,
         },
       },
@@ -118,19 +152,57 @@ export function getMemoryToolDefinitions(): SpecialistToolDefinition[] {
       function: {
         name: "memory_update",
         description:
-          "既存の記憶の内容を更新します。新しい情報で置き換える場合や、信頼度を変更する場合に使ってください。",
+          "既存の有効な記憶を訂正し、旧版を履歴に保存します。取得したrevisionをexpected_revisionへ渡してください。期限切れ・失効した記憶は更新できません。",
         parameters: {
           type: "object",
           properties: {
             id: { type: "string", description: "更新対象の記憶ID" },
+            expected_revision: {
+              type: "integer",
+              description: "直前に取得したrevision（競合検知）",
+            },
+            reason: { type: "string", description: "訂正の理由" },
+            tags: { type: "array", items: { type: "string" } },
             topic: { type: "string", description: "新しいトピック" },
             content: { type: "string", description: "新しい内容" },
+            kind: {
+              type: "string",
+              enum: [
+                "user_statement",
+                "sourced_fact",
+                "inference",
+                "unverified",
+              ],
+              description:
+                "情報の由来。ユーザーが明言した内容はuser_statement、出典付き事実はsourced_fact。自己判断で検証済みに昇格しない。",
+            },
+            category: {
+              type: "string",
+              enum: ["preference", "decision", "progress", "knowledge"],
+            },
+            source_url: {
+              type: "string",
+              description: "本文を確認したHTTP(S)出典URL",
+            },
+            source_ref: {
+              type: "string",
+              description: "会話や資料の参照ID（任意）",
+            },
+            valid_as_of: {
+              type: "string",
+              description: "情報の基準日 YYYY-MM-DD",
+            },
+            expires_at: {
+              type: "string",
+              description:
+                "有効期限（タイムゾーン付きISO 8601日時）。時事情報は短く設定。",
+            },
             confidence: {
               type: "number",
               description: "新しい信頼度（0.0-1.0）",
             },
           },
-          required: ["id"],
+          required: ["id", "expected_revision"],
           additionalProperties: false,
         },
       },
@@ -140,7 +212,7 @@ export function getMemoryToolDefinitions(): SpecialistToolDefinition[] {
       function: {
         name: "memory_forget",
         description:
-          "不要になった記憶を削除します。誤った情報や古い情報で不要になったものに対して使ってください。",
+          "不要な記憶の本文と訂正履歴を完全削除します。誤りの経緯を一時的に残したい場合はmemory_invalidateを使ってください。",
         parameters: {
           type: "object",
           properties: {
@@ -154,9 +226,30 @@ export function getMemoryToolDefinitions(): SpecialistToolDefinition[] {
     {
       type: "function",
       function: {
+        name: "memory_invalidate",
+        description:
+          "誤り・不要・古い記憶を直ちに検索対象から外します。本文と履歴は30日後の定期処理で自動廃棄します。即時の完全削除にはmemory_forgetを使います。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            reason: {
+              type: "string",
+              enum: ["incorrect", "unnecessary", "outdated"],
+            },
+            expected_revision: { type: "integer" },
+          },
+          required: ["id", "reason", "expected_revision"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "memory_supersede",
         description:
-          "古い記憶を新しい記憶で置き換えます。同じトピックについて新しい情報を得た場合、古い記憶をsupersedeしてから新しい情報をstoreしてください。",
+          "先にmemory_storeで新しい記憶を保存し、そのIDをnew_idに指定して古い記憶を置き換えます。両方が有効な同じユーザーの記憶である必要があります。",
         parameters: {
           type: "object",
           properties: {
@@ -190,7 +283,14 @@ function parseArgs<T>(schema: z.ZodType<T>, raw: string): T {
 }
 
 function formatMemoryBrief(m: MemoryEntry): string {
-  return `[${m.id}] ${m.topic} (信頼度: ${m.confidence.toFixed(1)}, 学習日: ${m.learned_at.slice(0, 10)})\n  ${m.content.slice(0, 200)}`;
+  return JSON.stringify({
+    id: m.id,
+    revision: m.revision,
+    topic: m.topic,
+    kind: m.kind,
+    expires_at: m.expires_at,
+    invalidated_at: m.invalidated_at,
+  });
 }
 
 export async function executeMemoryTool(
@@ -209,7 +309,7 @@ export async function executeMemoryTool(
         ok: true,
         capability: "web-search",
         summary: `記憶を保存しました (ID: ${entry.id})`,
-        text: `記憶ID: ${entry.id}\nトピック: ${entry.topic}\n内容: ${entry.content.slice(0, 200)}\n有効期限: ${entry.expires_at?.slice(0, 10) ?? "無期限"}`,
+        text: formatMemoryBrief(entry),
       };
     }
 
@@ -227,8 +327,8 @@ export async function executeMemoryTool(
       return {
         ok: true,
         capability: "web-search",
-        summary: `${memories.length}件の記憶を思い出しました。`,
-        text: memories.map(formatMemoryBrief).join("\n\n"),
+        summary: "記憶を取得し、入力予算に収まる参考情報を提示します。",
+        text: formatMemoriesForPrompt(memories),
       };
     }
 
@@ -249,6 +349,24 @@ export async function executeMemoryTool(
         capability: "web-search",
         summary: `記憶を更新しました (ID: ${id})`,
         text: formatMemoryBrief(updated),
+      };
+    }
+
+    if (call.name === "memory_invalidate") {
+      const args = parseArgs(memoryInvalidateArgs, call.arguments);
+      const success = await invalidateMemory(
+        userId,
+        args.id,
+        args.reason,
+        args.expected_revision,
+      );
+      return {
+        ok: success,
+        capability: "web-search",
+        summary: success
+          ? "記憶を失効させ、参照対象から外しました。"
+          : "記憶が見つかりませんでした。",
+        text: "",
       };
     }
 
@@ -298,6 +416,7 @@ export const MEMORY_TOOL_NAMES = new Set([
   "memory_recall",
   "memory_update",
   "memory_forget",
+  "memory_invalidate",
   "memory_supersede",
 ]);
 

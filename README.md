@@ -103,6 +103,10 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - `TRANSCRIBE_MODEL` — 音声添付の文字起こしモデル（任意。既定は `gpt-4o-mini-transcribe`、利用不可なら `whisper-1` へ自動フォールバックし、DashScope 設定時は paraformer-v2 も試行）
 - Token Plan の DashScope はリージョン共通 URL ではなく、専用エンドポイントが必要です
 
+## モデル共通の記憶
+
+通常チャットのモデル間で、ユーザーの好み・決定事項・進捗・出典付き知識を共有します。訂正履歴、失効と完全削除、期限切れの自動廃棄、文字数上限付きのコンテキスト取得に対応します。外部アプリ向けの認証付き `/api/memories` APIも利用できます。仕様と利用例は [共有記憶サービス](./docs/shared-memory.md) を参照してください。
+
 ## 安全性と運用上の注意
 
 - 添付は本文と分離した構造化JSONで送信し、サーバー側で画像data URL・base64の正規形・画像シグネチャとUTF-8テキストを検証してからモデル入力へ変換します。`CS_ATTACHMENTS_V1:` はDB・表示互換用です。

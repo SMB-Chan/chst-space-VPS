@@ -197,6 +197,27 @@ CREATE TABLE IF NOT EXISTS llm_memories (
   tags jsonb NOT NULL DEFAULT '[]'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+-- Existing memories have unknown provenance; do not silently promote them to facts.
+ALTER TABLE llm_memories ALTER COLUMN confidence SET DEFAULT 0.5;
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'unverified';
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT 'knowledge';
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS source_ref text;
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 1;
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS invalidated_at timestamptz;
+ALTER TABLE llm_memories ADD COLUMN IF NOT EXISTS invalidation_reason text;
+-- Bound retention for legacy entries that did not have an expiry.
+UPDATE llm_memories SET expires_at = learned_at + interval '180 days' WHERE expires_at IS NULL;
+CREATE TABLE IF NOT EXISTS llm_memory_revisions (
+  memory_id text NOT NULL REFERENCES llm_memories(id) ON DELETE CASCADE,
+  revision integer NOT NULL,
+  snapshot jsonb NOT NULL,
+  reason text NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (memory_id, revision)
+);
+CREATE INDEX IF NOT EXISTS llm_memory_revisions_recorded_idx ON llm_memory_revisions(recorded_at);
+CREATE INDEX IF NOT EXISTS llm_memories_retention_idx ON llm_memories(expires_at, invalidated_at);
 CREATE INDEX IF NOT EXISTS llm_memories_user_topic_idx
   ON llm_memories(user_id, topic);
 CREATE INDEX IF NOT EXISTS llm_memories_user_active_idx

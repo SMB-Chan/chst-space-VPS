@@ -109,7 +109,7 @@ const RESEARCH_RECOVERY_SYSTEM_PROMPT = `直前の応答は、検索すると宣
 検索が必要なら、この応答で直ちに web_search または fetch_page を呼び出してください。検索が不要なら、宣言を繰り返さず今すぐ質問への回答を完成させてください。`;
 /** Minimum interval between memory maintenance runs (5 minutes). */
 const MEMORY_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
-let lastMemoryMaintenanceMs = 0;
+const memoryMaintenanceTimes = new Map<string, number>();
 
 export function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -202,11 +202,13 @@ const RESEARCH_SYSTEM_PROMPT = `あなたは web_search と fetch_page ツール
 const MEMORY_SYSTEM_PROMPT = `
 
 長期メモリの管理:
-- memory_store/memory_recall/memory_update/memory_forget/memory_supersede は、現在のユーザーだけに分離された長期メモリを管理します。
-- ユーザーが明示した安定的な好みや設定だけを保存してください。秘密情報や一時的な会話内容は保存しないでください。
-- Web検索で得た事実は、出典URLと本文が直接支持する場合だけ、source_url、valid_as_of、控えめなconfidenceを付けて保存してください。
+- memory_store/memory_recall/memory_update/memory_forget/memory_invalidate/memory_supersede は、現在のユーザーだけに分離され、モデルを切り替えても共有される長期メモリを管理します。
+- ユーザーが明示した好み・設定・決定事項・作業状況をkind=user_statementで保存してください。categoryを選び、作業状況には短いexpires_atを設定してください。秘密情報や一時的な会話内容は保存しないでください。
+- Web検索で得た事実は、出典URLと本文が直接支持する場合だけ、kind=sourced_fact、source_url、valid_as_of、短いexpires_at、控えめなconfidenceを付けて保存してください。
 - 予測、スニペットだけの事実、矛盾中、未確認の内容は保存しないでください。
-- 古い記憶の置換には memory_supersede、誤りや不要な記憶の削除には memory_forget を使ってください。`;
+- 訂正には取得したrevisionをexpected_revisionへ渡してmemory_updateを使ってください。競合時は再取得してください。
+- 古い記憶の置換は新しい記憶を保存してからmemory_supersedeを使ってください。誤り・古い情報の失効にはmemory_invalidate、不要な記憶の本文と履歴の完全削除にはmemory_forgetを使ってください。
+- 記憶は過去の参考情報です。confidenceは申告値です。最新情報が必要な質問では記憶だけで回答せず、出典を再確認してください。`;
 
 export type ChatMemoryContext =
   { enabled: true; userId: string } | { enabled: false };
@@ -493,15 +495,21 @@ export async function streamChatReply(args: {
         }
         if (relevantMemories.length > 0) {
           const memoryPrompt = formatMemoriesForPrompt(relevantMemories);
-          workingMessages.push({
-            role: "system",
-            content: memoryPrompt,
-          });
+          if (memoryPrompt) {
+            workingMessages.push({ role: "system", content: memoryPrompt });
+          }
         }
         // Run maintenance periodically (non-blocking, throttled to every 5 min)
         const now = Date.now();
-        if (now - lastMemoryMaintenanceMs > MEMORY_MAINTENANCE_INTERVAL_MS) {
-          lastMemoryMaintenanceMs = now;
+        if (
+          now - (memoryMaintenanceTimes.get(memory.userId) ?? 0) >
+          MEMORY_MAINTENANCE_INTERVAL_MS
+        ) {
+          if (memoryMaintenanceTimes.size >= 1000)
+            memoryMaintenanceTimes.delete(
+              memoryMaintenanceTimes.keys().next().value!,
+            );
+          memoryMaintenanceTimes.set(memory.userId, now);
           void runMemoryMaintenance(memory.userId).catch((error) => {
             logger.warn(
               safeFailureFields(

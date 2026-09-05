@@ -11,6 +11,7 @@ import {
 import { createGracefulShutdown } from "./lib/graceful-shutdown";
 import { startAlibabaVideoWorker } from "./lib/alibaba-video-worker";
 import { attachAlibabaRealtimeWebSocket } from "./lib/alibaba-realtime";
+import { startMemoryWorker } from "./lib/llm-memory-worker";
 import { logger } from "./lib/logger";
 import { startupReadiness } from "./lib/startup-readiness";
 
@@ -34,9 +35,11 @@ async function main(): Promise<void> {
     logger.info({ port }, "Server listening");
   });
   const realtimeSocket = attachAlibabaRealtimeWebSocket(server);
+  let memoryWorker: ReturnType<typeof startMemoryWorker> | undefined;
   const shutdown = createGracefulShutdown({
     server,
     resources: [
+      { name: "memory-worker", close: async () => memoryWorker?.close() },
       { name: "alibaba-video-worker", close: videoWorker.close },
       { name: "alibaba-realtime-websocket", close: realtimeSocket.close },
       { name: "browser-egress", close: closeBrowser },
@@ -77,6 +80,7 @@ async function main(): Promise<void> {
     await ensureAlibabaVideoJobsSchema((sql) => pool.query(sql));
     await ensureAiUsageSchema((sql) => pool.query(sql));
     await ensureLlmMemoriesSchema((sql) => pool.query(sql));
+    memoryWorker = startMemoryWorker();
     startupReadiness.markReady();
     logger.info("Server ready");
   } catch (err) {

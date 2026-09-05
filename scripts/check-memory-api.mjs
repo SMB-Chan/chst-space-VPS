@@ -1,0 +1,10 @@
+import { readFileSync } from "node:fs";
+const root = new URL("../", import.meta.url);
+const spec = JSON.parse(readFileSync(new URL("docs/shared-memory.openapi.json", root), "utf8"));
+const source = readFileSync(new URL("artifacts/api-server/src/routes/memories.ts", root), "utf8");
+const normalize = (path) => path.replace(/:[^/]+|\{[^}]+\}/g, "{}");
+const actual = new Set([...source.matchAll(/router\.(get|post|patch|delete)\(\s*["']([^"']+)["']/g)].map((m) => `${m[1]} ${normalize(m[2])}`));
+const expected = new Set(Object.entries(spec.paths).flatMap(([path, methods]) => Object.keys(methods).map((method) => `${method} ${normalize(path)}`)));
+const mismatches = [...actual].filter((r) => !expected.has(r)).concat([...expected].filter((r) => !actual.has(r)));
+if (mismatches.length) throw new Error(`Memory API route mismatch: ${mismatches.join(", ")}`);
+console.log(`Memory OpenAPI/Express route contract OK (${actual.size} operations).`);

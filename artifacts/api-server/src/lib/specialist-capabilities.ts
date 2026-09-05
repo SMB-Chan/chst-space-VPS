@@ -467,6 +467,7 @@ const MUTATION_TOOL_NAMES = new Set([
   "memory_store",
   "memory_update",
   "memory_forget",
+  "memory_invalidate",
   "memory_supersede",
 ]);
 const EXTERNAL_ACTION_TOOL_NAMES = new Set(["fill_form"]);
