@@ -78,4 +78,14 @@ describe("buildSearchFallbackQuery", () => {
       ),
     ).toBe("");
   });
+
+  it("compacts the non-weather fallback into keyword-shaped text", () => {
+    const query = buildSearchFallbackQuery(
+      "発売日を教えて",
+      "ユーザー: 一番くじ ガンダム",
+      new Date("2026-09-02T06:00:00.000Z"),
+    );
+    expect(query).toBe("一番くじ ガンダム 発売日");
+    expect(query).not.toContain("教えて");
+  });
 });

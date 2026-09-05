@@ -76,4 +76,57 @@ describe("decideSearch", () => {
     expect(result.query).not.toContain("映画");
     expect(result.usedFallback).toBe(true);
   });
+
+  it("parses fenced planner JSON instead of falling back", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content:
+              '```json\n{"search": true, "query": "XR-5 製品仕様 2026"}\n```',
+          },
+        },
+      ],
+    });
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    const result = await decideSearch(
+      client,
+      "qwen3.7-plus",
+      "alibaba",
+      "XR-5の仕様を詳しく",
+      { recentConversation: "ユーザー: XR-5って何？" },
+    );
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ search: true, query: "XR-5 製品仕様 2026" });
+  });
+
+  it("parses prose-decorated planner JSON with trailing braces in the text", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content:
+              '判定結果: {"search": true, "query": "東京 株価 終値"} （括弧は}まで）',
+          },
+        },
+      ],
+    });
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    const result = await decideSearch(
+      client,
+      "qwen3.7-plus",
+      "alibaba",
+      "東京の株価終値は？",
+      { recentConversation: "ユーザー: 市場について" },
+    );
+
+    expect(result).toEqual({ search: true, query: "東京 株価 終値" });
+  });
 });
