@@ -24,11 +24,11 @@ const QUOTA_HEADERS = {
 export interface ModelInfo {
   id: string;
   label: string;
-  provider: "openai" | "dashscope";
+  provider: "openai" | "dashscope" | "openrouter";
   description: string;
   supportsVision: boolean;
   supportsReasoning: boolean;
-  reasoning?: "none" | "openai" | "dashscope";
+  reasoning?: "none" | "openai" | "dashscope" | "openrouter";
 }
 
 export interface TokenPlanQuotaHint {
@@ -142,6 +142,7 @@ const MODELS: ModelInfo[] = [
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
   dashscope: "Alibaba Cloud (Qwen)",
+  openrouter: "OpenRouter",
 };
 
 interface ModelSelectorProps {
@@ -156,7 +157,9 @@ function isModelInfo(value: unknown): value is ModelInfo {
   return (
     typeof v.id === "string" &&
     typeof v.label === "string" &&
-    (v.provider === "openai" || v.provider === "dashscope") &&
+    (v.provider === "openai" ||
+      v.provider === "dashscope" ||
+      v.provider === "openrouter") &&
     typeof v.description === "string" &&
     typeof v.supportsVision === "boolean" &&
     typeof v.supportsReasoning === "boolean"
@@ -344,6 +347,7 @@ export function ModelSelector({
 
   const openaiModels = models.filter((m) => m.provider === "openai");
   const qwenModels = models.filter((m) => m.provider === "dashscope");
+  const openRouterModels = models.filter((m) => m.provider === "openrouter");
   const triggerQuota =
     quota?.weeklyRemainingPercent ?? quota?.limitingRemainingPercent;
   const triggerQuotaLabel =
@@ -440,6 +444,15 @@ export function ModelSelector({
         {PROVIDER_LABELS["openai"]}
       </DropdownMenuLabel>
       {openaiModels.map((model) => renderModelOption(model, "desktop"))}
+      {openRouterModels.length > 0 ? (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            {PROVIDER_LABELS["openrouter"]}
+          </DropdownMenuLabel>
+          {openRouterModels.map((model) => renderModelOption(model, "desktop"))}
+        </>
+      ) : null}
       <DropdownMenuSeparator />
       <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
         {providerQuota}
@@ -493,6 +506,17 @@ export function ModelSelector({
           {openaiModels.map((model) =>
             renderModelOption(model, "mobile", close),
           )}
+          {openRouterModels.length > 0 ? (
+            <>
+              <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
+              <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                {PROVIDER_LABELS["openrouter"]}
+              </div>
+              {openRouterModels.map((model) =>
+                renderModelOption(model, "mobile", close),
+              )}
+            </>
+          ) : null}
           <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
           <div className="px-2 pb-1 pt-1">{providerQuota}</div>
           {qwenModels.map((model) => renderModelOption(model, "mobile", close))}

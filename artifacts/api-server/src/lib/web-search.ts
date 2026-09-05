@@ -78,6 +78,26 @@ const DECIDE_TIMEOUT_MS = 6_000;
 const DECISION_MAX_TOKENS = 400;
 
 /**
+ * Token cap for the planner calls. DashScope thinking models would spend the
+ * whole budget on hidden reasoning; OpenRouter must not receive the
+ * DashScope-only vendor field.
+ */
+function applyDecisionTokenCap(
+  opts: Record<string, unknown>,
+  provider: ModelProvider,
+): void {
+  if (provider === "openai") {
+    opts.max_completion_tokens = DECISION_MAX_TOKENS;
+    return;
+  }
+  opts.max_tokens = DECISION_MAX_TOKENS;
+  if (provider === "dashscope") {
+    // Search decision must stay a cheap JSON call — never inherit default thinking.
+    opts.extra_body = { enable_thinking: false };
+  }
+}
+
+/**
  * Extract the first balanced JSON object from model output. Planner models
  * routinely wrap the requested JSON in markdown fences or add prose ("以下の
  * JSONです: {...}"); a plain JSON.parse of the first-to-last brace span fails
@@ -717,17 +737,7 @@ export async function decideSearch(
         },
       ],
     };
-    if (provider === "openai") {
-      (opts as unknown as Record<string, unknown>).max_completion_tokens =
-        DECISION_MAX_TOKENS;
-    } else {
-      (opts as unknown as Record<string, unknown>).max_tokens =
-        DECISION_MAX_TOKENS;
-      // Search decision must stay a cheap JSON call — never inherit default thinking.
-      (opts as unknown as Record<string, unknown>).extra_body = {
-        enable_thinking: false,
-      };
-    }
+    applyDecisionTokenCap(opts as unknown as Record<string, unknown>, provider);
 
     // Pass the abort signal as a request option so the SDK cancels the upstream
     // HTTP request when the timer fires (not just races away from it).
@@ -839,16 +849,7 @@ export async function decideFollowUpSearch(
         },
       ],
     };
-    if (provider === "openai") {
-      (opts as unknown as Record<string, unknown>).max_completion_tokens =
-        DECISION_MAX_TOKENS;
-    } else {
-      (opts as unknown as Record<string, unknown>).max_tokens =
-        DECISION_MAX_TOKENS;
-      (opts as unknown as Record<string, unknown>).extra_body = {
-        enable_thinking: false,
-      };
-    }
+    applyDecisionTokenCap(opts as unknown as Record<string, unknown>, provider);
 
     const resp = (await client.chat.completions.create(opts, {
       signal: controller.signal,

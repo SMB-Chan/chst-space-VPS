@@ -4,9 +4,14 @@ import {
   AVAILABLE_MODELS,
   dashscopeClient,
   openaiClient,
+  openrouterClient,
   type ChatModel,
   type ModelProvider,
 } from "./ai-clients";
+import {
+  isOpenRouterOverBudget,
+  openRouterConfigured,
+} from "./openrouter-budget";
 import { transcribeDashScopeAudio } from "./audio-transcription";
 import {
   getMemoryToolDefinitions,
@@ -155,6 +160,7 @@ type ModelDiscoveryCache = {
 
 let dashScopeModelCache: ModelDiscoveryCache | null = null;
 let openAiModelCache: ModelDiscoveryCache | null = null;
+let openRouterModelCache: ModelDiscoveryCache | null = null;
 
 async function readModelIds(
   client: OpenAI | null,
@@ -198,9 +204,16 @@ async function readOpenAiModelIds(): Promise<Set<string> | null> {
   });
 }
 
+async function readOpenRouterModelIds(): Promise<Set<string> | null> {
+  return readModelIds(openrouterClient, openRouterModelCache, (next) => {
+    openRouterModelCache = next;
+  });
+}
+
 export function resetModelDiscoveryCache(): void {
   dashScopeModelCache = null;
   openAiModelCache = null;
+  openRouterModelCache = null;
 }
 
 function chatModelCapabilities(model: ChatModel): CapabilityId[] {
@@ -263,7 +276,10 @@ export function getCapabilityModels(): CapabilityModel[] {
     label: model.label,
     provider: model.provider,
     capabilities: chatModelCapabilities(model),
-    configured: model.provider === "openai" || Boolean(dashscopeClient),
+    configured:
+      model.provider === "openai" ||
+      (model.provider === "openrouter" && openRouterConfigured()) ||
+      Boolean(dashscopeClient),
   }));
   const specialistModels = SPECIALIST_MODEL_BASE.map((model) => ({
     ...model,
@@ -359,14 +375,22 @@ export function mergeAvailableChatModels(
 }
 
 export async function getAvailableChatModels(): Promise<ChatModel[]> {
-  const [dashScopeIds, openAiIds] = await Promise.all([
-    readDashScopeModelIds(),
-    readOpenAiModelIds(),
-  ]);
+  const [dashScopeIds, openAiIds, openRouterIds, openRouterOverBudget] =
+    await Promise.all([
+      readDashScopeModelIds(),
+      readOpenAiModelIds(),
+      readOpenRouterModelIds(),
+      isOpenRouterOverBudget(),
+    ]);
 
   return mergeAvailableChatModels([
     { provider: "dashscope", ids: dashScopeIds },
     { provider: "openai", ids: openAiIds },
+    // An empty set hides the catalog models when the budget is nearly spent.
+    {
+      provider: "openrouter",
+      ids: openRouterOverBudget ? new Set<string>() : openRouterIds,
+    },
   ]);
 }
 
@@ -374,9 +398,25 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
   capabilities: CapabilityDescriptor[];
   models: CapabilityModel[];
 }> {
-  const ids = await readDashScopeModelIds();
+  const [ids, openRouterOverBudget] = await Promise.all([
+    readDashScopeModelIds(),
+    isOpenRouterOverBudget(),
+  ]);
+  const openRouterIds = await readOpenRouterModelIds();
   const models = getCapabilityModels().map((model) => {
     if (model.provider === "openai") return { ...model, configured: true };
+    if (
+      model.provider === "openrouter" &&
+      model.capabilities.includes("chat")
+    ) {
+      return {
+        ...model,
+        configured:
+          openRouterConfigured() &&
+          !openRouterOverBudget &&
+          (!openRouterIds || openRouterIds.has(model.id)),
+      };
+    }
     if (model.capabilities.includes("chat")) {
       return {
         ...model,

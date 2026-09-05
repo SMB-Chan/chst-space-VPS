@@ -50,8 +50,35 @@ if (process.env.DASHSCOPE_API_KEY) {
 
 export { dashscopeClient };
 
-export type ModelProvider = "openai" | "dashscope";
-export type ReasoningKind = "none" | "openai" | "dashscope";
+// OpenRouter — OpenAI-compatible aggregator. Optional: chat models only.
+// A dedicated key with a spend limit (see .env.example) is the hard budget
+// cap; openrouter-budget.ts watches that limit and hides the models when
+// the allowance is nearly spent.
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+let openrouterClient: OpenAI | null = null;
+
+if (process.env.OPENROUTER_API_KEY?.trim()) {
+  openrouterClient = new OpenAI({
+    apiKey: process.env.OPENROUTER_API_KEY.trim(),
+    baseURL: OPENROUTER_BASE_URL,
+    fetch: llmFetch,
+    defaultHeaders: {
+      // OpenRouter attribution headers (optional but recommended).
+      "HTTP-Referer":
+        process.env.APP_PUBLIC_URL?.trim() || "https://chat-smb.replit.app",
+      "X-Title": "Chat Space",
+    },
+  });
+  logger.info("OpenRouter client initialized");
+} else {
+  logger.warn("OPENROUTER_API_KEY not set — OpenRouter models unavailable");
+}
+
+export { openrouterClient };
+
+export type ModelProvider = "openai" | "dashscope" | "openrouter";
+export type ReasoningKind = "none" | "openai" | "dashscope" | "openrouter";
 export type ReasoningLevel = "off" | "low" | "medium" | "high";
 
 export interface ChatModel {
@@ -176,6 +203,46 @@ export const AVAILABLE_MODELS = [
     supportsReasoning: true,
     reasoning: "dashscope" as ReasoningKind,
   },
+  // OpenRouter (openai-compatible aggregator) — budget-tier picks verified
+  // against the live catalog. Prices (per 1M tokens, 2026-09):
+  //   gemini-2.5-flash-lite $0.10/$0.40 · gpt-4o-mini $0.15/$0.60
+  //   deepseek-chat $0.32/$0.89 · qwen3-235b-thinking $0.23/$2.30
+  {
+    id: "google/gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash-Lite (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "最安・1M文脈・画像理解",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openrouter" as ReasoningKind,
+  },
+  {
+    id: "openai/gpt-4o-mini",
+    label: "GPT-4o mini (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "低コスト・画像理解",
+    supportsVision: true,
+    supportsReasoning: false,
+    reasoning: "none" as ReasoningKind,
+  },
+  {
+    id: "deepseek/deepseek-chat",
+    label: "DeepSeek V3 Chat (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "汎用・テキスト特化",
+    supportsVision: false,
+    supportsReasoning: false,
+    reasoning: "none" as ReasoningKind,
+  },
+  {
+    id: "qwen/qwen3-235b-a22b-thinking-2507",
+    label: "Qwen3 235B Thinking (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "推論特化（常時思考）",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "none" as ReasoningKind,
+  },
 ] as const satisfies readonly ChatModel[];
 
 export type ModelId = string;
@@ -230,6 +297,16 @@ export function applyGenerationParams(
     return;
   }
 
+  if (provider === "openrouter") {
+    opts.max_tokens = 8192;
+    // OpenRouter unified reasoning param. Models that reject it are covered
+    // by the unsupported-parameter retry (applySafeGenerationParams).
+    if (model?.reasoning === "openrouter" && level !== "off") {
+      opts.reasoning = { effort: level };
+    }
+    return;
+  }
+
   opts.max_tokens = 8192;
   // Alibaba's OpenAI-compatible API accepts these vendor parameters at the
   // request-body top level when used through the OpenAI Node.js SDK. The
@@ -258,6 +335,7 @@ export function applySafeGenerationParams(
   opts: Record<string, unknown>,
   provider: ModelProvider,
 ): void {
+  delete opts.reasoning;
   delete opts.reasoning_effort;
   delete opts.enable_thinking;
   delete opts.thinking_budget;
@@ -270,7 +348,9 @@ export function applySafeGenerationParams(
   } else {
     opts.max_tokens = 8192;
     delete opts.max_completion_tokens;
-    opts.incremental_output = true;
+    if (provider === "dashscope") {
+      opts.incremental_output = true;
+    }
   }
 }
 
@@ -306,7 +386,7 @@ export function isUnsupportedGenerationParam(err: unknown): boolean {
   const status = (err as { status?: number }).status;
   const msg = err instanceof Error ? err.message : String(err);
   if (status != null && status !== 400) return false;
-  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning_effort|enable_thinking|thinking_budget|incremental_output|tool_stream/i.test(
+  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning|enable_thinking|thinking_budget|incremental_output|tool_stream/i.test(
     msg,
   );
 }
@@ -328,6 +408,14 @@ export function getClientForModel(
     }
     return { client: dashscopeClient, provider: "dashscope" };
   }
+  if (provider === "openrouter") {
+    if (!openrouterClient) {
+      throw new Error(
+        "OpenRouter APIキーが設定されていません。OPENROUTER_API_KEY を確認してください。",
+      );
+    }
+    return { client: openrouterClient, provider: "openrouter" };
+  }
   return { client: openaiClient, provider: "openai" };
 }
 
@@ -339,11 +427,17 @@ const dashscopeCircuit = getOrCreateCircuitBreaker("dashscope", {
   failureThreshold: 5,
   resetTimeoutMs: 30_000,
 });
+const openrouterCircuit = getOrCreateCircuitBreaker("openrouter", {
+  failureThreshold: 5,
+  resetTimeoutMs: 30_000,
+});
 
 export function getCircuitBreakerForProvider(
   provider: ModelProvider,
 ): CircuitBreaker {
-  return provider === "dashscope" ? dashscopeCircuit : openaiCircuit;
+  if (provider === "dashscope") return dashscopeCircuit;
+  if (provider === "openrouter") return openrouterCircuit;
+  return openaiCircuit;
 }
 
 export async function withCircuitBreaker<T>(
