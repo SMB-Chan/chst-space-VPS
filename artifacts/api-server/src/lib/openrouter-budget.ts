@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { resolveOpenRouterApiKey } from "./openrouter-config";
 
 /**
  * OpenRouter budget guard.
@@ -37,7 +38,7 @@ interface CachedKeyState {
 let cached: CachedKeyState | null = null;
 
 export function openRouterConfigured(): boolean {
-  return Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  return Boolean(resolveOpenRouterApiKey());
 }
 
 export function resolveMonthlyBudgetUsd(
@@ -52,7 +53,7 @@ export function resolveMonthlyBudgetUsd(
 export async function getOpenRouterKeyState(
   signal?: AbortSignal,
 ): Promise<OpenRouterKeyState | null> {
-  const key = process.env.OPENROUTER_API_KEY?.trim();
+  const key = resolveOpenRouterApiKey();
   if (!key) return null;
   if (cached && cached.expiresAt > Date.now()) return cached.state;
   const state = await fetchKeyState(key, signal);
