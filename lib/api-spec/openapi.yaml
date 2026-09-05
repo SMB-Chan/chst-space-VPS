@@ -40,6 +40,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/OpenaiModel"
+  /openai/me:
+    get:
+      operationId: getOpenaiMe
+      tags: [openai]
+      summary: Identify the authenticated user
+      description: >-
+        Returns the authenticated Clerk user id. Used by the frontend access
+        gate; a 403 means the account is not on the service allowlist.
+      responses:
+        "200":
+          description: Authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiMe"
   /openai/capabilities:
     get:
       operationId: listOpenaiCapabilities
@@ -520,6 +535,13 @@ paths:
                 $ref: "#/components/schemas/OpenaiError"
 components:
   schemas:
+    OpenaiMe:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          description: Clerk user id of the authenticated account
     HealthStatus:
       type: object
       properties:

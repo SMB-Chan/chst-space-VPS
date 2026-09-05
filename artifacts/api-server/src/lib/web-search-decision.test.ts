@@ -54,6 +54,36 @@ describe("decideSearch", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("sends OpenRouter a plain token cap without DashScope vendor fields", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: '{"search": true, "query": "東京 株価 終値"}',
+          },
+        },
+      ],
+    });
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+
+    const result = await decideSearch(
+      client,
+      "google/gemini-2.5-flash-lite",
+      "openrouter",
+      "東京の株価終値は？",
+      { recentConversation: "ユーザー: 市場について" },
+    );
+
+    expect(result).toEqual({ search: true, query: "東京 株価 終値" });
+    const request = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request.max_tokens).toBe(400);
+    expect(request).not.toHaveProperty("extra_body");
+    expect(request).not.toHaveProperty("max_completion_tokens");
+    expect(request).not.toHaveProperty("enable_thinking");
+  });
+
   it("uses the previous user turn when planner output is malformed", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [{ message: { content: "not-json" } }],

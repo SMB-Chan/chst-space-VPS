@@ -505,6 +505,11 @@ router.get("/openai/models", async (_req, res) => {
   res.json(await getAvailableChatModels());
 });
 
+/** Lightweight authed probe the frontend access gate uses (403 = not invited). */
+router.get("/openai/me", requireAuth, (req, res) => {
+  res.json({ userId: getUserId(req) });
+});
+
 router.get("/openai/capabilities", async (_req, res) => {
   res.json(await getCapabilityRegistryWithAvailability());
 });

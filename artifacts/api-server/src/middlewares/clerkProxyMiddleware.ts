@@ -143,6 +143,45 @@ export function getClerkProxyUrlForRequest(
   return hostname ? `https://${hostname}${CLERK_PROXY_PATH}` : undefined;
 }
 
+/**
+ * Resolve the client IP we are willing to attest to Clerk.
+ *
+ * Trust boundary (issue #46): a client can seed arbitrary leftmost
+ * `X-Forwarded-For` entries, so the old leftmost-pick rule let a spoofed
+ * value become the IP Clerk uses for security/rate-limiting decisions.
+ *
+ * 1. `CLERK_TRUSTED_CLIENT_IP_HEADER` — explicit operator declaration of a
+ *    trusted edge header (e.g. `CF-Connecting-IP` behind Cloudflare).
+ *    When the header is absent the request did not traverse that edge, so
+ *    the standard chain rule below applies instead.
+ * 2. Rightmost `X-Forwarded-For` entry — the value appended by the last
+ *    honest proxy (Replit documents XFF as the supported way to observe the
+ *    originating IP in deployments). Clients cannot forge the rightmost
+ *    entry whenever at least one trusted proxy sits in front, which is
+ *    always true for production deployments.
+ * 3. TCP peer address — no forwarded chain at all (local/direct traffic).
+ */
+export function resolveTrustedClientIp(
+  headers: IncomingHttpHeaders,
+  remoteAddress: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const trustedHeader =
+    env.CLERK_TRUSTED_CLIENT_IP_HEADER?.trim().toLowerCase();
+  if (trustedHeader) {
+    const edgeValue = firstHeaderValue(headers[trustedHeader]);
+    if (edgeValue) return edgeValue;
+  }
+
+  const chain = headers["x-forwarded-for"];
+  const entries = (Array.isArray(chain) ? chain.join(",") : (chain ?? ""))
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length > 0) return entries[entries.length - 1];
+  return remoteAddress || undefined;
+}
+
 export function clerkProxyMiddleware(): RequestHandler {
   if (process.env.NODE_ENV !== "production") {
     return (_req, _res, next) => next();
@@ -176,12 +215,12 @@ export function clerkProxyMiddleware(): RequestHandler {
         proxyReq.setHeader("Clerk-Proxy-Url", proxyUrl);
         proxyReq.setHeader("Clerk-Secret-Key", secretKey);
 
-        // Keep the existing Replit client-IP behavior until issue #46's edge
-        // header contract is proven. Do not guess left/right proxy hops here.
-        const clientIp =
-          firstHeaderValue(req.headers["x-forwarded-for"]) ||
-          req.socket?.remoteAddress ||
-          "";
+        // Attest only an IP that survived the trust boundary above — never a
+        // client-seeded leftmost XFF entry (issue #46).
+        const clientIp = resolveTrustedClientIp(
+          req.headers,
+          req.socket?.remoteAddress,
+        );
         if (clientIp) proxyReq.setHeader("X-Forwarded-For", clientIp);
       },
       // Dynamic Frontend API responses without Content-Length must be buffered

@@ -15,6 +15,7 @@ import {
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { AccessGate } from "@/components/AccessGate";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
@@ -200,9 +201,11 @@ function ProtectedChat({ children }: { children: ReactNode }) {
   return (
     <>
       <Show when="signed-in">
-        <ChatLayout>
-          <RoutedErrorBoundary>{children}</RoutedErrorBoundary>
-        </ChatLayout>
+        <AccessGate>
+          <ChatLayout>
+            <RoutedErrorBoundary>{children}</RoutedErrorBoundary>
+          </ChatLayout>
+        </AccessGate>
       </Show>
       <Show when="signed-out">
         <Redirect to="/" />
