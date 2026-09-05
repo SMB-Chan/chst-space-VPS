@@ -177,6 +177,7 @@ describe("dynamic chat model discovery", () => {
         "deepseek-v4-pro",
         "deepseek-v4-flash-0731",
         "glm-5.2",
+        "z-ai/glm-5.3-flash",
         "google/gemini-2.5-flash-lite",
         "openai/gpt-4o-mini",
         "deepseek/deepseek-chat",
@@ -206,12 +207,15 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(16);
+    expect(models).toHaveLength(17);
     expect(models.some((model) => model.id === "gpt-5.6-terra")).toBe(true);
     expect(models.some((model) => model.id === "qwen3.8-max")).toBe(true);
     expect(
       models.some((model) => model.id === "google/gemini-2.5-flash-lite"),
     ).toBe(true);
+    expect(models.some((model) => model.id === "z-ai/glm-5.3-flash")).toBe(
+      true,
+    );
   });
 
   it("does not query or remove catalogs when provider clients are unavailable", async () => {
@@ -221,7 +225,7 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(16);
+    expect(models).toHaveLength(17);
     expect(dashScopeList).not.toHaveBeenCalled();
     expect(openAiList).not.toHaveBeenCalled();
     expect(openRouterList).not.toHaveBeenCalled();
@@ -256,7 +260,7 @@ describe("dynamic chat model discovery", () => {
     const models = await pending;
     await getAvailableChatModels();
 
-    expect(models).toHaveLength(16);
+    expect(models).toHaveLength(17);
     expect(openAiList).toHaveBeenCalledTimes(1);
   });
 });

@@ -68,9 +68,19 @@ describe("openrouter generation params", () => {
   });
 
   it("keeps OpenRouter vision models in the vision set", () => {
+    expect(VISION_MODEL_IDS.has("z-ai/glm-5.3-flash")).toBe(true);
     expect(VISION_MODEL_IDS.has("google/gemini-2.5-flash-lite")).toBe(true);
     expect(VISION_MODEL_IDS.has("openai/gpt-4o-mini")).toBe(true);
     expect(VISION_MODEL_IDS.has("deepseek/deepseek-chat")).toBe(false);
+  });
+
+  it("sends the reasoning effort to GLM-5.3 Flash", () => {
+    const opts: Record<string, unknown> = {};
+    applyGenerationParams(opts, "z-ai/glm-5.3-flash", "openrouter", "medium");
+    expect(opts.max_tokens).toBe(8192);
+    expect(opts.reasoning).toEqual({ effort: "medium" });
+    expect(opts).not.toHaveProperty("enable_thinking");
+    expect(opts).not.toHaveProperty("incremental_output");
   });
 
   it("fails with a clear message when the key is missing", () => {
