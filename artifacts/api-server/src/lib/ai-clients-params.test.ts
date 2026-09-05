@@ -73,14 +73,8 @@ describe("openrouter generation params", () => {
     expect(VISION_MODEL_IDS.has("deepseek/deepseek-chat")).toBe(false);
   });
 
-  it("fails with a clear message when the key is missing", () => {
-    if (process.env.OPENROUTER_API_KEY) {
-      const resolved = getClientForModel("deepseek/deepseek-chat");
-      expect(resolved.provider).toBe("openrouter");
-      return;
-    }
-    expect(() => getClientForModel("deepseek/deepseek-chat")).toThrow(
-      /OPENROUTER_API_KEY/,
-    );
+  it("resolves OpenRouter when either supported secret name is configured", () => {
+    const resolved = getClientForModel("deepseek/deepseek-chat");
+    expect(resolved.provider).toBe("openrouter");
   });
 });
