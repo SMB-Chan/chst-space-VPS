@@ -21,6 +21,7 @@ describe("openrouter-budget", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     vi.unstubAllEnvs();
+    vi.stubEnv("OPEN_ROUTER", "");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     delete process.env.OPENROUTER_MONTHLY_BUDGET_USD;
     fetchMock.mockReset();
@@ -34,7 +35,8 @@ describe("openrouter-budget", () => {
   });
 
   it("reports unconfigured without a key", async () => {
-    delete process.env.OPENROUTER_API_KEY;
+    vi.stubEnv("OPEN_ROUTER", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
     expect(openRouterConfigured()).toBe(false);
     expect(await isOpenRouterOverBudget()).toBe(false);
     expect(await getOpenRouterKeyState()).toBeNull();

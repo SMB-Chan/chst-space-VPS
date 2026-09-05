@@ -10,6 +10,7 @@ import {
   CircuitBreakerOpenError,
   getOrCreateCircuitBreaker,
 } from "./circuit-breaker";
+import { resolveOpenRouterApiKey } from "./openrouter-config";
 
 // Replit-managed OpenAI proxy
 if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
@@ -57,10 +58,11 @@ export { dashscopeClient };
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 let openrouterClient: OpenAI | null = null;
+const openRouterApiKey = resolveOpenRouterApiKey();
 
-if (process.env.OPENROUTER_API_KEY?.trim()) {
+if (openRouterApiKey) {
   openrouterClient = new OpenAI({
-    apiKey: process.env.OPENROUTER_API_KEY.trim(),
+    apiKey: openRouterApiKey,
     baseURL: OPENROUTER_BASE_URL,
     fetch: llmFetch,
     defaultHeaders: {
@@ -72,7 +74,9 @@ if (process.env.OPENROUTER_API_KEY?.trim()) {
   });
   logger.info("OpenRouter client initialized");
 } else {
-  logger.warn("OPENROUTER_API_KEY not set — OpenRouter models unavailable");
+  logger.warn(
+    "OPEN_ROUTER or OPENROUTER_API_KEY not set — OpenRouter models unavailable",
+  );
 }
 
 export { openrouterClient };
@@ -421,7 +425,7 @@ export function getClientForModel(
   if (provider === "openrouter") {
     if (!openrouterClient) {
       throw new Error(
-        "OpenRouter APIキーが設定されていません。OPENROUTER_API_KEY を確認してください。",
+        "OpenRouter APIキーが設定されていません。OPEN_ROUTER または OPENROUTER_API_KEY を確認してください。",
       );
     }
     return { client: openrouterClient, provider: "openrouter" };
