@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolveOpenRouterApiKey } from "./openrouter-config";
 import {
   applyGenerationParams,
   applySafeGenerationParams,
@@ -83,14 +84,14 @@ describe("openrouter generation params", () => {
     expect(opts).not.toHaveProperty("incremental_output");
   });
 
-  it("fails with a clear message when the key is missing", () => {
-    if (process.env.OPENROUTER_API_KEY) {
+  it("resolves when configured and fails with a clear message otherwise", () => {
+    if (resolveOpenRouterApiKey()) {
       const resolved = getClientForModel("deepseek/deepseek-chat");
       expect(resolved.provider).toBe("openrouter");
       return;
     }
     expect(() => getClientForModel("deepseek/deepseek-chat")).toThrow(
-      /OPENROUTER_API_KEY/,
+      /OPEN_ROUTER|OPENROUTER_API_KEY/,
     );
   });
 });
