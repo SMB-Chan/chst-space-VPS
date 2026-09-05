@@ -5,6 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface OpenaiMe {
+  /** Clerk user id of the authenticated account */
+  userId: string;
+}
+
 export interface HealthStatus {
   status: string;
 }

@@ -26,6 +26,7 @@ import type {
   OpenaiConversationInput,
   OpenaiConversationWithMessages,
   OpenaiError,
+  OpenaiMe,
   OpenaiMessage,
   OpenaiMessageDeleteInput,
   OpenaiMessageInput,
@@ -208,6 +209,84 @@ export function useListOpenaiModels<TData = Awaited<ReturnType<typeof listOpenai
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListOpenaiModelsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOpenaiMeUrl = () => {
+
+
+
+
+  return `/api/openai/me`
+}
+
+/**
+ * Returns the authenticated Clerk user id. Used by the frontend access gate; a 403 means the account is not on the service allowlist.
+ * @summary Identify the authenticated user
+ */
+export const getOpenaiMe = async ( options?: Parameters<typeof customFetch>[1]): Promise<OpenaiMe> => {
+
+  return customFetch<OpenaiMe>(getGetOpenaiMeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpenaiMeQueryKey = () => {
+    return [
+    `/api/openai/me`
+    ] as const;
+    }
+
+
+export const getGetOpenaiMeQueryOptions = <TData = Awaited<ReturnType<typeof getOpenaiMe>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiMe>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpenaiMeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpenaiMe>>> = ({ signal }) => getOpenaiMe({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpenaiMe>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOpenaiMeQueryResult = NonNullable<Awaited<ReturnType<typeof getOpenaiMe>>>
+export type GetOpenaiMeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Identify the authenticated user
+ */
+
+export function useGetOpenaiMe<TData = Awaited<ReturnType<typeof getOpenaiMe>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiMe>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOpenaiMeQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

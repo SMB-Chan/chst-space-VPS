@@ -33,6 +33,15 @@ export const ListOpenaiModelsResponse = zod.array(ListOpenaiModelsResponseItem)
 
 
 /**
+ * Returns the authenticated Clerk user id. Used by the frontend access gate; a 403 means the account is not on the service allowlist.
+ * @summary Identify the authenticated user
+ */
+export const GetOpenaiMeResponse = zod.object({
+  "userId": zod.string().describe('Clerk user id of the authenticated account')
+})
+
+
+/**
  * @summary List chat and specialist AI capabilities
  */
 export const ListOpenaiCapabilitiesResponse = zod.object({
