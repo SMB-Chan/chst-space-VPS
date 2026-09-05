@@ -99,3 +99,30 @@ describe("inferSearchQuery temporal expressions", () => {
     expect(inferSearchQuery("Pythonでソート怎么写く？").needed).toBe(false);
   });
 });
+
+describe("inferSearchQuery standalone query construction", () => {
+  it("strips trailing request phrasing from keyword messages", () => {
+    expect(inferSearchQuery("最新の円安ニュースを教えてください")).toEqual({
+      needed: true,
+      query: "最新の円安ニュース",
+    });
+    expect(inferSearchQuery("2026年の桜開花予想を調べて")).toMatchObject({
+      query: "2026年の桜開花予想",
+    });
+  });
+
+  it("prefers the sentence that carries the strong keyword", () => {
+    const result = inferSearchQuery(
+      "補足です。昨日の会議の市場反応が知りたい。以上です",
+    );
+    expect(result.needed).toBe(true);
+    expect(result.query).toBe("昨日の会議の市場反応が知りたい");
+  });
+
+  it("keeps compact keyword messages unchanged", () => {
+    expect(inferSearchQuery("広島 天気")).toEqual({
+      needed: true,
+      query: "広島 天気",
+    });
+  });
+});

@@ -57,6 +57,7 @@ import {
   createHistoricalImageBudget,
   modelContentForHistorical,
 } from "../../lib/historical-image-budget";
+import { budgetConversationHistory } from "../../lib/history-budget";
 import {
   UserMessageContentError,
   fallbackHistoricalUserContent,
@@ -1213,7 +1214,10 @@ router.post(
         }
       }
       historicalChatMessages.reverse();
-      const chatMessages = [...historicalChatMessages];
+      // Bounded replay keeps long-lived threads inside the model context
+      // window instead of overflowing it (providers then drop old turns).
+      const budgetedHistory = budgetConversationHistory(historicalChatMessages);
+      const chatMessages = [...budgetedHistory.messages];
       chatMessages.push({
         role: "user",
         content: useVisionBridge
@@ -1425,7 +1429,8 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       }
     }
     historicalChatMessages.reverse();
-    const chatMessages = [...historicalChatMessages];
+    const budgetedHistory = budgetConversationHistory(historicalChatMessages);
+    const chatMessages = [...budgetedHistory.messages];
     chatMessages.push({
       role: "user",
       content: useVisionBridge

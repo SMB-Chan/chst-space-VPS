@@ -467,14 +467,30 @@ export async function streamChatReply(args: {
       });
     }
 
-    // Auto-inject relevant LLM memories based on the user's message
+    // Auto-inject relevant LLM memories based on the user's message. Keyword
+    // recall is primary on the current message; when it matches nothing
+    // (typical for short follow-ups like "それで？"), retry once with recent
+    // conversation context so earlier turns can supply the missing keywords.
     if (!translationMode && memory.enabled) {
       try {
-        const relevantMemories = await findRelevantMemories(
+        let relevantMemories = await findRelevantMemories(
           memory.userId,
           userText,
           5,
         );
+        if (relevantMemories.length === 0) {
+          const recentContext = buildRecentSearchConversation(
+            chatMessages,
+            userText,
+          );
+          if (recentContext) {
+            relevantMemories = await findRelevantMemories(
+              memory.userId,
+              [userText, recentContext].filter(Boolean).join("\n"),
+              5,
+            );
+          }
+        }
         if (relevantMemories.length > 0) {
           const memoryPrompt = formatMemoriesForPrompt(relevantMemories);
           workingMessages.push({
