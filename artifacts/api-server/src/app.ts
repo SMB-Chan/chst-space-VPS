@@ -32,6 +32,7 @@ import {
 } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
+import { chatRunTrackingMiddleware } from "./middlewares/chatRunTrackingMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import { sharedAiUsageGuard } from "./middlewares/sharedAiUsageGuard";
 import {
@@ -145,6 +146,16 @@ app.post(
 );
 app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));
+
+// A chat is now one durable AI Run. This middleware is intentionally mounted
+// after body parsing and existing quota/auth gates, while the route and SSE
+// payload remain unchanged. Downstream stages inherit the Run through
+// AsyncLocalStorage and can opt into executeRunStep() incrementally.
+app.post(
+  "/api/openai/conversations/:conversationId/messages",
+  chatRunTrackingMiddleware,
+);
+app.post("/api/openai/ephemeral/messages", chatRunTrackingMiddleware);
 
 app.use("/api", router);
 

@@ -7,6 +7,59 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS factuality text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS asset_ids text;
 `.trim();
 
+export const ENSURE_RUNS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS runs (
+  id text PRIMARY KEY,
+  conversation_id integer REFERENCES conversations(id) ON DELETE CASCADE,
+  trigger_message_id integer REFERENCES messages(id) ON DELETE SET NULL,
+  user_id text NOT NULL,
+  status text NOT NULL,
+  provider text,
+  model_id text,
+  trace_id text,
+  input_tokens integer NOT NULL DEFAULT 0,
+  output_tokens integer NOT NULL DEFAULT 0,
+  cost_usd double precision NOT NULL DEFAULT 0,
+  error_code text,
+  error_message text,
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS runs_user_created_at_idx ON runs(user_id, created_at);
+CREATE INDEX IF NOT EXISTS runs_conversation_created_at_idx ON runs(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS runs_status_created_at_idx ON runs(status, created_at);
+CREATE INDEX IF NOT EXISTS runs_trace_id_idx ON runs(trace_id);
+
+CREATE TABLE IF NOT EXISTS run_steps (
+  id text PRIMARY KEY,
+  run_id text NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  sequence integer NOT NULL,
+  type text NOT NULL,
+  status text NOT NULL,
+  attempt integer NOT NULL DEFAULT 1,
+  input_ref text,
+  output_ref text,
+  provider text,
+  model_id text,
+  input_tokens integer NOT NULL DEFAULT 0,
+  output_tokens integer NOT NULL DEFAULT 0,
+  cost_usd double precision NOT NULL DEFAULT 0,
+  metadata jsonb,
+  error_code text,
+  error_message text,
+  started_at timestamptz,
+  completed_at timestamptz,
+  duration_ms integer,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS run_steps_run_sequence_idx ON run_steps(run_id, sequence);
+CREATE INDEX IF NOT EXISTS run_steps_run_type_idx ON run_steps(run_id, type);
+CREATE INDEX IF NOT EXISTS run_steps_status_created_at_idx ON run_steps(status, created_at);
+`.trim();
+
 export const ENSURE_ASSETS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS artifacts (
   id serial PRIMARY KEY,
@@ -230,6 +283,12 @@ export async function ensureMessageSchema(
   await query(ENSURE_MESSAGES_SCHEMA_SQL);
 }
 
+export async function ensureRunsSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_RUNS_SCHEMA_SQL);
+}
+
 export async function ensureAssetsSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -304,6 +363,7 @@ export async function ensureChatSchema(
   const { db } = await import("@workspace/db");
   const execute = query ?? ((sql: string) => db.execute(sql));
   await ensureMessageSchema(execute);
+  await ensureRunsSchema(execute);
   await ensureAssetsSchema(execute);
   await ensureAlibabaVideoJobsSchema(execute);
   await ensureAiUsageSchema(execute);
