@@ -52,7 +52,9 @@ describe("ensureRunsSchema", () => {
     expect(ENSURE_RUNS_SCHEMA_SQL).toContain(
       "run_id text NOT NULL REFERENCES runs(id) ON DELETE CASCADE",
     );
-    expect(ENSURE_RUNS_SCHEMA_SQL).toContain("runs_conversation_created_at_idx");
+    expect(ENSURE_RUNS_SCHEMA_SQL).toContain(
+      "runs_conversation_created_at_idx",
+    );
     expect(ENSURE_RUNS_SCHEMA_SQL).toContain("run_steps_run_sequence_idx");
     expect(ENSURE_RUNS_SCHEMA_SQL).toContain("duration_ms integer");
     expect(ENSURE_RUNS_SCHEMA_SQL).toContain("metadata jsonb");
