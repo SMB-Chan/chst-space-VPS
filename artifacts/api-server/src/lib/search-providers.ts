@@ -16,7 +16,11 @@ import {
   resetSearchEngineRuntimeForTests,
 } from "./search-engine-scheduler";
 import { getBuiltinVerticalProviders } from "./search-vertical-providers";
-import { planSearchQueries } from "./search-query-planner";
+import {
+  planSearchQueries,
+  type SearchQueryPlan,
+  type SearchSubqueryRole,
+} from "./search-query-planner";
 import type { ApiSearchProvider } from "./search-provider-types";
 
 /**
@@ -256,6 +260,63 @@ function distinctDomainCount(results: SearchResult[]): number {
   return new Set(results.map(domainOf).filter(Boolean)).size;
 }
 
+interface ProviderExecution {
+  provider: ApiSearchProvider;
+  results: SearchResult[];
+  success: boolean;
+  latencyMs: number;
+}
+
+interface TaggedProviderExecution {
+  role: SearchSubqueryRole;
+  execution: ProviderExecution;
+}
+
+interface ProviderSearchRun {
+  results: SearchResult[];
+  executions: ProviderExecution[];
+}
+
+function contributionCount(
+  providerResults: SearchResult[],
+  finalResults: SearchResult[],
+): number {
+  const finalUrls = new Set(finalResults.map((result) => result.url));
+  return new Set(
+    providerResults
+      .map((result) => result.url)
+      .filter((url) => finalUrls.has(url)),
+  ).size;
+}
+
+function logSearchExecutionMetadata(
+  executions: TaggedProviderExecution[],
+  finalResults: SearchResult[],
+): void {
+  const finalResultCount = finalResults.length;
+  const finalDistinctDomainCount = distinctDomainCount(finalResults);
+  for (const { role, execution } of executions) {
+    logger.debug(
+      {
+        component: "search-provider",
+        eventCode: "SEARCH_EXECUTION_METADATA",
+        subqueryRole: role,
+        engine: execution.provider.name,
+        success: execution.success,
+        resultCount: execution.results.length,
+        latencyMs: execution.latencyMs,
+        finalTopKContributionCount: contributionCount(
+          execution.results,
+          finalResults,
+        ),
+        finalResultCount,
+        finalDistinctDomainCount,
+      },
+      "Search execution metadata",
+    );
+  }
+}
+
 export function hasSufficientPrimaryCoverage(results: SearchResult[]): boolean {
   return (
     results.length >= PRIMARY_MIN_RESULTS &&
@@ -306,7 +367,7 @@ async function runProvider(
   provider: ApiSearchProvider,
   query: string,
   signal?: AbortSignal,
-): Promise<SearchResult[]> {
+): Promise<ProviderExecution> {
   if (!isSearchProviderAvailable(provider.name)) {
     const health = getSearchProviderHealth(provider.name);
     logger.debug(
@@ -317,15 +378,16 @@ async function runProvider(
       },
       "Skipping search provider in cooldown",
     );
-    return [];
+    return { provider, results: [], success: false, latencyMs: 0 };
   }
   const startedAt = Date.now();
   try {
     const results = await provider.search(query, signal);
+    const latencyMs = Math.max(0, Date.now() - startedAt);
     recordSearchProviderSuccess(provider.name);
     recordSearchEngineObservation(provider.name, {
       ok: results.length > 0,
-      latencyMs: Date.now() - startedAt,
+      latencyMs,
     });
     if (results.length > 0) {
       logger.debug(
@@ -338,12 +400,18 @@ async function runProvider(
         "Search API returned no results",
       );
     }
-    return results;
+    return {
+      provider,
+      results,
+      success: results.length > 0,
+      latencyMs,
+    };
   } catch (err) {
     if (signal?.aborted) throw err;
+    const latencyMs = Math.max(0, Date.now() - startedAt);
     recordSearchEngineObservation(provider.name, {
       ok: false,
-      latencyMs: Date.now() - startedAt,
+      latencyMs,
     });
     const health = recordSearchProviderFailure(provider.name, err);
     logger.warn(
@@ -360,7 +428,7 @@ async function runProvider(
       },
       "Search API provider failed",
     );
-    return [];
+    return { provider, results: [], success: false, latencyMs };
   }
 }
 
@@ -368,8 +436,8 @@ async function runProviderWave(
   providers: ApiSearchProvider[],
   query: string,
   signal?: AbortSignal,
-): Promise<SearchResult[][]> {
-  const pending: Promise<SearchResult[]>[] = [];
+): Promise<ProviderExecution[]> {
+  const pending: Promise<ProviderExecution>[] = [];
   for (const provider of providers) {
     if (signal?.aborted) {
       await Promise.allSettled(pending);
@@ -400,12 +468,12 @@ function rankedSet(
  * - if coverage is insufficient, remaining healthy providers run in parallel;
  * - ranked lists are combined with weighted Reciprocal Rank Fusion.
  */
-export async function searchWithProviders(
+async function executeSearchWithProviders(
   query: string,
   providers: ApiSearchProvider[],
   signal?: AbortSignal,
-): Promise<SearchResult[]> {
-  if (providers.length === 0) return [];
+): Promise<ProviderSearchRun> {
+  if (providers.length === 0) return { results: [], executions: [] };
   if (signal?.aborted) {
     throw signal.reason ?? new Error("Search cancelled");
   }
@@ -418,13 +486,17 @@ export async function searchWithProviders(
         verticalMatchesQuery(provider, query),
     ),
   );
-  if (available.length === 0) return [];
+  if (available.length === 0) return { results: [], executions: [] };
 
   const initialCount = Math.min(configuredInitialFanout(), available.length);
   const initialProviders = available.slice(0, initialCount);
-  const initialResults = await runProviderWave(initialProviders, query, signal);
-  const ranked: RankedProviderResults[] = initialProviders.map(
-    (provider, index) => rankedSet(provider, initialResults[index] ?? []),
+  const initialExecutions = await runProviderWave(
+    initialProviders,
+    query,
+    signal,
+  );
+  const ranked: RankedProviderResults[] = initialExecutions.map((execution) =>
+    rankedSet(execution.provider, execution.results),
   );
   const initialMerged = fuseSearchProviderResults(
     ranked,
@@ -435,22 +507,41 @@ export async function searchWithProviders(
     initialCount === available.length ||
     hasSufficientPrimaryCoverage(initialMerged)
   ) {
-    return initialMerged;
+    return { results: initialMerged, executions: initialExecutions };
   }
   if (signal?.aborted) {
     throw signal.reason ?? new Error("Search cancelled");
   }
 
   const remainingProviders = available.slice(initialCount);
-  const remainingResults = await runProviderWave(
+  const remainingExecutions = await runProviderWave(
     remainingProviders,
     query,
     signal,
   );
-  remainingProviders.forEach((provider, index) => {
-    ranked.push(rankedSet(provider, remainingResults[index] ?? []));
+  remainingExecutions.forEach((execution) => {
+    ranked.push(rankedSet(execution.provider, execution.results));
   });
-  return fuseSearchProviderResults(ranked, MAX_MERGED_API_RESULTS);
+  return {
+    results: fuseSearchProviderResults(ranked, MAX_MERGED_API_RESULTS),
+    executions: [...initialExecutions, ...remainingExecutions],
+  };
+}
+
+export async function searchWithProviders(
+  query: string,
+  providers: ApiSearchProvider[],
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const run = await executeSearchWithProviders(query, providers, signal);
+  logSearchExecutionMetadata(
+    run.executions.map((execution) => ({
+      role: "primary",
+      execution,
+    })),
+    run.results,
+  );
+  return run.results;
 }
 
 /**
@@ -463,57 +554,93 @@ export async function searchWithPlannedProviders(
   query: string,
   providers: ApiSearchProvider[],
   signal?: AbortSignal,
+  suppliedPlan?: SearchQueryPlan,
 ): Promise<SearchResult[]> {
-  const plan = planSearchQueries(query);
+  const plan = planSearchQueries(query, {
+    suggestedQueries: suppliedPlan?.queries
+      .slice(1)
+      .filter((item) => item.role !== "primary")
+      .map(({ query: suggestedQuery, role }) => ({
+        query: suggestedQuery,
+        role: role as Exclude<SearchSubqueryRole, "primary">,
+      })),
+  });
   const primary = plan.queries[0];
   if (!primary || providers.length === 0) return [];
   if (signal?.aborted) {
     throw signal.reason ?? new Error("Search cancelled");
   }
 
-  const primaryResults = await searchWithProviders(
+  const primaryRun = await executeSearchWithProviders(
     primary.query,
     providers,
     signal,
   );
   if (
     plan.queries.length === 1 ||
-    hasSufficientPrimaryCoverage(primaryResults)
+    hasSufficientPrimaryCoverage(primaryRun.results)
   ) {
-    return primaryResults;
+    logSearchExecutionMetadata(
+      primaryRun.executions.map((execution) => ({
+        role: primary.role,
+        execution,
+      })),
+      primaryRun.results,
+    );
+    return primaryRun.results;
   }
   if (signal?.aborted) {
     throw signal.reason ?? new Error("Search cancelled");
   }
 
   const supplemental = plan.queries.slice(1);
-  const supplementalResults = await Promise.all(
+  const supplementalRuns = await Promise.all(
     supplemental.map((item) =>
-      searchWithProviders(item.query, providers, signal),
+      executeSearchWithProviders(item.query, providers, signal),
     ),
   );
   const rankedQueries: RankedProviderResults[] = [
     {
       providerName: `query:${primary.role}`,
       weight: primary.weight,
-      results: primaryResults,
+      results: primaryRun.results,
     },
     ...supplemental.map((item, index) => ({
       providerName: `query:${item.role}:${index}`,
       weight: item.weight,
-      results: supplementalResults[index] ?? [],
+      results: supplementalRuns[index]?.results ?? [],
     })),
   ];
-  return fuseSearchProviderResults(rankedQueries, MAX_MERGED_API_RESULTS);
+  const finalResults = fuseSearchProviderResults(
+    rankedQueries,
+    MAX_MERGED_API_RESULTS,
+  );
+  logSearchExecutionMetadata(
+    [
+      ...primaryRun.executions.map((execution) => ({
+        role: primary.role,
+        execution,
+      })),
+      ...supplementalRuns.flatMap((run, index) =>
+        run.executions.map((execution) => ({
+          role: supplemental[index].role,
+          execution,
+        })),
+      ),
+    ],
+    finalResults,
+  );
+  return finalResults;
 }
 
 export async function searchWithApiProviders(
   query: string,
   signal?: AbortSignal,
+  suppliedPlan?: SearchQueryPlan,
 ): Promise<SearchResult[]> {
   const providers = [
     ...getConfiguredApiProviders(),
     ...getBuiltinVerticalProviders(),
   ];
-  return searchWithPlannedProviders(query, providers, signal);
+  return searchWithPlannedProviders(query, providers, signal, suppliedPlan);
 }

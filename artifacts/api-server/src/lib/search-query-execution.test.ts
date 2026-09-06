@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { logger } from "./logger";
 import {
   resetSearchEngineRuntimeForTests,
   resetSearchProviderHealthForTests,
@@ -6,6 +7,7 @@ import {
   type ApiSearchProvider,
 } from "./search-providers";
 import type { SearchResult } from "./search-parse";
+import { planSearchQueries } from "./search-query-planner";
 
 function result(host: string, path: string): SearchResult {
   return {
@@ -80,6 +82,38 @@ describe("searchWithPlannedProviders", () => {
     ).toBeGreaterThanOrEqual(4);
   });
 
+  it("executes supplied structured suggestions only after primary coverage is insufficient", async () => {
+    const plan = planSearchQueries("OpenAI product overview", {
+      suggestedQueries: [
+        { query: "OpenAI official product overview", role: "official" },
+      ],
+    });
+    const searchProvider = provider(async (query) => {
+      if (query === "OpenAI product overview") {
+        return [result("primary.example", "primary")];
+      }
+      expect(query).toBe("OpenAI official product overview");
+      return [
+        result("official-a.example", "one"),
+        result("official-b.example", "two"),
+        result("official-c.example", "three"),
+      ];
+    });
+
+    await searchWithPlannedProviders(
+      "OpenAI product overview",
+      [searchProvider],
+      undefined,
+      plan,
+    );
+
+    expect(searchProvider.search).toHaveBeenCalledTimes(2);
+    expect(searchProvider.search.mock.calls.map(([query]) => query)).toEqual([
+      "OpenAI product overview",
+      "OpenAI official product overview",
+    ]);
+  });
+
   it("does not call providers for an unsafe base query", async () => {
     const searchProvider = provider(async () => [result("a.example", "1")]);
 
@@ -110,5 +144,40 @@ describe("searchWithPlannedProviders", () => {
       ),
     ).rejects.toBe(cancelled);
     expect(searchProvider.search).toHaveBeenCalledOnce();
+  });
+
+  it("logs anonymous engine and subquery metadata against the final top-k", async () => {
+    const debug = vi.spyOn(logger, "debug").mockImplementation(() => undefined);
+    const searchProvider = provider(async () => [
+      result("a.example", "one"),
+      result("a.example", "two"),
+      result("b.example", "three"),
+      result("c.example", "four"),
+      result("c.example", "five"),
+    ]);
+
+    try {
+      await searchWithPlannedProviders("safe topic", [searchProvider]);
+      const metadataCall = debug.mock.calls.find(
+        ([fields]) =>
+          fields &&
+          typeof fields === "object" &&
+          "eventCode" in fields &&
+          fields.eventCode === "SEARCH_EXECUTION_METADATA",
+      );
+
+      expect(metadataCall?.[0]).toMatchObject({
+        subqueryRole: "primary",
+        engine: "planned-provider",
+        success: true,
+        resultCount: 5,
+        finalTopKContributionCount: 5,
+        finalResultCount: 5,
+        finalDistinctDomainCount: 3,
+      });
+      expect(metadataCall?.[0]).not.toHaveProperty("query");
+    } finally {
+      debug.mockRestore();
+    }
   });
 });
