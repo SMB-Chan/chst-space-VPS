@@ -6,6 +6,7 @@ import {
   ENSURE_LLM_MEMORIES_SCHEMA_SQL,
   ensureAiUsageSchema,
   ensureAssetsSchema,
+  ensureChatSchema,
   ensureMessageSchema,
   ensureLlmMemoriesSchema,
 } from "./ensure-schema";
@@ -134,5 +135,23 @@ describe("ensureAiUsageSchema", () => {
     await ensureAiUsageSchema(query);
     expect(query).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(ENSURE_AI_USAGE_SCHEMA_SQL);
+  });
+});
+
+describe("ensureChatSchema drift guard", () => {
+  it("applies every exported schema migration so boot never skips a table", async () => {
+    // index.ts delegates boot-time schema creation to ensureChatSchema. A new
+    // ensure*Schema function that is forgotten here would leave its table
+    // uncreated in every deployment (this class of drift once made every chat
+    // send fail with a 500).
+    const module = await import("./ensure-schema");
+    const ensureFns = Object.keys(module).filter(
+      (name) => /^ensure\w+Schema$/.test(name) && name !== "ensureChatSchema",
+    );
+    expect(ensureFns.length).toBeGreaterThan(0);
+    const aggregateSource = ensureChatSchema.toString();
+    for (const name of ensureFns) {
+      expect(aggregateSource).toContain(name);
+    }
   });
 });

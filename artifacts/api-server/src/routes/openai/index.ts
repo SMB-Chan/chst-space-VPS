@@ -107,7 +107,19 @@ async function enforceGeneralUserAiAccess(
   res: Response,
 ): Promise<boolean> {
   if (req.userRole === "admin" || !req.userId) return true;
-  const verdict = await checkGeneralUserAiAccess(req.userId);
+  let verdict: Awaited<ReturnType<typeof checkGeneralUserAiAccess>>;
+  try {
+    verdict = await checkGeneralUserAiAccess(req.userId);
+  } catch (err) {
+    // Accounting infrastructure must never block chatting: fail open and let
+    // the provider-side key spend limit bound the total. (Boot drift once left
+    // the usage tables uncreated and every send failed with a 500.)
+    logger.warn(
+      safeFailureFields(err, "openai-route", "BUDGET_CHECK_FAILED"),
+      "Budget check failed; allowing the request",
+    );
+    return true;
+  }
   if (verdict.allowed) return true;
   const message =
     verdict.reason === "suspended"

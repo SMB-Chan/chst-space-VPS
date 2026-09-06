@@ -298,13 +298,16 @@ export async function ensureUserUsageSchema(
   await query(ENSURE_USER_USAGE_SCHEMA_SQL);
 }
 
-export async function ensureChatSchema(): Promise<void> {
+export async function ensureChatSchema(
+  query?: (sql: string) => Promise<unknown>,
+): Promise<void> {
   const { db } = await import("@workspace/db");
-  await ensureMessageSchema((sql) => db.execute(sql));
-  await ensureAssetsSchema((sql) => db.execute(sql));
-  await ensureAlibabaVideoJobsSchema((sql) => db.execute(sql));
-  await ensureAiUsageSchema((sql) => db.execute(sql));
-  await ensureLlmMemoriesSchema((sql) => db.execute(sql));
-  await ensureUserUsageSchema((sql) => db.execute(sql));
-  await ensureUserSettingsSchema((sql) => db.execute(sql));
+  const execute = query ?? ((sql: string) => db.execute(sql));
+  await ensureMessageSchema(execute);
+  await ensureAssetsSchema(execute);
+  await ensureAlibabaVideoJobsSchema(execute);
+  await ensureAiUsageSchema(execute);
+  await ensureLlmMemoriesSchema(execute);
+  await ensureUserUsageSchema(execute);
+  await ensureUserSettingsSchema(execute);
 }
