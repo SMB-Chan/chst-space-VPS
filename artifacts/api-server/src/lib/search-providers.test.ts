@@ -149,16 +149,18 @@ describe("SearXNG configuration", () => {
     expect(normalizeSearxngBaseUrl("https://searx.example.com/")).toBe(
       "https://searx.example.com",
     );
-    expect(
-      normalizeSearxngBaseUrl("http://127.0.0.1:8080/searxng///"),
-    ).toBe("http://127.0.0.1:8080/searxng");
+    expect(normalizeSearxngBaseUrl("http://127.0.0.1:8080/searxng///")).toBe(
+      "http://127.0.0.1:8080/searxng",
+    );
   });
 
   it("rejects embedded credentials, query/fragment data, and non-http schemes", () => {
     expect(
       normalizeSearxngBaseUrl("https://user:pass@searx.example.com"),
     ).toBeNull();
-    expect(normalizeSearxngBaseUrl("https://searx.example.com/?x=1")).toBeNull();
+    expect(
+      normalizeSearxngBaseUrl("https://searx.example.com/?x=1"),
+    ).toBeNull();
     expect(normalizeSearxngBaseUrl("https://searx.example.com/#x")).toBeNull();
     expect(normalizeSearxngBaseUrl("file:///tmp/searxng")).toBeNull();
     expect(normalizeSearxngBaseUrl("not a url")).toBeNull();
