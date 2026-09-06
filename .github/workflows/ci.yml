@@ -27,6 +27,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Print formatted Run execution source
+        run: pnpm exec prettier artifacts/api-server/src/lib/run-execution.ts
       - run: pnpm run format:check
       - run: pnpm run check:api-routes
       - run: pnpm run typecheck
