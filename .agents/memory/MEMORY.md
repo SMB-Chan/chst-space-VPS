@@ -9,3 +9,4 @@
 - [マージ後セットアップ](post-merge-setup.md) — frozen install後にDBライブラリの生成型を再ビルドし、依存変更時はlockfileも同期する。
 - [公開ビルドのセキュリティ検査](deployment-security-scan.md) — 公開ログが二度目のSecurity Scanで終わる場合はOSV監査で依存脆弱性を特定し、frozen installまで再確認する。
 - [動的検索schedulerのテスト分離](search-scheduler-test-isolation.md) — 順位学習状態を持つschedulerは各テスト後にruntimeとhealthをリセットし、順序依存を防ぐ。
+- [Incremental Markdownの安全境界](streaming-markdown-incremental.md) — 空行で確定したブロックだけ固定し、参照定義・参照リンク・HTMLは全文描画へ戻す。

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown, stabilizeStreamingMarkdown } from "./markdown";
+import {
+  Markdown,
+  stabilizeStreamingMarkdown,
+  StreamingMarkdown,
+} from "./markdown";
 
 describe("Markdown", () => {
   it("renders GFM tables, task-unrelated lists, and emphasis", () => {
@@ -110,5 +114,39 @@ describe("Markdown", () => {
     expect(html).toContain("const value = 1");
     expect(html).toContain('data-source-target="source-message-stream-1"');
     expect(html).not.toContain("<script");
+  });
+
+  it.each([
+    ["paragraph", "A paragraph.\n\nTail."],
+    ["heading", "# Heading\n\nTail."],
+    ["list", "- one\n- two\n\nTail."],
+    ["table", "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nTail."],
+    ["blockquote", "> quoted text\n\nTail."],
+    ["code fence", "```ts\nconst value = 1;\n```\n\nTail."],
+    ["citation", "Source [1].\n\nTail."],
+  ])("matches full rendering for an incremental %s", (_name, content) => {
+    const fullHtml = renderToStaticMarkup(
+      <Markdown content={content} citationScope="differential-test" />,
+    );
+    const incrementalHtml = renderToStaticMarkup(
+      <StreamingMarkdown content={content} citationScope="differential-test" />,
+    );
+
+    expect(incrementalHtml).toBe(fullHtml);
+  });
+
+  it.each([
+    "before\n\n[docs]: https://example.com\n\nTail.",
+    "before\n\n[docs][ref]\n\nTail.",
+    "before\n\n<section>HTML</section>\n\nTail.",
+  ])("matches full rendering when unsafe syntax forces fallback", (content) => {
+    const fullHtml = renderToStaticMarkup(
+      <Markdown content={content} citationScope="fallback-test" />,
+    );
+    const incrementalHtml = renderToStaticMarkup(
+      <StreamingMarkdown content={content} citationScope="fallback-test" />,
+    );
+
+    expect(incrementalHtml).toBe(fullHtml);
   });
 });

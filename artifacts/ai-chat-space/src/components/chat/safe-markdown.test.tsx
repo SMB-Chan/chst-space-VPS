@@ -8,7 +8,7 @@ describe("SafeMarkdown streaming renderer", () => {
   let root: Root;
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -17,10 +17,10 @@ describe("SafeMarkdown streaming renderer", () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
-    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
-  it("coalesces append-only stream updates into one render window", () => {
+  it("renders append-only updates immediately without a second batching window", () => {
     act(() => {
       root.render(
         <SafeMarkdown content="A" citationScope="message-stream-test" />,
@@ -35,12 +35,6 @@ describe("SafeMarkdown streaming renderer", () => {
       root.render(
         <SafeMarkdown content="ABC" citationScope="message-stream-test" />,
       );
-    });
-
-    expect(container.textContent).not.toContain("ABC");
-
-    act(() => {
-      vi.advanceTimersByTime(40);
     });
 
     expect(container.textContent).toContain("ABC");
