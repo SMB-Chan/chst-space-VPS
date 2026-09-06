@@ -13,6 +13,7 @@ import {
 } from "./ssrf-guard";
 import {
   extractUrls,
+  parseSearchBingHtml,
   parseSearchHtml,
   inferSearchQuery,
   stripHtml,
@@ -40,7 +41,7 @@ import { searchWithApiProviders } from "./search-providers";
 import type { ModelProvider } from "./ai-clients";
 
 export type { SearchResult, ScoredSearchResult };
-export { extractUrls, inferSearchQuery, parseSearchHtml };
+export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
 // Re-exported: the SSRF regression tests (scripts/ssrf-guard.test.mjs) bundle
 // this module and exercise the guard through it.
 export { isPrivateAddress };
@@ -72,7 +73,7 @@ const SEARCH_FETCH_TIMEOUT_MS = 12_000;
 /** Shorter end-to-end timeout (DNS + connect + headers + body) for individual pages. */
 const PAGE_FETCH_TIMEOUT_MS = 6_000;
 /** Hard deadline for the search-decision LLM call. Heuristic covers timeouts. */
-const DECIDE_TIMEOUT_MS = 6_000;
+const DECIDE_TIMEOUT_MS = 9_000;
 
 /** Hard cap for the planner decision calls; JSON answers are short. */
 const DECISION_MAX_TOKENS = 400;
@@ -94,6 +95,11 @@ function applyDecisionTokenCap(
   if (provider === "dashscope") {
     // Search decision must stay a cheap JSON call — never inherit default thinking.
     opts.extra_body = { enable_thinking: false };
+  }
+  if (provider === "openrouter") {
+    // OpenRouter unified param: thinking models (GLM/Qwen) otherwise spend
+    // the whole token cap and the 9s deadline on hidden reasoning.
+    opts.reasoning = { enabled: false };
   }
 }
 
@@ -569,6 +575,7 @@ export async function fetchPageText(
 
 async function searchWebOnce(
   url: string,
+  parseResults: (html: string) => SearchResult[],
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const { response: res, cancel } = await fetchWithTimeout(
@@ -590,7 +597,7 @@ async function searchWebOnce(
       await discardResponseBody(res);
       return [];
     }
-    return parseSearchHtml(
+    return parseResults(
       await readResponseTextLimited(res, MAX_SEARCH_RESPONSE_BYTES),
     );
   } finally {
@@ -625,18 +632,31 @@ export async function searchWeb(
   }
 
   const queries = expandSearchQueries(query);
-  const endpoints = [
-    `https://html.duckduckgo.com/html/?q=`,
-    `https://lite.duckduckgo.com/lite/?q=`,
-  ];
+  // Bing is the essential fallback: DuckDuckGo answers datacenter IPs with a
+  // bot challenge (HTTP 202), which silently starved every scrape-based search.
+  const endpoints: { url: string; parse: (html: string) => SearchResult[] }[] =
+    [
+      {
+        url: `https://html.duckduckgo.com/html/?q=`,
+        parse: (html) => parseSearchHtml(html),
+      },
+      {
+        url: `https://lite.duckduckgo.com/lite/?q=`,
+        parse: (html) => parseSearchHtml(html),
+      },
+      {
+        url: `https://www.bing.com/search?q=`,
+        parse: (html) => parseSearchBingHtml(html),
+      },
+    ];
 
   // Search all query-angle × endpoint combinations in parallel.
   const searchCalls: Promise<SearchResult[]>[] = [];
   for (const q of queries) {
-    for (const base of endpoints) {
-      const url = `${base}${encodeURIComponent(q)}`;
+    for (const endpoint of endpoints) {
+      const url = `${endpoint.url}${encodeURIComponent(q)}`;
       searchCalls.push(
-        searchWebOnce(url, signal).catch((err) => {
+        searchWebOnce(url, endpoint.parse, signal).catch((err) => {
           logger.warn(
             safeFailureFields(err, "web-search", "SEARCH_ENDPOINT_ERROR"),
             "Web search endpoint error",
@@ -793,7 +813,7 @@ export async function decideSearch(
 }
 
 /** Hard deadline for the follow-up-search decision call. */
-const FOLLOWUP_DECIDE_TIMEOUT_MS = 6_000;
+const FOLLOWUP_DECIDE_TIMEOUT_MS = 9_000;
 
 /**
  * After the first search round, ask the model whether the gathered material

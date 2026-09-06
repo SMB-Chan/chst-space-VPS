@@ -79,6 +79,7 @@ describe("decideSearch", () => {
     expect(result).toEqual({ search: true, query: "東京 株価 終値" });
     const request = create.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(request.max_tokens).toBe(400);
+    expect(request.reasoning).toEqual({ enabled: false });
     expect(request).not.toHaveProperty("extra_body");
     expect(request).not.toHaveProperty("max_completion_tokens");
     expect(request).not.toHaveProperty("enable_thinking");

@@ -3,6 +3,7 @@ import {
   extractUrls,
   inferSearchQuery,
   normalizeExternalHttpUrl,
+  parseSearchBingHtml,
   parseSearchHtml,
 } from "./search-parse";
 
@@ -124,5 +125,38 @@ describe("inferSearchQuery standalone query construction", () => {
       needed: true,
       query: "広島 天気",
     });
+  });
+});
+
+describe("parseSearchBingHtml", () => {
+  const b64 = Buffer.from("https://example.com/article", "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+
+  it("parses b_algo cards and unwraps ck/a click-tracker links", () => {
+    const html =
+      `<li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&amp;p=abc&amp;u=a1${b64}&amp;ntb=1">` +
+      `Result <b>One</b></a></h2><p>Snippet one</p></li>` +
+      `<li class="b_algo"><h2><a href="https://direct.example.com/page">Result Two</a></h2>` +
+      `<p>Snippet two</p></li>`;
+    expect(parseSearchBingHtml(html)).toEqual([
+      {
+        title: "Result One",
+        url: "https://example.com/article",
+        snippet: "Snippet one",
+      },
+      {
+        title: "Result Two",
+        url: "https://direct.example.com/page",
+        snippet: "Snippet two",
+      },
+    ]);
+  });
+
+  it("keeps the tracker URL when the u parameter is malformed", () => {
+    const html = `<li class="b_algo"><h2><a href="https://www.bing.com/ck/a?p=zzz&amp;u=notbase64!!">Title</a></h2></li>`;
+    const results = parseSearchBingHtml(html);
+    expect(results).toHaveLength(0);
   });
 });
