@@ -20,6 +20,11 @@ describe("usage accounting primitives", () => {
     expect(
       estimateCostUsd("qwen/qwen3.7-flash", 1_000_000, 1_000_000),
     ).toBeCloseTo(0.16, 5);
+    // Tencent Hy3: $0.0825 input / $0.33 output per 1M.
+    expect(estimateCostUsd("tencent/hy3", 1_000_000, 1_000_000)).toBeCloseTo(
+      0.4125,
+      5,
+    );
     expect(estimateCostUsd("qwen/qwen3.8-flash", 1_000_000, 0)).toBeCloseTo(
       0.15,
       5,

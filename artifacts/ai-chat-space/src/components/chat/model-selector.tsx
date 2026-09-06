@@ -137,6 +137,15 @@ const MODELS: ModelInfo[] = [
     supportsVision: false,
     supportsReasoning: true,
   },
+  {
+    id: "tencent/hy3",
+    label: "Tencent Hy3 (OR)",
+    provider: "openrouter",
+    description: "低コスト・テキスト推論",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "openrouter",
+  },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {

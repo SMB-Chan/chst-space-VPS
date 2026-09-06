@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveOpenRouterApiKey } from "./openrouter-config";
 import {
+  AVAILABLE_MODELS,
   applyGenerationParams,
   applySafeGenerationParams,
   getClientForModel,
@@ -104,6 +105,30 @@ describe("openrouter generation params", () => {
     expect(opts).not.toHaveProperty("enable_thinking");
     expect(opts).not.toHaveProperty("incremental_output");
   });
+
+  it("catalogs Tencent Hy3 as a text-only OpenRouter reasoning model", () => {
+    const model = AVAILABLE_MODELS.find((item) => item.id === "tencent/hy3");
+    expect(model).toMatchObject({
+      id: "tencent/hy3",
+      provider: "openrouter",
+      supportsVision: false,
+      supportsReasoning: true,
+      reasoning: "openrouter",
+    });
+    expect(VISION_MODEL_IDS.has("tencent/hy3")).toBe(false);
+  });
+
+  it.each(["off", "low", "medium", "high"] as const)(
+    "uses the existing OpenRouter reasoning mapping for Hy3 (%s)",
+    (level) => {
+      const opts: Record<string, unknown> = {};
+      applyGenerationParams(opts, "tencent/hy3", "openrouter", level);
+      expect(opts.max_tokens).toBe(8192);
+      expect(opts.reasoning).toEqual(
+        level === "off" ? { enabled: false } : { effort: level },
+      );
+    },
+  );
 
   it("resolves when configured and fails with a clear message otherwise", () => {
     if (resolveOpenRouterApiKey()) {

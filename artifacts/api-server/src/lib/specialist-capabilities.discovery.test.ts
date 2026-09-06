@@ -144,6 +144,7 @@ describe("dynamic chat model discovery", () => {
       "qwen3.8-max",
       "qwen/qwen3.7-flash",
       "z-ai/glm-5.3-flash",
+      "tencent/hy3",
       "google/gemini-2.5-flash-lite",
       "qwen/qwen3.8-flash",
       "openai/gpt-4o-mini",
@@ -185,6 +186,7 @@ describe("dynamic chat model discovery", () => {
         "glm-5.2",
         "qwen/qwen3.7-flash",
         "z-ai/glm-5.3-flash",
+        "tencent/hy3",
         "google/gemini-2.5-flash-lite",
         "qwen/qwen3.8-flash",
         "openai/gpt-4o-mini",
@@ -215,7 +217,7 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(19);
+    expect(models).toHaveLength(20);
     expect(models.some((model) => model.id === "gpt-5.6-terra")).toBe(true);
     expect(models.some((model) => model.id === "qwen3.8-max")).toBe(true);
     expect(
@@ -224,6 +226,7 @@ describe("dynamic chat model discovery", () => {
     expect(models.some((model) => model.id === "z-ai/glm-5.3-flash")).toBe(
       true,
     );
+    expect(models.some((model) => model.id === "tencent/hy3")).toBe(true);
     expect(models.some((model) => model.id === "qwen/qwen3.8-flash")).toBe(
       true,
     );
@@ -239,7 +242,7 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(19);
+    expect(models).toHaveLength(20);
     expect(dashScopeList).not.toHaveBeenCalled();
     expect(openAiList).not.toHaveBeenCalled();
     expect(openRouterList).not.toHaveBeenCalled();
@@ -274,7 +277,7 @@ describe("dynamic chat model discovery", () => {
     const models = await pending;
     await getAvailableChatModels();
 
-    expect(models).toHaveLength(19);
+    expect(models).toHaveLength(20);
     expect(openAiList).toHaveBeenCalledTimes(1);
   });
 });

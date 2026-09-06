@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MODELS,
   readTokenPlanQuotaHint,
   readTokenPlanQuotaResponse,
 } from "./model-selector";
@@ -117,6 +118,20 @@ describe("Token Plan quota hint parsing", () => {
     expect(readTokenPlanQuotaHint(headers)).toMatchObject({
       weeklyRemainingPercent: 0,
       fiveHourRemainingPercent: 100,
+    });
+  });
+});
+
+describe("model fallback catalog", () => {
+  it("lists Tencent Hy3 as a text-only reasoning model", () => {
+    expect(MODELS).toContainEqual({
+      id: "tencent/hy3",
+      label: "Tencent Hy3 (OR)",
+      provider: "openrouter",
+      description: "低コスト・テキスト推論",
+      supportsVision: false,
+      supportsReasoning: true,
+      reasoning: "openrouter",
     });
   });
 });
