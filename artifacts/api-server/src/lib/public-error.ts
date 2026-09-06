@@ -1,3 +1,5 @@
+import { failCurrentRun } from "./run-execution";
+
 function errorMessage(err: unknown): string {
   return err instanceof Error
     ? err.message
@@ -81,23 +83,30 @@ export function isDatabaseError(err: unknown): boolean {
 export function publicAiError(err: unknown): string {
   const msg = errorMessage(err);
   if (isDatabaseError(err)) {
+    failCurrentRun("DATABASE_ERROR");
     return "メッセージの保存に失敗しました。もう一度お試しください。";
   }
   if (/api[_ ]?key|unauthorized|401|invalid_api_key/i.test(msg)) {
+    failCurrentRun("AI_PROVIDER_AUTH_FAILED");
     return "AI プロバイダの認証に失敗しました。";
   }
   if (/timeout|ETIMEDOUT|aborted/i.test(msg)) {
+    failCurrentRun("AI_TIMEOUT");
     return "応答がタイムアウトしました。もう一度お試しください。";
   }
   if (/rate limit|429|quota/i.test(msg)) {
+    failCurrentRun("AI_RATE_LIMITED");
     return "利用制限に達しました。しばらくしてから再試行してください。";
   }
   if (/unsupported parameter|unknown parameter|invalid.?request/i.test(msg)) {
+    failCurrentRun("AI_INVALID_REQUEST");
     return "このモデルでは使えない設定がありました。別のモデルか推論オフで再試行してください。";
   }
   if (isTransientAiError(err)) {
+    failCurrentRun("AI_TRANSIENT_FAILURE");
     return "AIサービスへの接続が一時的に不安定です。もう一度お試しください。";
   }
+  failCurrentRun("AI_RESPONSE_FAILED");
   return "応答の生成に失敗しました。もう一度お試しください。";
 }
 
@@ -115,6 +124,7 @@ export function publicHttpError(err: unknown): {
     };
   }
   if (isDatabaseError(err)) {
+    failCurrentRun("DATABASE_ERROR");
     return {
       status: 500,
       message: "メッセージの保存に失敗しました。もう一度お試しください。",
@@ -127,8 +137,10 @@ export function publicHttpError(err: unknown): {
       isDatabaseError(err) ||
       /insert into|select |Failed query/i.test(msg)
     ) {
+      failCurrentRun("HTTP_400");
       return { status: 400, message: "リクエストが不正です。" };
     }
+    failCurrentRun("HTTP_400");
     return { status: 400, message: `リクエストが不正です: ${msg}` };
   }
   if (status >= 400 && status < 600 && status !== 500) {
