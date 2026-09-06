@@ -78,18 +78,22 @@ function errorFields(error: unknown): {
   errorCode: string;
   errorMessage: string;
 } {
-  if (error instanceof Error) {
-    const maybeCode = (error as Error & { code?: unknown }).code;
-    return {
-      errorCode:
-        typeof maybeCode === "string" &&
-        /^[A-Za-z0-9_.:-]{1,64}$/.test(maybeCode)
-          ? maybeCode
-          : error.name || "ERROR",
-      errorMessage: error.message.slice(0, 1_000),
-    };
+  if (!(error instanceof Error)) {
+    return { errorCode: "ERROR", errorMessage: "Unknown run step failure" };
   }
-  return { errorCode: "ERROR", errorMessage: "Unknown run step failure" };
+
+  const maybeCode = (error as Error & { code?: unknown }).code;
+  let errorCode = error.name || "ERROR";
+  if (
+    typeof maybeCode === "string" &&
+    /^[A-Za-z0-9_.:-]{1,64}$/.test(maybeCode)
+  ) {
+    errorCode = maybeCode;
+  }
+  return {
+    errorCode,
+    errorMessage: error.message.slice(0, 1_000),
+  };
 }
 
 export class RunExecutionContext {
@@ -143,14 +147,15 @@ export class RunExecutionContext {
     } = {},
   ): Promise<void> {
     const completedAt = new Date();
+    const durationMs = Math.max(
+      0,
+      completedAt.getTime() - handle.startedAt.getTime(),
+    );
     await this.persistence.updateStep(handle.id, {
       status,
       completedAt,
       updatedAt: completedAt,
-      durationMs: Math.max(
-        0,
-        completedAt.getTime() - handle.startedAt.getTime(),
-      ),
+      durationMs,
       ...patch,
     });
   }
@@ -217,13 +222,13 @@ export function getRunExecutionContext(): RunExecutionContext | undefined {
 }
 
 /** Mark the current Run failed from an existing synchronous error path. */
-export function failCurrentRun(errorCode: string, errorMessage?: string): void {
+export function failCurrentRun(code: string, message?: string): void {
   const context = getRunExecutionContext();
   if (!context) return;
   void context
     .finish("failed", {
-      errorCode: errorCode.slice(0, 100),
-      errorMessage: errorMessage?.slice(0, 1_000),
+      errorCode: code.slice(0, 100),
+      errorMessage: message?.slice(0, 1_000),
     })
     .catch(() => {
       // Error-reporting paths must never throw a second failure into chat.
