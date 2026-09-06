@@ -135,14 +135,18 @@ describe("dynamic chat model discovery", () => {
   it("filters static models only for providers with successful discovery", async () => {
     dashScopeList.mockResolvedValue(modelList("qwen3.8-max"));
     openAiList.mockResolvedValue(modelList("gpt-5.6-terra"));
-    openRouterList.mockResolvedValue(modelList("google/gemini-2.5-flash-lite"));
 
     const models = await getAvailableChatModels();
 
+    // OpenRouter keeps its full curated catalog: discovery is disabled.
     expect(models.map((model) => model.id)).toEqual([
       "gpt-5.6-terra",
       "qwen3.8-max",
+      "z-ai/glm-5.3-flash",
       "google/gemini-2.5-flash-lite",
+      "openai/gpt-4o-mini",
+      "deepseek/deepseek-chat",
+      "qwen/qwen3-235b-a22b-thinking-2507",
     ]);
     expect(
       models.every(
@@ -234,14 +238,14 @@ describe("dynamic chat model discovery", () => {
   it("caches successful results independently for each provider", async () => {
     dashScopeList.mockResolvedValue(modelList("qwen-dynamic"));
     openAiList.mockResolvedValue(modelList("gpt-dynamic"));
-    openRouterList.mockResolvedValue(modelList("or-dynamic"));
 
     await getAvailableChatModels();
     await getAvailableChatModels();
 
     expect(dashScopeList).toHaveBeenCalledTimes(1);
     expect(openAiList).toHaveBeenCalledTimes(1);
-    expect(openRouterList).toHaveBeenCalledTimes(1);
+    // OpenRouter discovery is disabled; only the catalog is offered.
+    expect(openRouterList).not.toHaveBeenCalled();
   });
 
   it("caches timeout failures briefly and falls back without exposing the error", async () => {

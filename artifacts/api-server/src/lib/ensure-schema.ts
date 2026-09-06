@@ -278,6 +278,20 @@ CREATE TABLE IF NOT EXISTS user_budgets (
 );
 `.trim();
 
+export const ENSURE_USER_SETTINGS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id text PRIMARY KEY,
+  data text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`.trim();
+
+export async function ensureUserSettingsSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_USER_SETTINGS_SCHEMA_SQL);
+}
+
 export async function ensureUserUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -292,4 +306,5 @@ export async function ensureChatSchema(): Promise<void> {
   await ensureAiUsageSchema((sql) => db.execute(sql));
   await ensureLlmMemoriesSchema((sql) => db.execute(sql));
   await ensureUserUsageSchema((sql) => db.execute(sql));
+  await ensureUserSettingsSchema((sql) => db.execute(sql));
 }

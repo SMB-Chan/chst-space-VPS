@@ -7,8 +7,10 @@ import {
   artifacts,
   assets,
   alibabaVideoJobs,
+  userSettings,
 } from "@workspace/db/schema";
 import { and, asc, eq } from "drizzle-orm";
+import { z } from "zod/v4";
 import {
   CreateOpenaiConversationBody,
   CreateOpenaiVideoJobBody,
@@ -570,6 +572,70 @@ router.get("/openai/models", async (req, res) => {
 /** Lightweight authed probe the frontend access gate uses (403 = not invited). */
 router.get("/openai/me", requireAuth, (req, res) => {
   res.json({ userId: getUserId(req), role: req.userRole ?? "user" });
+});
+
+const appSettingsSchema = z.object({
+  defaultModel: z.string().trim().min(1).max(120),
+  defaultReasoning: z.enum(["off", "low", "medium", "high"]),
+  auditEnabled: z.boolean(),
+  auditModelId: z.string().trim().min(1).max(120),
+  auditReasoning: z.enum(["off", "low", "medium", "high"]),
+  translationMode: z.enum([
+    "off",
+    "auto",
+    "ja-en",
+    "en-ja",
+    "auto-ko",
+    "ja-ko",
+    "ko-ja",
+    "auto-zh",
+    "ja-zh",
+    "zh-ja",
+  ]),
+});
+
+/** Account-scoped UI settings so defaults follow the user across devices. */
+router.get("/openai/settings", requireAuth, async (req, res) => {
+  try {
+    const [row] = await db
+      .select()
+      .from(userSettings)
+      .where(eq(userSettings.userId, getUserId(req)))
+      .limit(1);
+    if (!row) {
+      res.json({ settings: null });
+      return;
+    }
+    res.json({ settings: JSON.parse(row.data) });
+  } catch (err) {
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
+    res.status(500).json({ error: "設定を取得できませんでした。" });
+  }
+});
+
+router.put("/openai/settings", requireAuth, async (req, res) => {
+  const parsed = appSettingsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "設定の形式が不正です。" });
+    return;
+  }
+  try {
+    await db
+      .insert(userSettings)
+      .values({
+        userId: getUserId(req),
+        data: JSON.stringify(parsed.data),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: userSettings.userId,
+        set: { data: JSON.stringify(parsed.data), updatedAt: new Date() },
+      });
+    res.status(204).send();
+  } catch (err) {
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
+    res.status(500).json({ error: "設定を保存できませんでした。" });
+  }
 });
 
 router.get("/openai/capabilities", async (_req, res) => {

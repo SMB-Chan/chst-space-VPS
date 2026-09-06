@@ -48,25 +48,80 @@ const FALLBACK: AppSettings = {
   translationMode: "off",
 };
 
+function sanitizeSettings(raw: unknown): AppSettings {
+  const parsed = (raw ?? {}) as Partial<AppSettings>;
+  return {
+    defaultModel:
+      typeof parsed.defaultModel === "string" && parsed.defaultModel
+        ? parsed.defaultModel
+        : FALLBACK.defaultModel,
+    defaultReasoning: parseReasoningLevel(parsed.defaultReasoning),
+    auditEnabled: parsed.auditEnabled === true,
+    auditModelId:
+      typeof parsed.auditModelId === "string" && parsed.auditModelId
+        ? parsed.auditModelId
+        : FALLBACK.auditModelId,
+    auditReasoning: parseReasoningLevel(parsed.auditReasoning),
+    translationMode: parseTranslationModeSetting(parsed.translationMode),
+  };
+}
+
+function apiBase(): string {
+  return `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/openai/settings`;
+}
+
+// Server sync bookkeeping: hydration must never clobber a newer local write.
+let lastLocalWriteAt = 0;
+let hydrationStartedAt = 0;
+let hydrationRequested = false;
+
+/**
+ * Pull the account's stored settings after authentication and apply them over
+ * the local cache. Keeps defaults consistent across browsers and devices —
+ * localStorage alone resets whenever storage is partitioned or cleared.
+ */
+export function hydrateSettingsFromServer(): void {
+  if (hydrationRequested) return;
+  hydrationRequested = true;
+  hydrationStartedAt = Date.now();
+  fetch(apiBase(), { credentials: "include" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      const remote = (data as { settings?: unknown } | null)?.settings;
+      if (!remote || typeof remote !== "object") return;
+      if (lastLocalWriteAt > hydrationStartedAt) return;
+      const next = sanitizeSettings(remote);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      window.dispatchEvent(
+        new CustomEvent("chat-space-settings", { detail: next }),
+      );
+    })
+    .catch(() => {
+      /* offline / unauthenticated: keep local settings */
+    });
+}
+
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function pushSettingsToServer(settings: AppSettings): void {
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => {
+    fetch(apiBase(), {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    }).catch(() => {
+      /* retried on the next save */
+    });
+  }, 400);
+}
+
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...FALLBACK };
-    const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return {
-      defaultModel:
-        typeof parsed.defaultModel === "string" && parsed.defaultModel
-          ? parsed.defaultModel
-          : FALLBACK.defaultModel,
-      defaultReasoning: parseReasoningLevel(parsed.defaultReasoning),
-      auditEnabled: parsed.auditEnabled === true,
-      auditModelId:
-        typeof parsed.auditModelId === "string" && parsed.auditModelId
-          ? parsed.auditModelId
-          : FALLBACK.auditModelId,
-      auditReasoning: parseReasoningLevel(parsed.auditReasoning),
-      translationMode: parseTranslationModeSetting(parsed.translationMode),
-    };
+    return sanitizeSettings(JSON.parse(raw));
   } catch {
     return { ...FALLBACK };
   }
@@ -74,7 +129,14 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(patch: Partial<AppSettings>): AppSettings {
   const next = { ...loadSettings(), ...patch };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    lastLocalWriteAt = Date.now();
+    pushSettingsToServer(next);
+  } catch {
+    // Storage may be unavailable (private mode); the account copy still syncs.
+    pushSettingsToServer(next);
+  }
   window.dispatchEvent(
     new CustomEvent("chat-space-settings", { detail: next }),
   );

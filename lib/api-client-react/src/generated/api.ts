@@ -31,6 +31,8 @@ import type {
   OpenaiMessageDeleteInput,
   OpenaiMessageInput,
   OpenaiModel,
+  OpenaiSettings,
+  OpenaiSettingsEnvelope,
   OpenaiVideoJob,
   OpenaiVideoJobInput,
   RealtimeSession,
@@ -375,6 +377,154 @@ export function useListOpenaiCapabilities<TData = Awaited<ReturnType<typeof list
 
 
 
+
+export const getGetOpenaiSettingsUrl = () => {
+
+
+
+
+  return `/api/openai/settings`
+}
+
+/**
+ * @summary Get the account's stored UI settings
+ */
+export const getOpenaiSettings = async ( options?: Parameters<typeof customFetch>[1]): Promise<OpenaiSettingsEnvelope> => {
+
+  return customFetch<OpenaiSettingsEnvelope>(getGetOpenaiSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpenaiSettingsQueryKey = () => {
+    return [
+    `/api/openai/settings`
+    ] as const;
+    }
+
+
+export const getGetOpenaiSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getOpenaiSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpenaiSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpenaiSettings>>> = ({ signal }) => getOpenaiSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpenaiSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOpenaiSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getOpenaiSettings>>>
+export type GetOpenaiSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the account's stored UI settings
+ */
+
+export function useGetOpenaiSettings<TData = Awaited<ReturnType<typeof getOpenaiSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOpenaiSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOpenaiSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPutOpenaiSettingsUrl = () => {
+
+
+
+
+  return `/api/openai/settings`
+}
+
+/**
+ * @summary Store the account's UI settings
+ */
+export const putOpenaiSettings = async (openaiSettings: OpenaiSettings, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getPutOpenaiSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(openaiSettings)
+  }
+);}
+
+
+
+
+
+export const getPutOpenaiSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putOpenaiSettings>>, TError,{data: BodyType<OpenaiSettings>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putOpenaiSettings>>, TError,{data: BodyType<OpenaiSettings>}, TContext> => {
+
+const mutationKey = ['putOpenaiSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putOpenaiSettings>>, {data: BodyType<OpenaiSettings>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  putOpenaiSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutOpenaiSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof putOpenaiSettings>>>
+    export type PutOpenaiSettingsMutationBody = BodyType<OpenaiSettings>
+    export type PutOpenaiSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Store the account's UI settings
+ */
+export const usePutOpenaiSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putOpenaiSettings>>, TError,{data: BodyType<OpenaiSettings>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof putOpenaiSettings>>,
+        TError,
+        {data: BodyType<OpenaiSettings>},
+        TContext
+      > => {
+      return useMutation(getPutOpenaiSettingsMutationOptions(options));
+    }
 
 export const getCreateOpenaiRealtimeSessionUrl = () => {
 
