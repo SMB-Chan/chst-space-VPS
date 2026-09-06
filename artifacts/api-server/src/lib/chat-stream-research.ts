@@ -7,6 +7,7 @@ import type {
   StreamEventEmitter,
   StreamModelTextFn,
   StreamModelTool,
+  StreamModelUsage,
   WithTimeoutFn,
 } from "./chat-stream-stage-types";
 import {
@@ -96,6 +97,7 @@ export async function runResearchLoop(args: {
   emit: StreamEventEmitter;
   streamText: StreamModelTextFn;
   withTimeout: WithTimeoutFn;
+  onUsage?: (usage: StreamModelUsage) => void;
 }): Promise<ResearchLoopResult> {
   const sources: FactualitySource[] = [];
   const evidenceParts: string[] = [];
@@ -224,6 +226,7 @@ export async function runResearchLoop(args: {
       onToolCalls: (calls) => nextRoundCalls.push(...calls),
       onDelta: (text, kind) =>
         emitModelDelta(args.emit, args.clientGone, args.signal, text, kind),
+      onUsage: args.onUsage,
       shouldStop: () => args.clientGone() || args.signal.aborted,
       signal: args.signal,
     });
@@ -268,6 +271,7 @@ export async function runResearchLoop(args: {
       messages: args.messages,
       onDelta: (text, kind) =>
         emitModelDelta(args.emit, args.clientGone, args.signal, text, kind),
+      onUsage: args.onUsage,
       shouldStop: () => args.clientGone() || args.signal.aborted,
       signal: args.signal,
     });

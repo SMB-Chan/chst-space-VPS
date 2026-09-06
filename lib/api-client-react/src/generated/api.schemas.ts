@@ -5,9 +5,22 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * Admins keep full provider access and reach moderation APIs.
+ */
+export type OpenaiMeRole = typeof OpenaiMeRole[keyof typeof OpenaiMeRole];
+
+
+export const OpenaiMeRole = {
+  admin: 'admin',
+  user: 'user',
+} as const;
+
 export interface OpenaiMe {
   /** Clerk user id of the authenticated account */
   userId: string;
+  /** Admins keep full provider access and reach moderation APIs. */
+  role: OpenaiMeRole;
 }
 
 export interface HealthStatus {

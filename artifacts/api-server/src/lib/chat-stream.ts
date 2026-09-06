@@ -88,6 +88,9 @@ import {
   safeAiFailureFields,
   waitForAiRetry,
 } from "./ai-retry";
+import { estimateTokens } from "./usage-pricing";
+import type { StreamModelUsage } from "./chat-stream-stage-types";
+import type { UserRole } from "../middlewares/allowedUsers";
 
 export {
   isResearchAnnouncementOnly,
@@ -110,6 +113,14 @@ const RESEARCH_RECOVERY_SYSTEM_PROMPT = `直前の応答は、検索すると宣
 /** Minimum interval between memory maintenance runs (5 minutes). */
 const MEMORY_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
 const memoryMaintenanceTimes = new Map<string, number>();
+
+/** Media tools run on the admin's Alibaba credentials: general users never see them. */
+const RESTRICTED_SPECIALIST_TOOL_NAMES = new Set([
+  "generate_image",
+  "synthesize_speech",
+  "edit_image",
+  "transcribe_audio",
+]);
 
 export function withTimeout<T>(
   createPromise: (signal: AbortSignal) => Promise<T>,
@@ -252,6 +263,10 @@ export async function streamChatReply(args: {
   memory?: ChatMemoryContext;
   /** Shared response cancellation, created before attachment extraction. */
   cancellation?: ResponseCancellation;
+  /** "user" restricts the turn to OpenRouter models and text-only tools. */
+  userRole?: UserRole;
+  /** When set, per-model token usage of this turn is recorded for the user. */
+  usageUserId?: string;
   onComplete?: ChatCompletionCallback;
   /** Persist the user turn and any visible partial answer after a non-cancelled failure. */
   onFailure?: ChatFailureCallback;
@@ -278,6 +293,8 @@ export async function streamChatReply(args: {
     requestedFileFormat,
     memory = { enabled: false },
     cancellation: providedCancellation,
+    userRole,
+    usageUserId,
     onComplete,
     onFailure,
     publicAiError,
@@ -315,6 +332,37 @@ export async function streamChatReply(args: {
   let fullResponse = "";
   let streamedResponse = "";
   let failureSources: ChatCompletionInput["sources"] = [];
+
+  // Per-turn token accounting: aggregated per model and persisted once the
+  // turn ends (success, failure, or client stop) when a user is attributed.
+  const restrictSpecialist = userRole === "user";
+  const usageEntries = new Map<string, StreamModelUsage>();
+  const onUsage = (usage: StreamModelUsage): void => {
+    const current = usageEntries.get(usage.modelId) ?? {
+      modelId: usage.modelId,
+      promptTokens: 0,
+      completionTokens: 0,
+    };
+    current.promptTokens += usage.promptTokens;
+    current.completionTokens += usage.completionTokens;
+    usageEntries.set(usage.modelId, current);
+  };
+  const flushUsage = (): void => {
+    if (!usageUserId || usageEntries.size === 0) return;
+    const entries = [...usageEntries.values()];
+    usageEntries.clear();
+    // Loaded lazily so hermetic test environments never touch the database.
+    void import("./usage-tracking")
+      .then(({ recordUsageEntry }) =>
+        Promise.all(
+          entries.map((entry) => recordUsageEntry(entry, usageUserId)),
+        ),
+      )
+      .catch(() => {
+        // Accounting must never break the chat turn.
+      });
+  };
+
   const persistInterruptedTurn = async (): Promise<boolean> => {
     if (clientAbort.signal.aborted || !onFailure) return false;
     const durableContent =
@@ -527,7 +575,9 @@ export async function streamChatReply(args: {
     }
 
     let brokerToolCall: SpecialistToolCall | undefined;
-    if (!translationMode) {
+    // General users run on OpenRouter text models only: image/audio media
+    // generation consumes the admin's Alibaba credentials and is skipped.
+    if (!translationMode && !restrictSpecialist) {
       const plan = await planCapabilityTool({
         client,
         provider,
@@ -564,11 +614,15 @@ export async function streamChatReply(args: {
       hasWebContext: Boolean(webContext.contextText),
     })
       ? getSpecialistTools({
-          imageAttachments: imageAttachmentsForTools,
-          audioAttachments: audioAttachmentsForTools,
+          imageAttachments: restrictSpecialist ? [] : imageAttachmentsForTools,
+          audioAttachments: restrictSpecialist ? [] : audioAttachmentsForTools,
           userId: memory.enabled ? memory.userId : undefined,
           memoryEnabled: memory.enabled,
-        })
+        }).filter(
+          (tool) =>
+            !restrictSpecialist ||
+            !RESTRICTED_SPECIALIST_TOOL_NAMES.has(tool.function.name),
+        )
       : [];
 
     fullResponse = await streamModelText({
@@ -594,6 +648,7 @@ export async function streamChatReply(args: {
           );
         }
       },
+      onUsage,
       shouldStop: () => clientGone() || clientAbort.signal.aborted,
       signal: clientAbort.signal,
     });
@@ -635,6 +690,7 @@ export async function streamChatReply(args: {
             );
           }
         },
+        onUsage,
         shouldStop: () => clientGone() || clientAbort.signal.aborted,
         signal: clientAbort.signal,
       });
@@ -686,6 +742,7 @@ export async function streamChatReply(args: {
           },
           streamText: streamModelText,
           withTimeout,
+          onUsage,
         });
         fullResponse += research.responseText;
         allResearchSources = research.sources;
@@ -822,6 +879,7 @@ export async function streamChatReply(args: {
               );
             }
           },
+          onUsage,
           shouldStop: () => clientGone() || clientAbort.signal.aborted,
           signal: clientAbort.signal,
         });
@@ -940,6 +998,7 @@ export async function streamChatReply(args: {
               );
             }
           },
+          onUsage,
           shouldStop: () => clientGone() || clientAbort.signal.aborted,
           signal: clientAbort.signal,
         });
@@ -1101,6 +1160,7 @@ export async function streamChatReply(args: {
                   // Audit JSON is intentionally kept server-side until it has
                   // passed validation; partial model output must never leak.
                 },
+                onUsage,
                 shouldStop: () => clientGone() || clientAbort.signal.aborted,
                 signal,
               }),
@@ -1210,6 +1270,7 @@ export async function streamChatReply(args: {
               clientGone,
               requestId,
               signal,
+              onUsage,
             }),
           FILE_GENERATION_TIMEOUT_MS,
           "File generation",
@@ -1255,6 +1316,7 @@ export async function streamChatReply(args: {
       );
     }
   } finally {
+    flushUsage();
     // Every early-return path (client cancellation, persistence failure, etc.)
     // must release the keepalive timer and terminate the SSE response.
     clearInterval(heartbeat);
@@ -1312,10 +1374,20 @@ export async function streamModelText(
     args.provider,
     Boolean(args.tools?.length),
   );
+  // Providers that support it report token usage on the final stream chunk;
+  // the usage tracker falls back to an estimate for the rest.
+  if (args.provider !== "dashscope") {
+    (streamOptions as unknown as Record<string, unknown>).stream_options = {
+      include_usage: true,
+    };
+  }
 
   let full = "";
   let emittedContent = "";
   let reasoning = "";
+  let usagePromptTokens = 0;
+  let usageCompletionTokens = 0;
+  let sawProviderUsage = false;
   const toolCalls = new Map<number, SpecialistToolCall>();
   const retryConfig = getAiStreamRetryConfig();
   const maxAttempts = retryConfig.maxAttempts;
@@ -1394,6 +1466,19 @@ export async function streamModelText(
         const choice = chunk.choices?.[0];
         const delta = choice?.delta;
         if (choice?.finish_reason) finishReason = choice.finish_reason;
+        const chunkUsage = (
+          chunk as {
+            usage?: {
+              prompt_tokens?: number | null;
+              completion_tokens?: number | null;
+            } | null;
+          }
+        ).usage;
+        if (chunkUsage) {
+          sawProviderUsage = true;
+          usagePromptTokens += chunkUsage.prompt_tokens ?? 0;
+          usageCompletionTokens += chunkUsage.completion_tokens ?? 0;
+        }
         const rawToolCalls = (
           delta as unknown as
             | {
@@ -1514,6 +1599,9 @@ export async function streamModelText(
         allowedToolNames.clear();
         full = "";
         emittedContent = "";
+        usagePromptTokens = 0;
+        usageCompletionTokens = 0;
+        sawProviderUsage = false;
         continue;
       }
       if (transientRetryCount > 0) {
@@ -1566,6 +1654,9 @@ export async function streamModelText(
       toolCalls.clear();
       full = "";
       emittedContent = "";
+      usagePromptTokens = 0;
+      usageCompletionTokens = 0;
+      sawProviderUsage = false;
       // Repeating the exact same expensive DashScope request five times can
       // keep hitting the same short-lived transport failure. Preserve the
       // selected model, messages and tools, but make later attempts cheaper:
@@ -1610,6 +1701,23 @@ export async function streamModelText(
       if (!retryReady) break;
     }
   }
+  if (args.onUsage && (sawProviderUsage || full.trim())) {
+    // Provider-reported usage when the stream carried it; otherwise a cheap
+    // character-based estimate so budget accounting stays conservative.
+    const promptTokens = sawProviderUsage
+      ? usagePromptTokens
+      : estimateTokens(collectMessageText(args.messages));
+    const completionTokens = sawProviderUsage
+      ? usageCompletionTokens
+      : estimateTokens(full);
+    if (promptTokens + completionTokens > 0) {
+      args.onUsage({
+        modelId: args.modelId,
+        promptTokens,
+        completionTokens,
+      });
+    }
+  }
   const completedToolCalls = validToolCalls();
   if (completedToolCalls.length > 0) {
     args.onToolCalls?.(completedToolCalls);
@@ -1633,6 +1741,19 @@ function formatMessageForSummary(
       .join("\n");
   }
   return "";
+}
+
+/** Text-only message serialization for token estimation (images excluded). */
+function collectMessageText(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+): string {
+  return messages
+    .filter(
+      (message) =>
+        message.role !== "system" || typeof message.content === "string",
+    )
+    .map((message) => formatMessageForSummary(message))
+    .join("\n");
 }
 
 function stripCodeAndArtifactBlocks(text: string): string {
@@ -1728,6 +1849,7 @@ interface GenerateAndReviewFileContext {
   clientGone: () => boolean;
   requestId?: string;
   signal?: AbortSignal;
+  onUsage?: (usage: StreamModelUsage) => void;
 }
 
 export async function generateAndReviewFile(
@@ -1746,6 +1868,7 @@ export async function generateAndReviewFile(
     clientGone,
     requestId,
     signal,
+    onUsage,
   } = ctx;
   const baseDiagnostic = { requestId, fileFormat };
   let currentStage = "file-generation";
@@ -1803,6 +1926,7 @@ export async function generateAndReviewFile(
         onDelta: () => {
           // File generation is short; no streaming needed.
         },
+        onUsage,
         shouldStop: isCancelled,
         signal,
       });

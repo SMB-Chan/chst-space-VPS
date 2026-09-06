@@ -5,8 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OpenaiMeRole } from './openaiMeRole';
 
 export interface OpenaiMe {
   /** Clerk user id of the authenticated account */
   userId: string;
+  /** Admins keep full provider access and reach moderation APIs. */
+  role: OpenaiMeRole;
 }

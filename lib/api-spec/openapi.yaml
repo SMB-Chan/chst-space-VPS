@@ -537,11 +537,15 @@ components:
   schemas:
     OpenaiMe:
       type: object
-      required: [userId]
+      required: [userId, role]
       properties:
         userId:
           type: string
           description: Clerk user id of the authenticated account
+        role:
+          type: string
+          enum: [admin, user]
+          description: Admins keep full provider access and reach moderation APIs.
     HealthStatus:
       type: object
       properties:

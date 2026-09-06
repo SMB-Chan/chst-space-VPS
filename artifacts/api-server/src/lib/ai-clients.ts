@@ -355,6 +355,7 @@ export function applySafeGenerationParams(
   delete opts.thinking_budget;
   delete opts.incremental_output;
   delete opts.tool_stream;
+  delete opts.stream_options;
   delete opts.extra_body;
   if (provider === "openai") {
     opts.max_completion_tokens = 8192;
