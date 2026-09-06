@@ -3,7 +3,7 @@ import type { ExtractedArtifact } from "./artifacts";
 import type { FactualityReport } from "./factuality";
 import type { GeneratedFile } from "./file-generation";
 import { logger, safeFailureFields } from "./logger";
-import { executeRunStep } from "./run-execution";
+import { executeRunStep, failCurrentRun } from "./run-execution";
 import type { GeneratedAsset } from "./specialist-capabilities";
 
 export interface ChatCompletionInput {
@@ -90,6 +90,7 @@ export async function persistAndEmitChatCompletion(args: {
         )
       : undefined;
   } catch (error) {
+    failCurrentRun("CHAT_COMPLETION_PERSIST_FAILED");
     logger.error(
       safeFailureFields(error, "chat-stream", "CHAT_COMPLETION_PERSIST_FAILED"),
       "Failed to persist chat completion",
