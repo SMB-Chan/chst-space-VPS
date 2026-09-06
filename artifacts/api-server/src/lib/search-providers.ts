@@ -94,6 +94,16 @@ export function parseBraveResults(json: unknown): SearchResult[] {
   });
 }
 
+export function parseSearxngResults(json: unknown): SearchResult[] {
+  const results = (json as { results?: unknown[] })?.results;
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((raw): SearchResult[] => {
+    const item = raw as { title?: unknown; url?: unknown; content?: unknown };
+    const result = safeResult(item.title, item.url, item.content);
+    return result ? [result] : [];
+  });
+}
+
 export function parseTavilyResults(json: unknown): SearchResult[] {
   const results = (json as { results?: unknown[] })?.results;
   if (!Array.isArray(results)) return [];
@@ -168,8 +178,35 @@ function braveProvider(apiKey: string): ApiSearchProvider {
   };
 }
 
+/**
+ * Self-hosted SearXNG metasearch. The instance aggregates upstream engines
+ * through their supported interfaces with its own politeness controls, so the
+ * app never talks to search engines directly — no bot-evasion arms race. The
+ * instance must enable the JSON output format (`search.formats` incl. "json"),
+ * which public instances usually disable; run your own (Docker one-liner).
+ */
+function searxngProvider(baseUrl: string): ApiSearchProvider {
+  const base = baseUrl.replace(/\/+$/, "");
+  const username = process.env.SEARXNG_USERNAME?.trim();
+  const password = process.env.SEARXNG_PASSWORD?.trim();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (username && password) {
+    headers.Authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+  }
+  return {
+    name: "searxng",
+    async search(query) {
+      const url = `${base}/search?q=${encodeURIComponent(query)}&format=json`;
+      const json = await fetchJson(url, { headers });
+      return parseSearxngResults(json);
+    },
+  };
+}
+
 export function getConfiguredApiProviders(): ApiSearchProvider[] {
   const providers: ApiSearchProvider[] = [];
+  const searxngUrl = process.env.SEARXNG_BASE_URL?.trim();
+  if (searxngUrl) providers.push(searxngProvider(searxngUrl));
   const tavilyKey = process.env.TAVILY_API_KEY?.trim();
   const exaKey = process.env.EXA_API_KEY?.trim();
   const braveKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
