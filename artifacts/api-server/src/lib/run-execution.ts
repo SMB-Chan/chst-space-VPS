@@ -97,10 +97,7 @@ export class RunExecutionContext {
   private nextStepSequence = 1;
   private finishPromise: Promise<void> | undefined;
 
-  constructor(
-    runId: string,
-    private readonly persistence: RunPersistence,
-  ) {
+  constructor(runId: string, private readonly persistence: RunPersistence) {
     this.runId = runId;
   }
 
@@ -220,10 +217,7 @@ export function getRunExecutionContext(): RunExecutionContext | undefined {
 }
 
 /** Mark the current Run failed from an existing synchronous error path. */
-export function failCurrentRun(
-  errorCode: string,
-  errorMessage?: string,
-): void {
+export function failCurrentRun(errorCode: string, errorMessage?: string): void {
   const context = getRunExecutionContext();
   if (!context) return;
   void context
