@@ -4,9 +4,9 @@ import { readResponseTextLimited } from "./bounded-body";
 import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
 
 /**
- * API-based search providers. Hosts are fixed and known; only the query string
- * carries user-controlled data. Provider responses are still untrusted and
- * are bounded, parsed defensively, and URL-normalized before use.
+ * API-based search providers. Fixed SaaS providers use known hosts; SearXNG is
+ * an operator-configured self-hosted endpoint. Provider responses are still
+ * untrusted and are bounded, parsed defensively, and URL-normalized before use.
  */
 
 const PROVIDER_TIMEOUT_MS = 10_000;
@@ -19,19 +19,27 @@ export const SEARCH_PROVIDER_REDIRECT_POLICY = "error" as const;
 
 export interface ApiSearchProvider {
   name: string;
-  search(query: string): Promise<SearchResult[]>;
+  search(query: string, signal?: AbortSignal): Promise<SearchResult[]>;
 }
 
 async function fetchJson(
   url: string,
   init: { method?: string; headers?: Record<string, string>; body?: string },
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  const abortParent = () =>
+    controller.abort(signal?.reason ?? new Error("Operation cancelled"));
+  if (signal?.aborted) abortParent();
+  else signal?.addEventListener("abort", abortParent, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new Error("Search provider timed out")),
+    PROVIDER_TIMEOUT_MS,
+  );
   try {
-    // Authenticated machine-API endpoints are fixed and are not expected to
-    // redirect. Reject redirects rather than carrying API credentials onto a
-    // second destination selected by an unexpected provider response.
+    // Authenticated machine-API endpoints are not expected to redirect. Reject
+    // redirects rather than carrying API credentials onto a second destination
+    // selected by an unexpected provider response.
     const res = await undiciFetch(url, {
       ...init,
       signal: controller.signal,
@@ -54,6 +62,7 @@ async function fetchJson(
     }
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abortParent);
   }
 }
 
@@ -127,15 +136,23 @@ export function parseExaResults(json: unknown): SearchResult[] {
 function tavilyProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "tavily",
-    async search(query) {
-      const json = await fetchJson("https://api.tavily.com/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+    async search(query, signal) {
+      const json = await fetchJson(
+        "https://api.tavily.com/search",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            query,
+            max_results: 8,
+            search_depth: "basic",
+          }),
         },
-        body: JSON.stringify({ query, max_results: 8, search_depth: "basic" }),
-      });
+        signal,
+      );
       return parseTavilyResults(json);
     },
   };
@@ -144,19 +161,23 @@ function tavilyProvider(apiKey: string): ApiSearchProvider {
 function exaProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "exa",
-    async search(query) {
-      const json = await fetchJson("https://api.exa.ai/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
+    async search(query, signal) {
+      const json = await fetchJson(
+        "https://api.exa.ai/search",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            query,
+            numResults: 8,
+            contents: { text: { maxCharacters: 500 } },
+          }),
         },
-        body: JSON.stringify({
-          query,
-          numResults: 8,
-          contents: { text: { maxCharacters: 500 } },
-        }),
-      });
+        signal,
+      );
       return parseExaResults(json);
     },
   };
@@ -165,28 +186,49 @@ function exaProvider(apiKey: string): ApiSearchProvider {
 function braveProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "brave",
-    async search(query) {
+    async search(query, signal) {
       const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`;
-      const json = await fetchJson(url, {
-        headers: {
-          Accept: "application/json",
-          "X-Subscription-Token": apiKey,
+      const json = await fetchJson(
+        url,
+        {
+          headers: {
+            Accept: "application/json",
+            "X-Subscription-Token": apiKey,
+          },
         },
-      });
+        signal,
+      );
       return parseBraveResults(json);
     },
   };
 }
 
 /**
- * Self-hosted SearXNG metasearch. The instance aggregates upstream engines
- * through their supported interfaces with its own politeness controls, so the
- * app never talks to search engines directly — no bot-evasion arms race. The
- * instance must enable the JSON output format (`search.formats` incl. "json"),
- * which public instances usually disable; run your own (Docker one-liner).
+ * Normalize the operator-configured SearXNG base URL. Private/local HTTP hosts
+ * are intentionally allowed because a self-hosted instance commonly lives on
+ * an internal network. Embedded credentials, queries, fragments, and non-HTTP
+ * schemes are rejected; Basic auth must use the dedicated env vars instead.
+ */
+export function normalizeSearxngBaseUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password || url.search || url.hash) return null;
+    const pathname = url.pathname.replace(/\/+$/, "");
+    return `${url.origin}${pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Self-hosted SearXNG metasearch. The instance aggregates its configured
+ * engines behind one JSON API and can suspend/throttle engines that return
+ * access-denied, CAPTCHA, or rate-limit responses. The app only talks to the
+ * configured instance. JSON output (`search.formats` incl. "json") must be
+ * enabled on that instance.
  */
 function searxngProvider(baseUrl: string): ApiSearchProvider {
-  const base = baseUrl.replace(/\/+$/, "");
   const username = process.env.SEARXNG_USERNAME?.trim();
   const password = process.env.SEARXNG_PASSWORD?.trim();
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -195,9 +237,11 @@ function searxngProvider(baseUrl: string): ApiSearchProvider {
   }
   return {
     name: "searxng",
-    async search(query) {
-      const url = `${base}/search?q=${encodeURIComponent(query)}&format=json`;
-      const json = await fetchJson(url, { headers });
+    async search(query, signal) {
+      const url = new URL(`${baseUrl}/search`);
+      url.searchParams.set("q", query);
+      url.searchParams.set("format", "json");
+      const json = await fetchJson(url.href, { headers }, signal);
       return parseSearxngResults(json);
     },
   };
@@ -205,8 +249,17 @@ function searxngProvider(baseUrl: string): ApiSearchProvider {
 
 export function getConfiguredApiProviders(): ApiSearchProvider[] {
   const providers: ApiSearchProvider[] = [];
-  const searxngUrl = process.env.SEARXNG_BASE_URL?.trim();
-  if (searxngUrl) providers.push(searxngProvider(searxngUrl));
+  const rawSearxngUrl = process.env.SEARXNG_BASE_URL?.trim();
+  if (rawSearxngUrl) {
+    const searxngUrl = normalizeSearxngBaseUrl(rawSearxngUrl);
+    if (searxngUrl) providers.push(searxngProvider(searxngUrl));
+    else {
+      logger.warn(
+        { component: "search-provider", errorCode: "SEARXNG_CONFIG_INVALID" },
+        "Ignoring invalid SEARXNG_BASE_URL",
+      );
+    }
+  }
   const tavilyKey = process.env.TAVILY_API_KEY?.trim();
   const exaKey = process.env.EXA_API_KEY?.trim();
   const braveKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
@@ -300,9 +353,10 @@ export function mergeSearchProviderResults(
 async function runProvider(
   provider: ApiSearchProvider,
   query: string,
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   try {
-    const results = await provider.search(query);
+    const results = await provider.search(query, signal);
     if (results.length > 0) {
       logger.debug(
         { provider: provider.name, resultCount: results.length },
@@ -316,6 +370,10 @@ async function runProvider(
     }
     return results;
   } catch (err) {
+    // Client disconnect/cancellation is a lifecycle event, not a provider
+    // failure. Propagate it so we do not launch fallbacks after the response is
+    // already gone.
+    if (signal?.aborted) throw err;
     logger.warn(
       {
         ...safeFailureFields(
@@ -343,16 +401,23 @@ async function runProvider(
 export async function searchWithProviders(
   query: string,
   providers: ApiSearchProvider[],
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   if (providers.length === 0) return [];
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("Search cancelled");
+  }
 
-  const primaryResults = await runProvider(providers[0]!, query);
+  const primaryResults = await runProvider(providers[0]!, query, signal);
   if (providers.length === 1 || hasSufficientPrimaryCoverage(primaryResults)) {
     return primaryResults.slice(0, MAX_MERGED_API_RESULTS);
   }
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("Search cancelled");
+  }
 
   const secondaryResults = await Promise.all(
-    providers.slice(1).map((provider) => runProvider(provider, query)),
+    providers.slice(1).map((provider) => runProvider(provider, query, signal)),
   );
   return mergeSearchProviderResults(
     [primaryResults, ...secondaryResults],
@@ -362,6 +427,7 @@ export async function searchWithProviders(
 
 export async function searchWithApiProviders(
   query: string,
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  return searchWithProviders(query, getConfiguredApiProviders());
+  return searchWithProviders(query, getConfiguredApiProviders(), signal);
 }
