@@ -101,7 +101,10 @@ export class RunExecutionContext {
   private nextStepSequence = 1;
   private finishPromise: Promise<void> | undefined;
 
-  constructor(runId: string, private readonly persistence: RunPersistence) {
+  constructor(
+    runId: string,
+    private readonly persistence: RunPersistence,
+  ) {
     this.runId = runId;
   }
 
