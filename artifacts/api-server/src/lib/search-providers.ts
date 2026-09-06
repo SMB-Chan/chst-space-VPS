@@ -2,11 +2,23 @@ import { fetch as undiciFetch } from "undici";
 import { logger, safeFailureFields } from "./logger";
 import { readResponseTextLimited } from "./bounded-body";
 import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
+import {
+  fuseSearchProviderResults,
+  getSearchProviderHealth,
+  isSearchProviderAvailable,
+  recordSearchProviderFailure,
+  recordSearchProviderSuccess,
+  resetSearchProviderHealthForTests,
+  type RankedProviderResults,
+} from "./search-core";
 
 /**
  * API-based search providers. Fixed SaaS providers use known hosts; SearXNG is
  * an operator-configured self-hosted endpoint. Provider responses are still
  * untrusted and are bounded, parsed defensively, and URL-normalized before use.
+ *
+ * Provider scheduling, cooldown and rank fusion are implemented independently
+ * in search-core.ts. No SearXNG source code is embedded here.
  */
 
 const PROVIDER_TIMEOUT_MS = 10_000;
@@ -14,12 +26,37 @@ const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 const PRIMARY_MIN_RESULTS = 5;
 const PRIMARY_MIN_DOMAINS = 3;
 const MAX_MERGED_API_RESULTS = 10;
-const DIVERSE_DOMAIN_SOFT_CAP = 2;
+const DEFAULT_INITIAL_FANOUT = 1;
+const MAX_INITIAL_FANOUT = 3;
 export const SEARCH_PROVIDER_REDIRECT_POLICY = "error" as const;
 
 export interface ApiSearchProvider {
   name: string;
+  /** Optional relative contribution to rank fusion; defaults to 1. */
+  weight?: number;
   search(query: string, signal?: AbortSignal): Promise<SearchResult[]>;
+}
+
+export { getSearchProviderHealth, resetSearchProviderHealthForTests };
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return undefined;
+}
+
+function providerHttpError(status: number, retryAfter: string | null): Error {
+  const error = new Error(`Search API returned ${status}`) as Error & {
+    status?: number;
+    retryAfterMs?: number;
+  };
+  error.status = status;
+  const retryAfterMs = parseRetryAfterMs(retryAfter);
+  if (retryAfterMs !== undefined) error.retryAfterMs = retryAfterMs;
+  return error;
 }
 
 async function fetchJson(
@@ -45,7 +82,10 @@ async function fetchJson(
       signal: controller.signal,
       redirect: SEARCH_PROVIDER_REDIRECT_POLICY,
     });
-    if (!res.ok) throw new Error(`Search API returned ${res.status}`);
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined);
+      throw providerHttpError(res.status, res.headers.get("retry-after"));
+    }
     const contentType = res.headers.get("content-type") ?? "";
     if (!/\b(?:application\/json|[^;]+\+json)\b/i.test(contentType)) {
       await res.body?.cancel().catch(() => undefined);
@@ -222,11 +262,8 @@ export function normalizeSearxngBaseUrl(raw: string): string | null {
 }
 
 /**
- * Self-hosted SearXNG metasearch. The instance aggregates its configured
- * engines behind one JSON API and can suspend/throttle engines that return
- * access-denied, CAPTCHA, or rate-limit responses. The app only talks to the
- * configured instance. JSON output (`search.formats` incl. "json") must be
- * enabled on that instance.
+ * Self-hosted SearXNG metasearch. This remains an optional compatibility
+ * provider; Chat-Space does not depend on it for scheduling or fusion.
  */
 function searxngProvider(baseUrl: string): ApiSearchProvider {
   const username = process.env.SEARXNG_USERNAME?.trim();
@@ -289,65 +326,29 @@ export function hasSufficientPrimaryCoverage(results: SearchResult[]): boolean {
 }
 
 /**
- * Merge provider-ranked lists while preserving useful provider ordering and
- * avoiding one provider/domain monopolising the ensemble. The domain cap is a
- * soft first pass: remaining unique URLs are used afterward if diversity alone
- * would leave too few results.
+ * Backward-compatible merge entry point. Internally this now uses weighted RRF
+ * instead of round-robin interleaving, so agreement across providers is a
+ * positive ranking signal while a soft domain cap still protects diversity.
  */
 export function mergeSearchProviderResults(
   resultSets: SearchResult[][],
   maxResults = MAX_MERGED_API_RESULTS,
 ): SearchResult[] {
-  const output: SearchResult[] = [];
-  const seenUrls = new Set<string>();
-  const perDomain = new Map<string, number>();
-  const cursors = resultSets.map(() => 0);
+  return fuseSearchProviderResults(
+    resultSets.map((results, index) => ({
+      providerName: `provider-${index}`,
+      results,
+    })),
+    maxResults,
+  );
+}
 
-  const addRoundRobin = (enforceDomainCap: boolean): void => {
-    let progressed = true;
-    while (output.length < maxResults && progressed) {
-      progressed = false;
-      for (let setIndex = 0; setIndex < resultSets.length; setIndex++) {
-        const results = resultSets[setIndex] ?? [];
-        while (cursors[setIndex] < results.length) {
-          const candidate = results[cursors[setIndex]++]!;
-          if (seenUrls.has(candidate.url)) continue;
-          const domain = domainOf(candidate);
-          if (
-            enforceDomainCap &&
-            domain &&
-            (perDomain.get(domain) ?? 0) >= DIVERSE_DOMAIN_SOFT_CAP
-          ) {
-            continue;
-          }
-          seenUrls.add(candidate.url);
-          if (domain) perDomain.set(domain, (perDomain.get(domain) ?? 0) + 1);
-          output.push(candidate);
-          progressed = true;
-          break;
-        }
-        if (output.length >= maxResults) return;
-      }
-    }
-  };
-
-  addRoundRobin(true);
-
-  // The first pass advances past domain-capped candidates. Re-scan every set
-  // for remaining unique URLs without the cap so sparse provider combinations
-  // still return as much useful coverage as possible.
-  if (output.length < maxResults) {
-    for (const results of resultSets) {
-      for (const candidate of results) {
-        if (output.length >= maxResults) break;
-        if (seenUrls.has(candidate.url)) continue;
-        seenUrls.add(candidate.url);
-        output.push(candidate);
-      }
-    }
-  }
-
-  return output;
+function configuredInitialFanout(): number {
+  const raw = Number(
+    process.env.SEARCH_INITIAL_FANOUT ?? DEFAULT_INITIAL_FANOUT,
+  );
+  if (!Number.isFinite(raw)) return DEFAULT_INITIAL_FANOUT;
+  return Math.min(MAX_INITIAL_FANOUT, Math.max(1, Math.floor(raw)));
 }
 
 async function runProvider(
@@ -355,8 +356,21 @@ async function runProvider(
   query: string,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
+  if (!isSearchProviderAvailable(provider.name)) {
+    const health = getSearchProviderHealth(provider.name);
+    logger.debug(
+      {
+        provider: provider.name,
+        providerHealth: health.health,
+        suspendedUntil: health.suspendedUntil,
+      },
+      "Skipping search provider in cooldown",
+    );
+    return [];
+  }
   try {
     const results = await provider.search(query, signal);
+    recordSearchProviderSuccess(provider.name);
     if (results.length > 0) {
       logger.debug(
         { provider: provider.name, resultCount: results.length },
@@ -374,6 +388,7 @@ async function runProvider(
     // failure. Propagate it so we do not launch fallbacks after the response is
     // already gone.
     if (signal?.aborted) throw err;
+    const health = recordSearchProviderFailure(provider.name, err);
     logger.warn(
       {
         ...safeFailureFields(
@@ -382,6 +397,9 @@ async function runProvider(
           "SEARCH_API_PROVIDER_FAILED",
         ),
         provider: provider.name,
+        providerHealth: health.health,
+        failureKind: health.lastFailureKind,
+        suspendedUntil: health.suspendedUntil || undefined,
       },
       "Search API provider failed",
     );
@@ -389,14 +407,28 @@ async function runProvider(
   }
 }
 
+function rankedSet(
+  provider: ApiSearchProvider,
+  results: SearchResult[],
+): RankedProviderResults {
+  return {
+    providerName: provider.name,
+    weight: provider.weight,
+    results,
+  };
+}
+
 /**
- * Prefer one provider when it already gives sufficient coverage. Only pay the
- * latency/API-cost of additional providers when the primary set is sparse or
- * concentrated in too few domains. Secondary providers are then queried in
- * parallel and merged with URL deduplication + domain diversity.
+ * Adaptive provider ensemble inspired by metasearch scheduling principles but
+ * implemented independently for Chat-Space:
+ * - providers in cooldown are skipped rather than repeatedly hammered;
+ * - the initial wave is configurable (SEARCH_INITIAL_FANOUT, 1..3);
+ * - if coverage is insufficient, remaining healthy providers run in parallel;
+ * - ranked lists are combined with weighted Reciprocal Rank Fusion.
  *
- * Raw queries are intentionally never written to logs because they can contain
- * user-provided personal or confidential text.
+ * The default fan-out remains 1 to preserve API-cost behavior. Operators can
+ * set SEARCH_INITIAL_FANOUT=2 for lower latency / broader first-wave coverage.
+ * Raw queries are intentionally never written to logs.
  */
 export async function searchWithProviders(
   query: string,
@@ -408,21 +440,42 @@ export async function searchWithProviders(
     throw signal.reason ?? new Error("Search cancelled");
   }
 
-  const primaryResults = await runProvider(providers[0]!, query, signal);
-  if (providers.length === 1 || hasSufficientPrimaryCoverage(primaryResults)) {
-    return primaryResults.slice(0, MAX_MERGED_API_RESULTS);
+  const available = providers.filter((provider) =>
+    isSearchProviderAvailable(provider.name),
+  );
+  if (available.length === 0) return [];
+
+  const initialCount = Math.min(configuredInitialFanout(), available.length);
+  const initialProviders = available.slice(0, initialCount);
+  const initialResults = await Promise.all(
+    initialProviders.map((provider) => runProvider(provider, query, signal)),
+  );
+  const ranked: RankedProviderResults[] = initialProviders.map(
+    (provider, index) => rankedSet(provider, initialResults[index] ?? []),
+  );
+  const initialMerged = fuseSearchProviderResults(
+    ranked,
+    MAX_MERGED_API_RESULTS,
+  );
+
+  if (
+    initialCount === available.length ||
+    hasSufficientPrimaryCoverage(initialMerged)
+  ) {
+    return initialMerged;
   }
   if (signal?.aborted) {
     throw signal.reason ?? new Error("Search cancelled");
   }
 
-  const secondaryResults = await Promise.all(
-    providers.slice(1).map((provider) => runProvider(provider, query, signal)),
+  const remainingProviders = available.slice(initialCount);
+  const remainingResults = await Promise.all(
+    remainingProviders.map((provider) => runProvider(provider, query, signal)),
   );
-  return mergeSearchProviderResults(
-    [primaryResults, ...secondaryResults],
-    MAX_MERGED_API_RESULTS,
-  );
+  remainingProviders.forEach((provider, index) => {
+    ranked.push(rankedSet(provider, remainingResults[index] ?? []));
+  });
+  return fuseSearchProviderResults(ranked, MAX_MERGED_API_RESULTS);
 }
 
 export async function searchWithApiProviders(
