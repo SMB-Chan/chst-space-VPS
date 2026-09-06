@@ -148,10 +148,9 @@ describe("RunExecutionContext", () => {
     await context.finish("cancelled", { errorCode: "CLIENT_DISCONNECTED" });
 
     expect(persistence.runUpdateCount).toBe(1);
-    expect(persistence.runs.get(context.runId)).toMatchObject({
-      status: "completed",
-      errorCode: undefined,
-    });
+    const settled = persistence.runs.get(context.runId);
+    expect(settled).toMatchObject({ status: "completed" });
+    expect(settled?.errorCode).toBeUndefined();
   });
 
   it("keeps executeRunStep transparent outside a Run", async () => {
