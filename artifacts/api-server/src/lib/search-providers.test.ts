@@ -7,6 +7,7 @@ import {
   getConfiguredApiProviders,
   hasSufficientPrimaryCoverage,
   mergeSearchProviderResults,
+  normalizeSearxngBaseUrl,
   searchWithProviders,
   SEARCH_PROVIDER_REDIRECT_POLICY,
   type ApiSearchProvider,
@@ -42,11 +43,13 @@ function result(host: string, path: string, title = path): SearchResult {
 
 function stubProvider(
   name: string,
-  implementation: () => Promise<SearchResult[]>,
+  implementation: (signal?: AbortSignal) => Promise<SearchResult[]>,
 ): ApiSearchProvider & { search: ReturnType<typeof vi.fn> } {
   return {
     name,
-    search: vi.fn(implementation),
+    search: vi.fn((_query: string, signal?: AbortSignal) =>
+      implementation(signal),
+    ),
   };
 }
 
@@ -141,6 +144,27 @@ describe("parseExaResults", () => {
   });
 });
 
+describe("SearXNG configuration", () => {
+  it("normalizes http(s) base URLs including subpaths", () => {
+    expect(normalizeSearxngBaseUrl("https://searx.example.com/")).toBe(
+      "https://searx.example.com",
+    );
+    expect(
+      normalizeSearxngBaseUrl("http://127.0.0.1:8080/searxng///"),
+    ).toBe("http://127.0.0.1:8080/searxng");
+  });
+
+  it("rejects embedded credentials, query/fragment data, and non-http schemes", () => {
+    expect(
+      normalizeSearxngBaseUrl("https://user:pass@searx.example.com"),
+    ).toBeNull();
+    expect(normalizeSearxngBaseUrl("https://searx.example.com/?x=1")).toBeNull();
+    expect(normalizeSearxngBaseUrl("https://searx.example.com/#x")).toBeNull();
+    expect(normalizeSearxngBaseUrl("file:///tmp/searxng")).toBeNull();
+    expect(normalizeSearxngBaseUrl("not a url")).toBeNull();
+  });
+});
+
 describe("getConfiguredApiProviders", () => {
   it("returns no providers when no keys are set", () => {
     for (const key of ENV_KEYS) delete process.env[key];
@@ -158,6 +182,12 @@ describe("getConfiguredApiProviders", () => {
       "exa",
       "brave",
     ]);
+  });
+
+  it("ignores an invalid searxng URL instead of creating a provider", () => {
+    process.env.SEARXNG_BASE_URL = "file:///tmp/searxng";
+    process.env.BRAVE_SEARCH_API_KEY = "b";
+    expect(getConfiguredApiProviders().map((p) => p.name)).toEqual(["brave"]);
   });
 
   it("orders providers tavily > exa > brave without searxng", () => {
@@ -268,6 +298,39 @@ describe("conditional provider ensemble", () => {
     expect(results).toEqual(secondaryResults);
     expect(primary.search).toHaveBeenCalledOnce();
     expect(secondary.search).toHaveBeenCalledOnce();
+  });
+
+  it("propagates parent cancellation instead of launching fallback providers", async () => {
+    const controller = new AbortController();
+    const cancelled = new Error("client disconnected");
+    const primary = stubProvider("primary", async (signal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort(cancelled);
+      throw cancelled;
+    });
+    const secondary = stubProvider("secondary", async () => [
+      result("two.example", "1"),
+    ]);
+
+    await expect(
+      searchWithProviders("query", [primary, secondary], controller.signal),
+    ).rejects.toBe(cancelled);
+    expect(primary.search).toHaveBeenCalledOnce();
+    expect(secondary.search).not.toHaveBeenCalled();
+  });
+
+  it("does not start a provider when the parent signal is already aborted", async () => {
+    const controller = new AbortController();
+    const cancelled = new Error("already cancelled");
+    controller.abort(cancelled);
+    const primary = stubProvider("primary", async () => [
+      result("one.example", "1"),
+    ]);
+
+    await expect(
+      searchWithProviders("query", [primary], controller.signal),
+    ).rejects.toBe(cancelled);
+    expect(primary.search).not.toHaveBeenCalled();
   });
 
   it("round-robins providers and deduplicates URLs while keeping a soft domain cap", () => {
