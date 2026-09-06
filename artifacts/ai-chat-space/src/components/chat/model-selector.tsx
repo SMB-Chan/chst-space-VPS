@@ -390,9 +390,15 @@ export function ModelSelector({
         )
       : list;
 
-  const openaiModels = filterModels(models.filter((m) => m.provider === "openai"));
-  const qwenModels = filterModels(models.filter((m) => m.provider === "dashscope"));
-  const openRouterModels = filterModels(models.filter((m) => m.provider === "openrouter"));
+  const openaiModels = filterModels(
+    models.filter((m) => m.provider === "openai"),
+  );
+  const qwenModels = filterModels(
+    models.filter((m) => m.provider === "dashscope"),
+  );
+  const openRouterModels = filterModels(
+    models.filter((m) => m.provider === "openrouter"),
+  );
   const triggerQuota =
     quota?.weeklyRemainingPercent ?? quota?.limitingRemainingPercent;
   const triggerQuotaLabel =
@@ -523,7 +529,9 @@ export function ModelSelector({
               <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                 {PROVIDER_LABELS["openrouter"]}
               </DropdownMenuLabel>
-              {openRouterModels.map((model) => renderModelOption(model, "desktop"))}
+              {openRouterModels.map((model) =>
+                renderModelOption(model, "desktop"),
+              )}
             </>
           )}
           {qwenModels.length > 0 && (
@@ -619,7 +627,9 @@ export function ModelSelector({
                 <>
                   <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
                   <div className="px-2 pb-1 pt-1">{providerQuota}</div>
-                  {qwenModels.map((model) => renderModelOption(model, "mobile", close))}
+                  {qwenModels.map((model) =>
+                    renderModelOption(model, "mobile", close),
+                  )}
                 </>
               )}
             </>

@@ -144,7 +144,6 @@ export function ChatLayout({ children }: ChatLayoutProps) {
     );
   }, [pendingDeleteId, activeId, deleteConversation, queryClient, setLocation]);
 
-
   type ConvItem = NonNullable<typeof conversations>[number];
   type ConvGroup = { label: string; items: ConvItem[] };
 
@@ -163,7 +162,9 @@ export function ChatLayout({ children }: ChatLayoutProps) {
       else older.items.push(conv);
     }
 
-    return [today, yesterday, thisWeek, older].filter((g) => g.items.length > 0);
+    return [today, yesterday, thisWeek, older].filter(
+      (g) => g.items.length > 0,
+    );
   }, [conversations]);
 
   const open = sidebarOpen ?? false;

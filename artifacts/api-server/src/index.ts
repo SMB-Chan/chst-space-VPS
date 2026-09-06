@@ -1,13 +1,7 @@
 import { pool } from "@workspace/db";
 import app from "./app";
 import { closeBrowser } from "./lib/render-fetch";
-import {
-  ensureAiUsageSchema,
-  ensureAlibabaVideoJobsSchema,
-  ensureAssetsSchema,
-  ensureMessageSchema,
-  ensureLlmMemoriesSchema,
-} from "./lib/ensure-schema";
+import { ensureChatSchema } from "./lib/ensure-schema";
 import { createGracefulShutdown } from "./lib/graceful-shutdown";
 import { startAlibabaVideoWorker } from "./lib/alibaba-video-worker";
 import { attachAlibabaRealtimeWebSocket } from "./lib/alibaba-realtime";
@@ -75,11 +69,10 @@ async function main(): Promise<void> {
   });
 
   try {
-    await ensureMessageSchema((sql) => pool.query(sql));
-    await ensureAssetsSchema((sql) => pool.query(sql));
-    await ensureAlibabaVideoJobsSchema((sql) => pool.query(sql));
-    await ensureAiUsageSchema((sql) => pool.query(sql));
-    await ensureLlmMemoriesSchema((sql) => pool.query(sql));
+    // Single aggregate entry point: every table (including the usage and
+    // user-settings stores) is ensured here. Enumerating functions here used
+    // to drift from ensureChatSchema and left new tables uncreated at boot.
+    await ensureChatSchema((sql) => pool.query(sql));
     memoryWorker = startMemoryWorker();
     startupReadiness.markReady();
     logger.info("Server ready");
