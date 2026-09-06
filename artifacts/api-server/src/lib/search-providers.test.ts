@@ -21,6 +21,7 @@ const ENV_KEYS = [
   "TAVILY_API_KEY",
   "EXA_API_KEY",
   "BRAVE_SEARCH_API_KEY",
+  "SEARCH_INITIAL_FANOUT",
 ] as const;
 const savedEnv = new Map<string, string | undefined>();
 for (const key of ENV_KEYS) savedEnv.set(key, process.env[key]);
@@ -235,6 +236,7 @@ describe("conditional provider ensemble", () => {
   });
 
   it("does not call secondary providers when primary coverage is sufficient", async () => {
+    process.env.SEARCH_INITIAL_FANOUT = "1";
     const primaryResults = [
       result("a.example", "1"),
       result("a.example", "2"),
@@ -254,6 +256,7 @@ describe("conditional provider ensemble", () => {
   });
 
   it("queries secondary providers only when the primary is sparse or concentrated", async () => {
+    process.env.SEARCH_INITIAL_FANOUT = "1";
     const duplicate = result("same.example", "duplicate");
     const primary = stubProvider("primary", async () => [
       duplicate,
@@ -287,6 +290,7 @@ describe("conditional provider ensemble", () => {
   });
 
   it("falls back to secondary providers when the primary throws", async () => {
+    process.env.SEARCH_INITIAL_FANOUT = "1";
     const primary = stubProvider("primary", async () => {
       throw new Error("primary unavailable");
     });
@@ -302,7 +306,30 @@ describe("conditional provider ensemble", () => {
     expect(secondary.search).toHaveBeenCalledOnce();
   });
 
+  it("starts two providers in the initial wave by default", async () => {
+    delete process.env.SEARCH_INITIAL_FANOUT;
+    const primary = stubProvider("default-primary", async () => [
+      result("same.example", "p1"),
+      result("same.example", "p2"),
+      result("same.example", "p3"),
+    ]);
+    const secondary = stubProvider("default-secondary", async () => [
+      result("two.example", "s1"),
+      result("three.example", "s2"),
+    ]);
+    const tertiary = stubProvider("default-tertiary", async () => [
+      result("four.example", "t1"),
+    ]);
+
+    await searchWithProviders("query", [primary, secondary, tertiary]);
+
+    expect(primary.search).toHaveBeenCalledOnce();
+    expect(secondary.search).toHaveBeenCalledOnce();
+    expect(tertiary.search).not.toHaveBeenCalled();
+  });
+
   it("propagates parent cancellation instead of launching fallback providers", async () => {
+    process.env.SEARCH_INITIAL_FANOUT = "1";
     const controller = new AbortController();
     const cancelled = new Error("client disconnected");
     const primary = stubProvider("primary", async (signal) => {

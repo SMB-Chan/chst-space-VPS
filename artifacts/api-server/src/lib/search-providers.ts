@@ -26,7 +26,7 @@ const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 const PRIMARY_MIN_RESULTS = 5;
 const PRIMARY_MIN_DOMAINS = 3;
 const MAX_MERGED_API_RESULTS = 10;
-const DEFAULT_INITIAL_FANOUT = 1;
+const DEFAULT_INITIAL_FANOUT = 2;
 const MAX_INITIAL_FANOUT = 3;
 export const SEARCH_PROVIDER_REDIRECT_POLICY = "error" as const;
 
@@ -426,8 +426,8 @@ function rankedSet(
  * - if coverage is insufficient, remaining healthy providers run in parallel;
  * - ranked lists are combined with weighted Reciprocal Rank Fusion.
  *
- * The default fan-out remains 1 to preserve API-cost behavior. Operators can
- * set SEARCH_INITIAL_FANOUT=2 for lower latency / broader first-wave coverage.
+ * The default fan-out is 2 for lower latency and broader first-wave coverage.
+ * Operators can set SEARCH_INITIAL_FANOUT to an explicit value from 1 to 3.
  * Raw queries are intentionally never written to logs.
  */
 export async function searchWithProviders(
