@@ -16,6 +16,14 @@ describe("usage accounting primitives", () => {
       0.5,
       5,
     );
+    // Qwen3.7 Flash is the cheapest pick.
+    expect(
+      estimateCostUsd("qwen/qwen3.7-flash", 1_000_000, 1_000_000),
+    ).toBeCloseTo(0.16, 5);
+    expect(estimateCostUsd("qwen/qwen3.8-flash", 1_000_000, 0)).toBeCloseTo(
+      0.15,
+      5,
+    );
     // Qwen thinking has expensive output.
     expect(
       estimateCostUsd("qwen/qwen3-235b-a22b-thinking-2507", 0, 1_000_000),

@@ -209,9 +209,19 @@ export const AVAILABLE_MODELS = [
   },
   // OpenRouter (openai-compatible aggregator) — budget-tier picks verified
   // against the live catalog. Prices (per 1M tokens, 2026-09):
-  //   glm-5.3-flash $0.07/$0.25 · gemini-2.5-flash-lite $0.10/$0.40
+  //   qwen3.7-flash $0.03/$0.13 · glm-5.3-flash $0.07/$0.25
+  //   gemini-2.5-flash-lite $0.10/$0.40 · qwen3.8-flash $0.15/$0.47
   //   gpt-4o-mini $0.15/$0.60 · deepseek-chat $0.32/$0.89
   //   qwen3-235b-thinking $0.23/$2.30
+  {
+    id: "qwen/qwen3.7-flash",
+    label: "Qwen3.7 Flash (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "最安級・1M文脈・画像理解",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openrouter" as ReasoningKind,
+  },
   {
     id: "z-ai/glm-5.3-flash",
     label: "GLM-5.3 Flash (OR)",
@@ -226,6 +236,15 @@ export const AVAILABLE_MODELS = [
     label: "Gemini 2.5 Flash-Lite (OR)",
     provider: "openrouter" as ModelProvider,
     description: "最安・1M文脈・画像理解",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openrouter" as ReasoningKind,
+  },
+  {
+    id: "qwen/qwen3.8-flash",
+    label: "Qwen3.8 Flash (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "低コスト・1M文脈・画像理解",
     supportsVision: true,
     supportsReasoning: true,
     reasoning: "openrouter" as ReasoningKind,
