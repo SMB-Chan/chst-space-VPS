@@ -166,13 +166,11 @@ export function pickAuditModel(
   models: { id: string; provider: "openai" | "dashscope" | "openrouter" }[],
   preferred?: string,
 ): string {
-  if (
-    preferred &&
-    preferred !== primaryId &&
-    models.some((m) => m.id === preferred)
-  ) {
-    return preferred;
-  }
+  // The saved choice is the source of truth whenever it still exists in the
+  // current catalog — including when it equals the primary (the server then
+  // skips the audit for that turn). Only a stale/invalid id falls back, and
+  // the fallback prefers a different provider for genuine cross-checking.
+  if (preferred && models.some((m) => m.id === preferred)) return preferred;
   const primary = models.find((m) => m.id === primaryId);
   const otherProvider = models.find(
     (m) => m.id !== primaryId && m.provider !== primary?.provider,

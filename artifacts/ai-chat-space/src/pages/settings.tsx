@@ -18,7 +18,12 @@ import {
   useAvailableModelsSource,
 } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
-import { loadSettings, pickAuditModel, saveSettings } from "@/lib/settings";
+import {
+  loadSettings,
+  pickAuditModel,
+  saveSettings,
+  type AppSettings,
+} from "@/lib/settings";
 import { Switch } from "@/components/ui/switch";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 import { useQueryClient } from "@tanstack/react-query";
@@ -74,17 +79,30 @@ export function SettingsPage() {
   const [wipeDone, setWipeDone] = useState(false);
   const [installHint, setInstallHint] = useState<string | null>(null);
 
-  // Heal a stale saved model only against the server-loaded catalog. The
+  // Heal stale saved models only against the server-loaded catalog. The
   // bundled fallback list does not contain OpenRouter models; healing against
   // it used to overwrite the saved default on every visit (settings reset bug).
   useEffect(() => {
     if (modelSource !== "api") return;
-    const current = models.find((m) => m.id === settings.defaultModel);
-    if (!current && models.length > 0) {
-      const next = saveSettings({ defaultModel: models[0].id });
-      setSettings(next);
+    const patch: Partial<AppSettings> = {};
+    if (
+      models.length > 0 &&
+      !models.some((m) => m.id === settings.defaultModel)
+    ) {
+      patch.defaultModel = models[0].id;
     }
-  }, [models, modelSource, settings.defaultModel]);
+    if (
+      settings.auditModelId &&
+      !models.some((m) => m.id === settings.auditModelId)
+    ) {
+      // The saved auditor is no longer offered (role-filtered list, retired
+      // model): fall back to a valid cross-check model.
+      patch.auditModelId = pickAuditModel(settings.defaultModel, models);
+    }
+    if (Object.keys(patch).length > 0) {
+      setSettings(saveSettings(patch));
+    }
+  }, [models, modelSource, settings.defaultModel, settings.auditModelId]);
 
   const handleWipe = async () => {
     setWiping(true);
@@ -177,11 +195,7 @@ export function SettingsPage() {
               監査モデル
             </span>
             <ModelSelector
-              selectedModel={pickAuditModel(
-                settings.defaultModel,
-                models,
-                settings.auditModelId,
-              )}
+              selectedModel={settings.auditModelId}
               onSelect={(id) => setSettings(saveSettings({ auditModelId: id }))}
               disabled={!settings.auditEnabled}
             />

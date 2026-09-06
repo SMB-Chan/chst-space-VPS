@@ -334,8 +334,12 @@ export function applyGenerationParams(
     opts.max_tokens = 8192;
     // OpenRouter unified reasoning param. Models that reject it are covered
     // by the unsupported-parameter retry (applySafeGenerationParams).
-    if (model?.reasoning === "openrouter" && level !== "off") {
-      opts.reasoning = { effort: level };
+    // "off" must ACTIVELY disable thinking: GLM/Qwen think by default, and
+    // background stages (audit, verification, file generation) that run with
+    // reasoningLevel "off" would otherwise burn their token cap and minutes
+    // of wall-clock time on hidden reasoning before the turn can finish.
+    if (model?.reasoning === "openrouter") {
+      opts.reasoning = level === "off" ? { enabled: false } : { effort: level };
     }
     return;
   }

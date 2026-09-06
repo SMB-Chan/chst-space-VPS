@@ -46,4 +46,29 @@ describe("settings store", () => {
       ]),
     ).toBe("qwen3.8-max");
   });
+
+  it("honors a saved auditor even when it equals the primary", () => {
+    // Swapping used to make the selector show (and the turn use) a model the
+    // user never selected whenever the saved auditor matched the chat model.
+    const models = [
+      { id: "z-ai/glm-5.3-flash", provider: "openrouter" as const },
+      { id: "qwen/qwen3.7-flash", provider: "openrouter" as const },
+    ];
+    expect(
+      pickAuditModel("z-ai/glm-5.3-flash", models, "z-ai/glm-5.3-flash"),
+    ).toBe("z-ai/glm-5.3-flash");
+    expect(
+      pickAuditModel("z-ai/glm-5.3-flash", models, "qwen/qwen3.7-flash"),
+    ).toBe("qwen/qwen3.7-flash");
+  });
+
+  it("falls back only when the saved auditor is missing from the catalog", () => {
+    const models = [
+      { id: "z-ai/glm-5.3-flash", provider: "openrouter" as const },
+      { id: "qwen/qwen3.7-flash", provider: "openrouter" as const },
+    ];
+    expect(pickAuditModel("z-ai/glm-5.3-flash", models, "qwen3.8-max")).toBe(
+      "qwen/qwen3.7-flash",
+    );
+  });
 });
