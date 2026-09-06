@@ -378,10 +378,21 @@ export function ModelSelector({
   const current =
     models.find((m) => m.id === selectedModel) ?? models[0] ?? MODELS[0];
   const quota = useTokenPlanQuotaHint(current.provider === "dashscope");
+  const [query, setQuery] = useState("");
 
-  const openaiModels = models.filter((m) => m.provider === "openai");
-  const qwenModels = models.filter((m) => m.provider === "dashscope");
-  const openRouterModels = models.filter((m) => m.provider === "openrouter");
+  const q = query.trim().toLowerCase();
+  const filterModels = (list: ModelInfo[]) =>
+    q
+      ? list.filter(
+          (m) =>
+            m.label.toLowerCase().includes(q) ||
+            m.description.toLowerCase().includes(q),
+        )
+      : list;
+
+  const openaiModels = filterModels(models.filter((m) => m.provider === "openai"));
+  const qwenModels = filterModels(models.filter((m) => m.provider === "dashscope"));
+  const openRouterModels = filterModels(models.filter((m) => m.provider === "openrouter"));
   const triggerQuota =
     quota?.weeklyRemainingPercent ?? quota?.limitingRemainingPercent;
   const triggerQuotaLabel =
@@ -472,26 +483,60 @@ export function ModelSelector({
     </div>
   );
 
+  const noResults =
+    openaiModels.length === 0 &&
+    qwenModels.length === 0 &&
+    openRouterModels.length === 0;
+
+  const searchInput = (
+    <div className="px-1 pb-1 pt-0.5">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="モデルを検索…"
+        className="w-full rounded-[var(--m3-shape-sm)] border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs outline-none placeholder:text-muted-foreground/60 focus:border-primary/60 focus:bg-background/80"
+      />
+    </div>
+  );
+
   const desktopContent = (
     <>
-      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-        {PROVIDER_LABELS["openai"]}
-      </DropdownMenuLabel>
-      {openaiModels.map((model) => renderModelOption(model, "desktop"))}
-      {openRouterModels.length > 0 ? (
+      {searchInput}
+      {noResults ? (
+        <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+          「{query}」に一致するモデルがありません
+        </div>
+      ) : (
         <>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-            {PROVIDER_LABELS["openrouter"]}
-          </DropdownMenuLabel>
-          {openRouterModels.map((model) => renderModelOption(model, "desktop"))}
+          {openaiModels.length > 0 && (
+            <>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                {PROVIDER_LABELS["openai"]}
+              </DropdownMenuLabel>
+              {openaiModels.map((model) => renderModelOption(model, "desktop"))}
+            </>
+          )}
+          {openRouterModels.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                {PROVIDER_LABELS["openrouter"]}
+              </DropdownMenuLabel>
+              {openRouterModels.map((model) => renderModelOption(model, "desktop"))}
+            </>
+          )}
+          {qwenModels.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
+                {providerQuota}
+              </DropdownMenuLabel>
+              {qwenModels.map((model) => renderModelOption(model, "desktop"))}
+            </>
+          )}
         </>
-      ) : null}
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal [color:var(--app-status-accent)]">
-        {providerQuota}
-      </DropdownMenuLabel>
-      {qwenModels.map((model) => renderModelOption(model, "desktop"))}
+      )}
     </>
   );
 
@@ -530,30 +575,55 @@ export function ModelSelector({
       description="使用するAIモデルを選択します"
       disabled={disabled}
       contentTestId="dropdown-model-list"
-      desktopContentClassName="w-64"
+      desktopContentClassName="w-80 max-h-96 overflow-y-auto"
       desktopContent={desktopContent}
       mobileContent={(close) => (
         <div className="space-y-1">
-          <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
-            {PROVIDER_LABELS["openai"]}
+          <div className="pb-2">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="モデルを検索…"
+              className="w-full rounded-[var(--m3-shape-sm)] border border-border/60 bg-background/50 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground/60 focus:border-primary/60"
+            />
           </div>
-          {openaiModels.map((model) =>
-            renderModelOption(model, "mobile", close),
-          )}
-          {openRouterModels.length > 0 ? (
+          {noResults ? (
+            <div className="py-4 text-center text-sm text-muted-foreground">
+              「{query}」に一致するモデルがありません
+            </div>
+          ) : (
             <>
-              <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
-              <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
-                {PROVIDER_LABELS["openrouter"]}
-              </div>
-              {openRouterModels.map((model) =>
-                renderModelOption(model, "mobile", close),
+              {openaiModels.length > 0 && (
+                <>
+                  <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                    {PROVIDER_LABELS["openai"]}
+                  </div>
+                  {openaiModels.map((model) =>
+                    renderModelOption(model, "mobile", close),
+                  )}
+                </>
+              )}
+              {openRouterModels.length > 0 && (
+                <>
+                  <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
+                  <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                    {PROVIDER_LABELS["openrouter"]}
+                  </div>
+                  {openRouterModels.map((model) =>
+                    renderModelOption(model, "mobile", close),
+                  )}
+                </>
+              )}
+              {qwenModels.length > 0 && (
+                <>
+                  <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
+                  <div className="px-2 pb-1 pt-1">{providerQuota}</div>
+                  {qwenModels.map((model) => renderModelOption(model, "mobile", close))}
+                </>
               )}
             </>
-          ) : null}
-          <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
-          <div className="px-2 pb-1 pt-1">{providerQuota}</div>
-          {qwenModels.map((model) => renderModelOption(model, "mobile", close))}
+          )}
         </div>
       )}
     />

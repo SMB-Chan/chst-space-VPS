@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   useListOpenaiConversations,
   useDeleteOpenaiConversation,
@@ -22,8 +22,7 @@ import {
   MessageSquareText,
   LogOut,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { ja } from "date-fns/locale";
+import { isToday, isYesterday, isThisWeek } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/design-system/surface";
@@ -144,6 +143,28 @@ export function ChatLayout({ children }: ChatLayoutProps) {
       },
     );
   }, [pendingDeleteId, activeId, deleteConversation, queryClient, setLocation]);
+
+
+  type ConvItem = NonNullable<typeof conversations>[number];
+  type ConvGroup = { label: string; items: ConvItem[] };
+
+  const groupedConversations = useMemo<ConvGroup[]>(() => {
+    if (!conversations?.length) return [];
+    const today: ConvGroup = { label: "今日", items: [] };
+    const yesterday: ConvGroup = { label: "昨日", items: [] };
+    const thisWeek: ConvGroup = { label: "今週", items: [] };
+    const older: ConvGroup = { label: "それ以前", items: [] };
+
+    for (const conv of conversations) {
+      const date = new Date(conv.createdAt);
+      if (isToday(date)) today.items.push(conv);
+      else if (isYesterday(date)) yesterday.items.push(conv);
+      else if (isThisWeek(date, { weekStartsOn: 1 })) thisWeek.items.push(conv);
+      else older.items.push(conv);
+    }
+
+    return [today, yesterday, thisWeek, older].filter((g) => g.items.length > 0);
+  }, [conversations]);
 
   const open = sidebarOpen ?? false;
   const compactRail = isMobile === false && !open;
@@ -315,99 +336,100 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                     まだ会話はありません
                   </div>
                 ) : (
-                  conversations?.map((conv) => (
-                    <div key={conv.id} className="group relative">
-                      {renamingId === conv.id ? (
-                        <div className="px-2 py-1.5">
-                          <input
-                            ref={renameInputRef}
-                            value={renameDraft}
-                            maxLength={CONVERSATION_TITLE_MAX}
-                            onChange={(e) => setRenameDraft(e.target.value)}
-                            onBlur={commitRename}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                commitRename();
-                              }
-                              if (e.key === "Escape") {
-                                e.preventDefault();
-                                setRenamingId(null);
-                              }
-                            }}
-                            className="m3-focus-ring h-9 w-full rounded-[var(--m3-shape-sm)] border border-[var(--m3-outline-variant)] bg-[var(--m3-surface-container)] px-2.5 text-sm outline-none"
-                            aria-label="会話名"
-                          />
-                        </div>
-                      ) : (
-                        <Link
-                          href={`/conversations/${conv.id}`}
-                          onClick={() => isMobile && setSidebarOpen(false)}
-                          className={cn(
-                            "relative flex flex-col gap-1 rounded-[var(--m3-shape-md)] px-3 py-2.5 text-sm transition-[background-color,color,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)] active:scale-[0.99]",
-                            activeId === conv.id
-                              ? "bg-[var(--m3-primary-container)] text-[var(--m3-on-primary-container)]"
-                              : "text-[var(--m3-on-surface-variant)] hover:bg-[var(--m3-surface-container)] hover:text-[var(--m3-on-surface)]",
-                          )}
-                        >
-                          <div className="truncate pr-6 font-medium">
-                            {conv.title || "無題"}
-                          </div>
-                          <div className="text-xs opacity-65">
-                            {formatDistanceToNow(new Date(conv.createdAt), {
-                              addSuffix: true,
-                              locale: ja,
-                            })}
-                          </div>
-                        </Link>
-                      )}
-
-                      <div
-                        className={cn(
-                          "absolute right-2 top-2.5 transition-opacity",
-                          isMobile
-                            ? "opacity-100"
-                            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-                        )}
-                      >
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              aria-label="会話メニュー"
-                            >
-                              <MoreVertical className="h-3.5 w-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setRenameDraft(conv.title || "");
-                                setRenamingId(conv.id);
-                              }}
-                              className="cursor-pointer"
-                            >
-                              <Pencil className="h-4 w-4" />
-                              名前を変更
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setPendingDeleteId(conv.id);
-                              }}
-                              className="cursor-pointer text-[var(--m3-error)] focus:text-[var(--m3-error)]"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              削除
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                  groupedConversations.map((group) => (
+                    <div key={group.label}>
+                      <div className="px-2 pb-1 pt-2.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--m3-on-surface-variant)]/50">
+                        {group.label}
                       </div>
+                      {group.items.map((conv) => (
+                        <div key={conv.id} className="group relative">
+                          {renamingId === conv.id ? (
+                            <div className="px-2 py-1.5">
+                              <input
+                                ref={renameInputRef}
+                                value={renameDraft}
+                                maxLength={CONVERSATION_TITLE_MAX}
+                                onChange={(e) => setRenameDraft(e.target.value)}
+                                onBlur={commitRename}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitRename();
+                                  }
+                                  if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    setRenamingId(null);
+                                  }
+                                }}
+                                className="m3-focus-ring h-9 w-full rounded-[var(--m3-shape-sm)] border border-[var(--m3-outline-variant)] bg-[var(--m3-surface-container)] px-2.5 text-sm outline-none"
+                                aria-label="会話名"
+                              />
+                            </div>
+                          ) : (
+                            <Link
+                              href={`/conversations/${conv.id}`}
+                              onClick={() => isMobile && setSidebarOpen(false)}
+                              className={cn(
+                                "relative flex items-center rounded-[var(--m3-shape-md)] px-3 py-2 text-sm transition-[background-color,color,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)] active:scale-[0.99]",
+                                activeId === conv.id
+                                  ? "bg-[var(--m3-primary-container)] text-[var(--m3-on-primary-container)]"
+                                  : "text-[var(--m3-on-surface-variant)] hover:bg-[var(--m3-surface-container)] hover:text-[var(--m3-on-surface)]",
+                              )}
+                            >
+                              <div className="min-w-0 flex-1 truncate pr-6 font-medium">
+                                {conv.title || "無題"}
+                              </div>
+                            </Link>
+                          )}
+
+                          <div
+                            className={cn(
+                              "absolute right-2 top-1.5 transition-opacity",
+                              isMobile
+                                ? "opacity-100"
+                                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                            )}
+                          >
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  aria-label="会話メニュー"
+                                >
+                                  <MoreVertical className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-40">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setRenameDraft(conv.title || "");
+                                    setRenamingId(conv.id);
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                  名前を変更
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setPendingDeleteId(conv.id);
+                                  }}
+                                  className="cursor-pointer text-[var(--m3-error)] focus:text-[var(--m3-error)]"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  削除
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ))
                 )}
