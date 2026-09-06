@@ -27,6 +27,7 @@ export * from './openaiFactualityReport';
 export * from './openaiFactualityReportStatus';
 export * from './openaiGeneratedAsset';
 export * from './openaiMe';
+export * from './openaiMeRole';
 export * from './openaiMessage';
 export * from './openaiMessageDeleteInput';
 export * from './openaiMessageInput';

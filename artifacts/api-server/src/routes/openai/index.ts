@@ -88,6 +88,38 @@ import { logSafeHttpError } from "../../lib/http-error-observability";
 import { publicAiError } from "../../lib/public-error";
 import { parseStoredFactuality } from "../../lib/factuality";
 import { deleteAllMemories } from "../../lib/llm-memory-store";
+import { checkGeneralUserAiAccess } from "../../lib/usage-tracking";
+import type { UserRole } from "../../middlewares/allowedUsers";
+
+function formatUsd(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
+
+/**
+ * Monthly fair-share gate for general users: blocks new AI turns once the
+ * member's estimated spend reaches their budget, or when they are suspended.
+ * Admins are exempt. Reading conversations stays possible either way.
+ */
+async function enforceGeneralUserAiAccess(
+  req: Request,
+  res: Response,
+): Promise<boolean> {
+  if (req.userRole === "admin" || !req.userId) return true;
+  const verdict = await checkGeneralUserAiAccess(req.userId);
+  if (verdict.allowed) return true;
+  const message =
+    verdict.reason === "suspended"
+      ? "このアカウントは管理者によって一時停止されています。"
+      : `今月の利用上限（${formatUsd(verdict.budgetUsd)}）に達しました。使用量は${formatUsd(verdict.usedUsd)}です。来月までお待ちいただくか、管理者に上限の引き上げを相談してください。`;
+  res.status(429).json({
+    error: message,
+    code:
+      verdict.reason === "suspended"
+        ? "USER_SUSPENDED"
+        : "USER_BUDGET_EXCEEDED",
+  });
+  return false;
+}
 
 const router = Router();
 
@@ -201,6 +233,28 @@ async function resolveSharedChatParams(
       : undefined;
   const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
   const translationMode = parseTranslationMode(req.query.translate);
+
+  // General users are provisioned exclusively on OpenRouter budget models.
+  // The model picker hides the rest; this is the server-side backstop.
+  if (req.userRole !== "admin" && modelDef.provider !== "openrouter") {
+    res.status(403).json({
+      error:
+        "一般ユーザーはOpenRouterモデルのみ利用できます。モデルを選び直してください。",
+      code: "MODEL_NOT_ALLOWED",
+    });
+    return null;
+  }
+  if (
+    auditModel &&
+    req.userRole !== "admin" &&
+    auditModel.provider !== "openrouter"
+  ) {
+    res.status(403).json({
+      error: "一般ユーザーはOpenRouterモデル以外を監査モデルに指定できません。",
+      code: "MODEL_NOT_ALLOWED",
+    });
+    return null;
+  }
 
   const supportsVision = modelDef.supportsVision;
   const useVisionBridge =
@@ -501,20 +555,36 @@ async function markVideoSubmissionFailed(
 
 router.use("/openai/artifacts", requireAuth);
 
-router.get("/openai/models", async (_req, res) => {
-  res.json(await getAvailableChatModels());
+router.get("/openai/models", async (req, res) => {
+  const models = await getAvailableChatModels();
+  // General users are provisioned on OpenRouter budget models only; the
+  // admin keeps the full provider catalog. Unauthenticated requests see the
+  // restricted list too (they cannot start chats anyway).
+  res.json(
+    req.userRole === "admin"
+      ? models
+      : models.filter((model) => model.provider === "openrouter"),
+  );
 });
 
 /** Lightweight authed probe the frontend access gate uses (403 = not invited). */
 router.get("/openai/me", requireAuth, (req, res) => {
-  res.json({ userId: getUserId(req) });
+  res.json({ userId: getUserId(req), role: req.userRole ?? "user" });
 });
 
 router.get("/openai/capabilities", async (_req, res) => {
   res.json(await getCapabilityRegistryWithAvailability());
 });
 
+// Realtime voice runs on the admin's Alibaba credentials; keep it admin-only.
 router.post("/openai/realtime/session", requireAuth, async (req, res) => {
+  if (req.userRole !== "admin") {
+    res.status(403).json({
+      error: "リアルタイム音声は管理者のみ利用できます。",
+      code: "ADMIN_ONLY",
+    });
+    return;
+  }
   try {
     const userId = getUserId(req);
     const modelId =
@@ -1146,6 +1216,7 @@ router.post(
         res.status(404).json({ error: "Conversation not found" });
         return;
       }
+      if (!(await enforceGeneralUserAiAccess(req, res))) return;
 
       const requestedFileFormat = parsed.data.fileFormat as
         FileFormat | undefined;
@@ -1268,6 +1339,7 @@ router.post(
         requestedFileFormat,
         cancellation,
         memory: { enabled: true, userId },
+        userRole: (req.userRole ?? "user") as UserRole,
         publicAiError,
         onComplete: async ({
           content,
@@ -1365,6 +1437,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       });
       return;
     }
+    if (!(await enforceGeneralUserAiAccess(req, res))) return;
 
     const shared = await resolveSharedChatParams(
       req,
@@ -1476,6 +1549,7 @@ router.post("/openai/ephemeral/messages", requireAuth, async (req, res) => {
       includeArtifactContent: true,
       cancellation,
       memory: { enabled: false },
+      userRole: (req.userRole ?? "user") as UserRole,
       publicAiError,
     });
   } catch (err) {

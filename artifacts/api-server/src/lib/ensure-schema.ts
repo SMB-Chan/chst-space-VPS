@@ -254,6 +254,36 @@ export async function ensureLlmMemoriesSchema(
   await query(ENSURE_LLM_MEMORIES_SCHEMA_SQL);
 }
 
+export const ENSURE_USER_USAGE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS user_usage_monthly (
+  id serial PRIMARY KEY,
+  user_id text NOT NULL,
+  month text NOT NULL,
+  model_id text NOT NULL,
+  prompt_tokens integer NOT NULL DEFAULT 0,
+  completion_tokens integer NOT NULL DEFAULT 0,
+  requests integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_usage_monthly_user_month_model_uidx
+  ON user_usage_monthly(user_id, month, model_id);
+CREATE INDEX IF NOT EXISTS user_usage_monthly_month_idx
+  ON user_usage_monthly(month);
+
+CREATE TABLE IF NOT EXISTS user_budgets (
+  user_id text PRIMARY KEY,
+  monthly_budget_usd double precision,
+  suspended boolean NOT NULL DEFAULT false,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`.trim();
+
+export async function ensureUserUsageSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_USER_USAGE_SCHEMA_SQL);
+}
+
 export async function ensureChatSchema(): Promise<void> {
   const { db } = await import("@workspace/db");
   await ensureMessageSchema((sql) => db.execute(sql));
@@ -261,4 +291,5 @@ export async function ensureChatSchema(): Promise<void> {
   await ensureAlibabaVideoJobsSchema((sql) => db.execute(sql));
   await ensureAiUsageSchema((sql) => db.execute(sql));
   await ensureLlmMemoriesSchema((sql) => db.execute(sql));
+  await ensureUserUsageSchema((sql) => db.execute(sql));
 }

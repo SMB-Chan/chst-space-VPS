@@ -11,6 +11,12 @@ export interface StreamModelTool {
   };
 }
 
+export interface StreamModelUsage {
+  modelId: string;
+  promptTokens: number;
+  completionTokens: number;
+}
+
 export interface StreamModelTextInput {
   client: OpenAI;
   provider: ModelProvider;
@@ -21,6 +27,8 @@ export interface StreamModelTextInput {
   tools?: StreamModelTool[];
   onToolCalls?: (calls: SpecialistToolCall[]) => void;
   onDelta: (text: string, kind: "content" | "reasoning") => void;
+  /** Reported once per call with provider usage when available, else an estimate. */
+  onUsage?: (usage: StreamModelUsage) => void;
   shouldStop: () => boolean;
   signal?: AbortSignal;
 }

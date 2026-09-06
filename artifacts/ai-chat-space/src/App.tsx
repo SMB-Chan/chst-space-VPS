@@ -19,6 +19,7 @@ import { AccessGate } from "@/components/AccessGate";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
+import AdminPage from "@/pages/admin";
 import { ChatLayout } from "@/components/layout/chat-layout";
 import { ChatPage } from "@/pages/chat";
 import { HomePage } from "@/pages/home";
@@ -219,6 +220,21 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
 }
 
+function ProtectedAdmin({ children }: { children: ReactNode }) {
+  const { isLoaded } = useAuth();
+  if (!isLoaded) return <AuthLoading />;
+  return (
+    <>
+      <Show when="signed-in">
+        <AccessGate>{children}</AccessGate>
+      </Show>
+      <Show when="signed-out">
+        <Redirect to="/" />
+      </Show>
+    </>
+  );
+}
+
 function Router() {
   return (
     <Switch>
@@ -226,6 +242,11 @@ function Router() {
       {/* REQUIRED — the /*? optional wildcard matches the bare URL and Clerk's OAuth sub-paths */}
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
+      <Route path="/admin">
+        <ProtectedAdmin>
+          <AdminPage />
+        </ProtectedAdmin>
+      </Route>
       <Route path="/chat">
         <ProtectedChat>
           <ChatPage />

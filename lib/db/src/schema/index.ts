@@ -4,3 +4,4 @@ export * from "./conversations";
 export * from "./messages";
 export * from "./artifacts";
 export * from "./llm-memories";
+export * from "./user-usage";

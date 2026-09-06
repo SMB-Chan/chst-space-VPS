@@ -37,7 +37,8 @@ export const ListOpenaiModelsResponse = zod.array(ListOpenaiModelsResponseItem)
  * @summary Identify the authenticated user
  */
 export const GetOpenaiMeResponse = zod.object({
-  "userId": zod.string().describe('Clerk user id of the authenticated account')
+  "userId": zod.string().describe('Clerk user id of the authenticated account'),
+  "role": zod.enum(['admin', 'user']).describe('Admins keep full provider access and reach moderation APIs.')
 })
 
 
