@@ -3,6 +3,7 @@ import type { ExtractedArtifact } from "./artifacts";
 import type { FactualityReport } from "./factuality";
 import type { GeneratedFile } from "./file-generation";
 import { logger, safeFailureFields } from "./logger";
+import { executeRunStep } from "./run-execution";
 import type { GeneratedAsset } from "./specialist-capabilities";
 
 export interface ChatCompletionInput {
@@ -82,7 +83,11 @@ export async function persistAndEmitChatCompletion(args: {
   let completion: ChatCompletionPersistenceResult | void;
   try {
     completion = args.onComplete
-      ? await args.onComplete(args.input)
+      ? await executeRunStep(
+          "persistence",
+          () => args.onComplete!(args.input),
+          { metadata: { phase: "chat_completion" } },
+        )
       : undefined;
   } catch (error) {
     logger.error(
