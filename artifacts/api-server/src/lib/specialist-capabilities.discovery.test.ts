@@ -142,8 +142,10 @@ describe("dynamic chat model discovery", () => {
     expect(models.map((model) => model.id)).toEqual([
       "gpt-5.6-terra",
       "qwen3.8-max",
+      "qwen/qwen3.7-flash",
       "z-ai/glm-5.3-flash",
       "google/gemini-2.5-flash-lite",
+      "qwen/qwen3.8-flash",
       "openai/gpt-4o-mini",
       "deepseek/deepseek-chat",
       "qwen/qwen3-235b-a22b-thinking-2507",
@@ -181,8 +183,10 @@ describe("dynamic chat model discovery", () => {
         "deepseek-v4-pro",
         "deepseek-v4-flash-0731",
         "glm-5.2",
+        "qwen/qwen3.7-flash",
         "z-ai/glm-5.3-flash",
         "google/gemini-2.5-flash-lite",
+        "qwen/qwen3.8-flash",
         "openai/gpt-4o-mini",
         "deepseek/deepseek-chat",
         "qwen/qwen3-235b-a22b-thinking-2507",
@@ -211,13 +215,19 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(17);
+    expect(models).toHaveLength(19);
     expect(models.some((model) => model.id === "gpt-5.6-terra")).toBe(true);
     expect(models.some((model) => model.id === "qwen3.8-max")).toBe(true);
     expect(
       models.some((model) => model.id === "google/gemini-2.5-flash-lite"),
     ).toBe(true);
     expect(models.some((model) => model.id === "z-ai/glm-5.3-flash")).toBe(
+      true,
+    );
+    expect(models.some((model) => model.id === "qwen/qwen3.8-flash")).toBe(
+      true,
+    );
+    expect(models.some((model) => model.id === "qwen/qwen3.7-flash")).toBe(
       true,
     );
   });
@@ -229,7 +239,7 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(17);
+    expect(models).toHaveLength(19);
     expect(dashScopeList).not.toHaveBeenCalled();
     expect(openAiList).not.toHaveBeenCalled();
     expect(openRouterList).not.toHaveBeenCalled();
@@ -264,7 +274,7 @@ describe("dynamic chat model discovery", () => {
     const models = await pending;
     await getAvailableChatModels();
 
-    expect(models).toHaveLength(17);
+    expect(models).toHaveLength(19);
     expect(openAiList).toHaveBeenCalledTimes(1);
   });
 });

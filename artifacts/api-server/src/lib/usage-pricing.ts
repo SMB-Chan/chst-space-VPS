@@ -14,7 +14,9 @@ const MODEL_PRICING_USD_PER_1M: Record<
   string,
   { input: number; output: number }
 > = {
+  "qwen/qwen3.7-flash": { input: 0.03, output: 0.13 },
   "z-ai/glm-5.3-flash": { input: 0.07, output: 0.25 },
+  "qwen/qwen3.8-flash": { input: 0.15, output: 0.47 },
   "google/gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
   "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
   "deepseek/deepseek-chat": { input: 0.32, output: 0.89 },

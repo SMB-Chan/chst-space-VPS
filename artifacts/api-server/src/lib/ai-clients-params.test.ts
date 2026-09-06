@@ -71,8 +71,27 @@ describe("openrouter generation params", () => {
   it("keeps OpenRouter vision models in the vision set", () => {
     expect(VISION_MODEL_IDS.has("z-ai/glm-5.3-flash")).toBe(true);
     expect(VISION_MODEL_IDS.has("google/gemini-2.5-flash-lite")).toBe(true);
+    expect(VISION_MODEL_IDS.has("qwen/qwen3.8-flash")).toBe(true);
+    expect(VISION_MODEL_IDS.has("qwen/qwen3.7-flash")).toBe(true);
     expect(VISION_MODEL_IDS.has("openai/gpt-4o-mini")).toBe(true);
     expect(VISION_MODEL_IDS.has("deepseek/deepseek-chat")).toBe(false);
+  });
+
+  it("sends the reasoning effort to Qwen3.7 Flash", () => {
+    const opts: Record<string, unknown> = {};
+    applyGenerationParams(opts, "qwen/qwen3.7-flash", "openrouter", "high");
+    expect(opts.max_tokens).toBe(8192);
+    expect(opts.reasoning).toEqual({ effort: "high" });
+    expect(opts).not.toHaveProperty("enable_thinking");
+  });
+
+  it("sends the reasoning effort to Qwen3.8 Flash", () => {
+    const opts: Record<string, unknown> = {};
+    applyGenerationParams(opts, "qwen/qwen3.8-flash", "openrouter", "medium");
+    expect(opts.max_tokens).toBe(8192);
+    expect(opts.reasoning).toEqual({ effort: "medium" });
+    expect(opts).not.toHaveProperty("enable_thinking");
+    expect(opts).not.toHaveProperty("incremental_output");
   });
 
   it("sends the reasoning effort to GLM-5.3 Flash", () => {
