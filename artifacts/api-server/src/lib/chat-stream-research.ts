@@ -25,8 +25,21 @@ import {
   researchDepthPolicy,
   selectDeepPageFetches,
 } from "./research-depth";
+import {
+  buildEvidenceFacetGapSearch,
+  buildEvidenceMatrixFinalInstruction,
+  buildEvidenceMatrixGapInstruction,
+  buildEvidenceMatrixUserMessage,
+  EVIDENCE_MATRIX_SYSTEM_PROMPT,
+  inferRequiredEvidenceFacets,
+  parseEvidenceMatrixAssessment,
+  type EvidenceFacetRequirement,
+  type EvidenceMatrixAssessment,
+} from "./research-evidence-matrix";
 
 const RESEARCH_STEP_TIMEOUT_MS = 30_000;
+const EVIDENCE_MATRIX_TIMEOUT_MS = 15_000;
+const MAX_EVIDENCE_MATRIX_ASSESSMENTS = 3;
 const RESEARCH_FINAL_SYNTHESIS_SYSTEM_PROMPT = `検索ツールの実行段階は終了しました。追加のツールは呼び出せません。
 これまでに取得したツール結果だけを使い、ユーザーの質問への最終回答を今すぐ完成させてください。検索するという宣言や作業予定は書かず、根拠番号を引用し、不明点は不明と明示してください。`;
 const DEEP_RESEARCH_FINAL_SYNTHESIS_SYSTEM_PROMPT = `Deep調査の検索ツール実行段階は終了しました。追加のツールは呼び出せません。
@@ -123,6 +136,57 @@ function bodyBlockCount(text: string): number {
   return (text.match(/(?:^|\n)\s*本文:\n/g) ?? []).length;
 }
 
+async function assessEvidenceMatrix(args: {
+  client: OpenAI;
+  provider: ModelProvider;
+  modelId: string;
+  question: string;
+  requiredFacets: EvidenceFacetRequirement[];
+  sources: FactualitySource[];
+  evidenceParts: string[];
+  signal: AbortSignal;
+  clientGone: () => boolean;
+  streamText: StreamModelTextFn;
+  withTimeout: WithTimeoutFn;
+  onUsage?: (usage: StreamModelUsage) => void;
+}): Promise<EvidenceMatrixAssessment | undefined> {
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: "system", content: EVIDENCE_MATRIX_SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: buildEvidenceMatrixUserMessage({
+        question: args.question,
+        requiredFacets: args.requiredFacets,
+        sources: args.sources,
+        evidenceParts: args.evidenceParts,
+      }),
+    },
+  ];
+  const raw = await args.withTimeout(
+    (signal) =>
+      args.streamText({
+        client: args.client,
+        provider: args.provider,
+        modelId: args.modelId,
+        reasoningLevel: "off",
+        maxOutputTokens: 700,
+        messages,
+        onDelta: () => undefined,
+        onUsage: args.onUsage,
+        shouldStop: () => args.clientGone() || signal.aborted,
+        signal,
+      }),
+    EVIDENCE_MATRIX_TIMEOUT_MS,
+    "Evidence matrix assessment",
+    args.signal,
+  );
+  return parseEvidenceMatrixAssessment({
+    raw,
+    requiredFacets: args.requiredFacets,
+    sourceCount: args.sources.length,
+  });
+}
+
 export interface ResearchLoopResult {
   responseText: string;
   sources: FactualitySource[];
@@ -157,12 +221,18 @@ export async function runResearchLoop(args: {
   const deferredCalls: SpecialistToolCall[] = [];
   const question = latestUserQuestion(args.messages);
   const policy = researchDepthPolicy(question);
+  const requiredEvidenceFacets =
+    policy.depth === "deep" ? inferRequiredEvidenceFacets(question) : [];
   const seenQueries = new Set<string>();
   const fetchedUrls = new Set<string>();
   let executedToolCount = 0;
   let successfulSearches = 0;
   let fetchedPages = 0;
   let forcedGapRounds = 0;
+  let evidenceMatrixAssessments = 0;
+  let lastEvidenceMatrixPartCount = -1;
+  let evidenceMatrixGateFailedOpen = false;
+  let evidenceMatrix: EvidenceMatrixAssessment | undefined;
   let continuationText = "";
   let responseText = "";
   let hitStepLimitWithPendingResearch = false;
@@ -259,8 +329,9 @@ export async function runResearchLoop(args: {
           successfulSearches += 1;
           if (parsedArgs.fetchContent === true) {
             fetchedPages += bodyBlockCount(result.text);
-            for (const source of result.sources ?? [])
+            for (const source of result.sources ?? []) {
               fetchedUrls.add(source.url);
+            }
           }
         } else if (toolCall.name === "fetch_page") {
           fetchedPages += 1;
@@ -342,19 +413,88 @@ export async function runResearchLoop(args: {
     }
 
     const coverageSufficient = hasSufficientResearchCoverage(policy, coverage);
+    if (
+      policy.depth === "deep" &&
+      coverageSufficient &&
+      requiredEvidenceFacets.length > 0 &&
+      evidenceMatrixAssessments < MAX_EVIDENCE_MATRIX_ASSESSMENTS &&
+      evidenceParts.length !== lastEvidenceMatrixPartCount &&
+      !args.signal.aborted &&
+      !args.clientGone()
+    ) {
+      lastEvidenceMatrixPartCount = evidenceParts.length;
+      evidenceMatrixAssessments += 1;
+      try {
+        const assessed = await assessEvidenceMatrix({
+          client: args.client,
+          provider: args.provider,
+          modelId: args.modelId,
+          question,
+          requiredFacets: requiredEvidenceFacets,
+          sources,
+          evidenceParts,
+          signal: args.signal,
+          clientGone: args.clientGone,
+          streamText: args.streamText,
+          withTimeout: args.withTimeout,
+          onUsage: args.onUsage,
+        });
+        if (assessed) {
+          evidenceMatrix = assessed;
+          evidenceMatrixGateFailedOpen = false;
+          if (!args.clientGone()) {
+            args.emit({
+              status: "researching",
+              researchDepth: "deep",
+              evidenceMatrix: {
+                complete: assessed.complete,
+                facets: assessed.facets,
+                assessment: evidenceMatrixAssessments,
+                maxAssessments: MAX_EVIDENCE_MATRIX_ASSESSMENTS,
+              },
+            });
+          }
+        } else {
+          evidenceMatrixGateFailedOpen = true;
+        }
+      } catch (error) {
+        if (args.signal.aborted) throw error;
+        evidenceMatrixGateFailedOpen = true;
+        logger.warn(
+          safeFailureFields(
+            error,
+            "chat-stream",
+            "RESEARCH_EVIDENCE_MATRIX_FAILED",
+          ),
+          "Evidence matrix assessment failed; falling back to numeric coverage",
+        );
+      }
+    }
+
+    const matrixSufficient =
+      evidenceMatrixGateFailedOpen ||
+      !evidenceMatrix ||
+      evidenceMatrix.complete;
     const deepNeedsMore =
       policy.depth === "deep" &&
-      !coverageSufficient &&
+      (!coverageSufficient || !matrixSufficient) &&
       remainingToolCalls > 0 &&
       researchStep < policy.maxSteps;
     const nextRoundCalls: SpecialistToolCall[] = [];
+    const activeMatrix =
+      evidenceMatrixGateFailedOpen || !evidenceMatrix || evidenceMatrix.complete
+        ? undefined
+        : evidenceMatrix;
+    const gapInstruction = activeMatrix
+      ? buildEvidenceMatrixGapInstruction(activeMatrix)
+      : buildResearchGapInstruction(policy, coverage);
     const decisionMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
       deepNeedsMore
         ? [
             ...args.messages,
             {
               role: "system",
-              content: buildResearchGapInstruction(policy, coverage),
+              content: gapInstruction,
             },
           ]
         : args.messages;
@@ -401,12 +541,22 @@ export async function runResearchLoop(args: {
       remainingAfterDecision > 0 &&
       researchStep < policy.maxSteps
     ) {
-      const forced = buildForcedGapSearch({
-        question,
-        coverage,
-        forcedRound: forcedGapRounds,
-        seenQueries,
-      });
+      const semanticGap = activeMatrix
+        ? buildEvidenceFacetGapSearch({
+            question,
+            assessment: activeMatrix,
+            seenQueries,
+            forcedRound: forcedGapRounds,
+          })
+        : undefined;
+      const forced =
+        semanticGap?.call ??
+        buildForcedGapSearch({
+          question,
+          coverage,
+          forcedRound: forcedGapRounds,
+          seenQueries,
+        });
       if (forced) {
         forcedGapRounds += 1;
         currentResearchCalls = [forced];
@@ -433,6 +583,16 @@ export async function runResearchLoop(args: {
     }) &&
     !args.signal.aborted
   ) {
+    const matrixFinalInstruction =
+      policy.depth === "deep"
+        ? buildEvidenceMatrixFinalInstruction(evidenceMatrix)
+        : undefined;
+    if (matrixFinalInstruction) {
+      args.messages.push({
+        role: "system",
+        content: matrixFinalInstruction,
+      });
+    }
     args.messages.push({
       role: "system",
       content:

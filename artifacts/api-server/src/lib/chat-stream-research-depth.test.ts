@@ -19,6 +19,17 @@ function source(title: string, url: string) {
   return { title, url, publishedAt: null };
 }
 
+function isMatrixAssessment(input: {
+  messages: { role?: string; content?: unknown }[];
+}): boolean {
+  return input.messages.some(
+    (message) =>
+      message.role === "system" &&
+      typeof message.content === "string" &&
+      message.content.includes("Deep Researchの証拠充足判定器"),
+  );
+}
+
 describe("deep research evidence coverage", () => {
   it("fetches page bodies, suppresses premature prose, and forces a gap search", async () => {
     mocks.executeSpecialistTool.mockImplementation(async (call) => {
@@ -62,10 +73,28 @@ describe("deep research evidence coverage", () => {
       };
     });
 
-    let modelRound = 0;
+    let visibleModelRound = 0;
     const streamText = vi.fn(async (input) => {
-      modelRound += 1;
-      if (modelRound === 1) {
+      if (isMatrixAssessment(input)) {
+        return JSON.stringify({
+          facets: [
+            {
+              facet: "primary_source",
+              status: "covered",
+              sourceIds: [1],
+              reason: "primary evidence",
+            },
+            {
+              facet: "counterevidence",
+              status: "covered",
+              sourceIds: [6],
+              reason: "counter evidence",
+            },
+          ],
+        });
+      }
+      visibleModelRound += 1;
+      if (visibleModelRound === 1) {
         input.onDelta("premature answer", "content");
         return "premature answer";
       }
@@ -124,6 +153,11 @@ describe("deep research evidence coverage", () => {
     expect(
       emit.mock.calls.some(
         ([event]) => event && event.content === "final grounded answer",
+      ),
+    ).toBe(true);
+    expect(
+      emit.mock.calls.some(
+        ([event]) => event?.evidenceMatrix?.complete === true,
       ),
     ).toBe(true);
   });
