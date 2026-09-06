@@ -156,3 +156,59 @@ export function parseSearchHtml(html: string): SearchResult[] {
   }
   return results;
 }
+
+/**
+ * Bing wraps organic results in `bing.com/ck/a` click-tracker links whose
+ * real target is base64url-encoded in the `u` parameter (after an "a1"
+ * marker). Returns the decoded target, the plain href for direct links, or
+ * null when an unresolvable tracker link cannot be decoded.
+ */
+function unwrapBingRedirectUrl(rawHref: string): string | null {
+  const href = rawHref.replace(/&amp;/g, "&");
+  if (!/^https?:\/\/[^/]*bing\.com\/ck/i.test(href)) return href;
+  const match = href.match(/[?&]u=([^&]+)/);
+  if (!match) return null;
+  let value = match[1];
+  if (value.startsWith("a1")) value = value.slice(2);
+  try {
+    const decoded = Buffer.from(
+      value.replace(/-/g, "+").replace(/_/g, "/"),
+      "base64",
+    ).toString("utf8");
+    if (/^https?:\/\//i.test(decoded)) return decoded;
+  } catch {
+    // Malformed encoding: treated as an unresolvable tracker below.
+  }
+  return null;
+}
+
+/**
+ * Parse Bing result cards (`li.b_algo`). Used as the scraping fallback when
+ * DuckDuckGo answers with its bot challenge, which is the common case from
+ * datacenter IPs.
+ */
+export function parseSearchBingHtml(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+  const algoRe = /<li class="b_algo"[\s\S]*?<\/li>/g;
+  let block: RegExpExecArray | null;
+  while ((block = algoRe.exec(html)) !== null && results.length < 5) {
+    const item = block[0];
+    const link = item.match(
+      /<h2[^>]*><a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/,
+    );
+    if (!link) continue;
+    const unwrapped = unwrapBingRedirectUrl(link[1]);
+    if (!unwrapped) continue;
+    const url = normalizeExternalHttpUrl(unwrapped);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const snippet = item.match(/<p[^>]*>([\s\S]*?)<\/p>/);
+    results.push({
+      title: stripHtml(link[2]) || url,
+      url,
+      snippet: snippet ? stripHtml(snippet[1]) : "",
+    });
+  }
+  return results;
+}
