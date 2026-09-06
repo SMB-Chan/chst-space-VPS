@@ -1,6 +1,4 @@
-import { fetch as undiciFetch } from "undici";
 import { logger, safeFailureFields } from "./logger";
-import { readResponseTextLimited } from "./bounded-body";
 import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
 import {
   fuseSearchProviderResults,
@@ -11,100 +9,35 @@ import {
   resetSearchProviderHealthForTests,
   type RankedProviderResults,
 } from "./search-core";
+import { fetchSearchJson } from "./search-http";
+import {
+  rankSearchEngines,
+  recordSearchEngineObservation,
+  resetSearchEngineRuntimeForTests,
+} from "./search-engine-scheduler";
+import { getBuiltinVerticalProviders } from "./search-vertical-providers";
+import type { ApiSearchProvider } from "./search-provider-types";
 
 /**
- * API-based search providers. Fixed SaaS providers use known hosts; SearXNG is
- * an operator-configured self-hosted endpoint. Provider responses are still
- * untrusted and are bounded, parsed defensively, and URL-normalized before use.
- *
- * Provider scheduling, cooldown and rank fusion are implemented independently
- * in search-core.ts. No SearXNG source code is embedded here.
+ * API-based and vertical search engines. Provider responses are untrusted and
+ * bounded, parsed defensively, and URL-normalized before use. Scheduling,
+ * cooldown and rank fusion are implemented independently for Chat-Space.
  */
 
-const PROVIDER_TIMEOUT_MS = 10_000;
-const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 const PRIMARY_MIN_RESULTS = 5;
 const PRIMARY_MIN_DOMAINS = 3;
 const MAX_MERGED_API_RESULTS = 10;
 const DEFAULT_INITIAL_FANOUT = 2;
 const MAX_INITIAL_FANOUT = 3;
-export const SEARCH_PROVIDER_REDIRECT_POLICY = "error" as const;
+const MIN_VERTICAL_QUERY_AFFINITY = 0.55;
 
-export interface ApiSearchProvider {
-  name: string;
-  /** Optional relative contribution to rank fusion; defaults to 1. */
-  weight?: number;
-  search(query: string, signal?: AbortSignal): Promise<SearchResult[]>;
-}
-
-export { getSearchProviderHealth, resetSearchProviderHealthForTests };
-
-function parseRetryAfterMs(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const seconds = Number(value.trim());
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-  const date = Date.parse(value);
-  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
-  return undefined;
-}
-
-function providerHttpError(status: number, retryAfter: string | null): Error {
-  const error = new Error(`Search API returned ${status}`) as Error & {
-    status?: number;
-    retryAfterMs?: number;
-  };
-  error.status = status;
-  const retryAfterMs = parseRetryAfterMs(retryAfter);
-  if (retryAfterMs !== undefined) error.retryAfterMs = retryAfterMs;
-  return error;
-}
-
-async function fetchJson(
-  url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string },
-  signal?: AbortSignal,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const abortParent = () =>
-    controller.abort(signal?.reason ?? new Error("Operation cancelled"));
-  if (signal?.aborted) abortParent();
-  else signal?.addEventListener("abort", abortParent, { once: true });
-  const timer = setTimeout(
-    () => controller.abort(new Error("Search provider timed out")),
-    PROVIDER_TIMEOUT_MS,
-  );
-  try {
-    // Authenticated machine-API endpoints are not expected to redirect. Reject
-    // redirects rather than carrying API credentials onto a second destination
-    // selected by an unexpected provider response.
-    const res = await undiciFetch(url, {
-      ...init,
-      signal: controller.signal,
-      redirect: SEARCH_PROVIDER_REDIRECT_POLICY,
-    });
-    if (!res.ok) {
-      await res.body?.cancel().catch(() => undefined);
-      throw providerHttpError(res.status, res.headers.get("retry-after"));
-    }
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!/\b(?:application\/json|[^;]+\+json)\b/i.test(contentType)) {
-      await res.body?.cancel().catch(() => undefined);
-      throw new Error("Search API returned a non-JSON response");
-    }
-    const text = await readResponseTextLimited(
-      res,
-      MAX_PROVIDER_RESPONSE_BYTES,
-    );
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new Error("Search API returned invalid JSON");
-    }
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", abortParent);
-  }
-}
+export { SEARCH_PROVIDER_REDIRECT_POLICY } from "./search-http";
+export type { ApiSearchProvider } from "./search-provider-types";
+export {
+  getSearchProviderHealth,
+  resetSearchProviderHealthForTests,
+  resetSearchEngineRuntimeForTests,
+};
 
 function safeResult(
   title: unknown,
@@ -176,8 +109,9 @@ export function parseExaResults(json: unknown): SearchResult[] {
 function tavilyProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "tavily",
+    kind: "general",
     async search(query, signal) {
-      const json = await fetchJson(
+      const json = await fetchSearchJson(
         "https://api.tavily.com/search",
         {
           method: "POST",
@@ -201,8 +135,9 @@ function tavilyProvider(apiKey: string): ApiSearchProvider {
 function exaProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "exa",
+    kind: "general",
     async search(query, signal) {
-      const json = await fetchJson(
+      const json = await fetchSearchJson(
         "https://api.exa.ai/search",
         {
           method: "POST",
@@ -226,9 +161,10 @@ function exaProvider(apiKey: string): ApiSearchProvider {
 function braveProvider(apiKey: string): ApiSearchProvider {
   return {
     name: "brave",
+    kind: "general",
     async search(query, signal) {
       const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`;
-      const json = await fetchJson(
+      const json = await fetchSearchJson(
         url,
         {
           headers: {
@@ -274,11 +210,12 @@ function searxngProvider(baseUrl: string): ApiSearchProvider {
   }
   return {
     name: "searxng",
+    kind: "general",
     async search(query, signal) {
       const url = new URL(`${baseUrl}/search`);
       url.searchParams.set("q", query);
       url.searchParams.set("format", "json");
-      const json = await fetchJson(url.href, { headers }, signal);
+      const json = await fetchSearchJson(url.href, { headers }, signal);
       return parseSearxngResults(json);
     },
   };
@@ -326,9 +263,9 @@ export function hasSufficientPrimaryCoverage(results: SearchResult[]): boolean {
 }
 
 /**
- * Backward-compatible merge entry point. Internally this now uses weighted RRF
- * instead of round-robin interleaving, so agreement across providers is a
- * positive ranking signal while a soft domain cap still protects diversity.
+ * Backward-compatible merge entry point. Internally this uses weighted RRF so
+ * agreement across providers is a positive ranking signal while a soft domain
+ * cap still protects diversity.
  */
 export function mergeSearchProviderResults(
   resultSets: SearchResult[][],
@@ -351,6 +288,19 @@ function configuredInitialFanout(): number {
   return Math.min(MAX_INITIAL_FANOUT, Math.max(1, Math.floor(raw)));
 }
 
+function verticalMatchesQuery(
+  provider: ApiSearchProvider,
+  query: string,
+): boolean {
+  if (provider.kind !== "vertical") return true;
+  if (!provider.queryAffinity) return false;
+  try {
+    return provider.queryAffinity(query) >= MIN_VERTICAL_QUERY_AFFINITY;
+  } catch {
+    return false;
+  }
+}
+
 async function runProvider(
   provider: ApiSearchProvider,
   query: string,
@@ -368,9 +318,14 @@ async function runProvider(
     );
     return [];
   }
+  const startedAt = Date.now();
   try {
     const results = await provider.search(query, signal);
     recordSearchProviderSuccess(provider.name);
+    recordSearchEngineObservation(provider.name, {
+      ok: results.length > 0,
+      latencyMs: Date.now() - startedAt,
+    });
     if (results.length > 0) {
       logger.debug(
         { provider: provider.name, resultCount: results.length },
@@ -384,10 +339,11 @@ async function runProvider(
     }
     return results;
   } catch (err) {
-    // Client disconnect/cancellation is a lifecycle event, not a provider
-    // failure. Propagate it so we do not launch fallbacks after the response is
-    // already gone.
     if (signal?.aborted) throw err;
+    recordSearchEngineObservation(provider.name, {
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+    });
     const health = recordSearchProviderFailure(provider.name, err);
     logger.warn(
       {
@@ -407,6 +363,22 @@ async function runProvider(
   }
 }
 
+async function runProviderWave(
+  providers: ApiSearchProvider[],
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResult[][]> {
+  const pending: Promise<SearchResult[]>[] = [];
+  for (const provider of providers) {
+    if (signal?.aborted) {
+      await Promise.allSettled(pending);
+      throw signal.reason ?? new Error("Search cancelled");
+    }
+    pending.push(runProvider(provider, query, signal));
+  }
+  return Promise.all(pending);
+}
+
 function rankedSet(
   provider: ApiSearchProvider,
   results: SearchResult[],
@@ -419,16 +391,13 @@ function rankedSet(
 }
 
 /**
- * Adaptive provider ensemble inspired by metasearch scheduling principles but
- * implemented independently for Chat-Space:
+ * Adaptive provider ensemble:
  * - providers in cooldown are skipped rather than repeatedly hammered;
- * - the initial wave is configurable (SEARCH_INITIAL_FANOUT, 1..3);
+ * - eligible engines are dynamically ordered using query affinity, recent
+ *   success rate and EWMA latency;
+ * - the initial wave remains configurable (SEARCH_INITIAL_FANOUT, 1..3);
  * - if coverage is insufficient, remaining healthy providers run in parallel;
  * - ranked lists are combined with weighted Reciprocal Rank Fusion.
- *
- * The default fan-out is 2 for lower latency and broader first-wave coverage.
- * Operators can set SEARCH_INITIAL_FANOUT to an explicit value from 1 to 3.
- * Raw queries are intentionally never written to logs.
  */
 export async function searchWithProviders(
   query: string,
@@ -440,16 +409,19 @@ export async function searchWithProviders(
     throw signal.reason ?? new Error("Search cancelled");
   }
 
-  const available = providers.filter((provider) =>
-    isSearchProviderAvailable(provider.name),
+  const available = rankSearchEngines(
+    query,
+    providers.filter(
+      (provider) =>
+        isSearchProviderAvailable(provider.name) &&
+        verticalMatchesQuery(provider, query),
+    ),
   );
   if (available.length === 0) return [];
 
   const initialCount = Math.min(configuredInitialFanout(), available.length);
   const initialProviders = available.slice(0, initialCount);
-  const initialResults = await Promise.all(
-    initialProviders.map((provider) => runProvider(provider, query, signal)),
-  );
+  const initialResults = await runProviderWave(initialProviders, query, signal);
   const ranked: RankedProviderResults[] = initialProviders.map(
     (provider, index) => rankedSet(provider, initialResults[index] ?? []),
   );
@@ -469,8 +441,10 @@ export async function searchWithProviders(
   }
 
   const remainingProviders = available.slice(initialCount);
-  const remainingResults = await Promise.all(
-    remainingProviders.map((provider) => runProvider(provider, query, signal)),
+  const remainingResults = await runProviderWave(
+    remainingProviders,
+    query,
+    signal,
   );
   remainingProviders.forEach((provider, index) => {
     ranked.push(rankedSet(provider, remainingResults[index] ?? []));
@@ -482,5 +456,9 @@ export async function searchWithApiProviders(
   query: string,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  return searchWithProviders(query, getConfiguredApiProviders(), signal);
+  const providers = [
+    ...getConfiguredApiProviders(),
+    ...getBuiltinVerticalProviders(),
+  ];
+  return searchWithProviders(query, providers, signal);
 }

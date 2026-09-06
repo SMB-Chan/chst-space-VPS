@@ -8,3 +8,4 @@
 - [PDF用CJKフォント互換性](pdf-cjk-font-compatibility.md) — fontconfigで見つかる可変TTCはpdf-lib非互換。単体の静的TTF/OTFを使う。
 - [マージ後セットアップ](post-merge-setup.md) — frozen install後にDBライブラリの生成型を再ビルドし、依存変更時はlockfileも同期する。
 - [公開ビルドのセキュリティ検査](deployment-security-scan.md) — 公開ログが二度目のSecurity Scanで終わる場合はOSV監査で依存脆弱性を特定し、frozen installまで再確認する。
+- [動的検索schedulerのテスト分離](search-scheduler-test-isolation.md) — 順位学習状態を持つschedulerは各テスト後にruntimeとhealthをリセットし、順序依存を防ぐ。

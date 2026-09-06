@@ -8,6 +8,8 @@ import {
   hasSufficientPrimaryCoverage,
   mergeSearchProviderResults,
   normalizeSearxngBaseUrl,
+  resetSearchEngineRuntimeForTests,
+  resetSearchProviderHealthForTests,
   searchWithProviders,
   SEARCH_PROVIDER_REDIRECT_POLICY,
   type ApiSearchProvider,
@@ -32,6 +34,8 @@ afterEach(() => {
     if (saved === undefined) delete process.env[key];
     else process.env[key] = saved;
   }
+  resetSearchEngineRuntimeForTests();
+  resetSearchProviderHealthForTests();
 });
 
 function result(host: string, path: string, title = path): SearchResult {
