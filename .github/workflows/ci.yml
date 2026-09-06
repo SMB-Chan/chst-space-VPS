@@ -27,8 +27,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Print formatted SearXNG provider tests
-        run: pnpm exec prettier artifacts/api-server/src/lib/search-providers.test.ts
       - run: pnpm run format:check
       - run: pnpm run check:api-routes
       - run: pnpm run typecheck
