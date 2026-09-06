@@ -94,7 +94,7 @@ function errorFields(error: unknown): {
 export class RunExecutionContext {
   readonly runId: string;
   private nextStepSequence = 1;
-  private finished = false;
+  private finishPromise: Promise<void> | undefined;
 
   constructor(
     runId: string,
@@ -154,7 +154,7 @@ export class RunExecutionContext {
     });
   }
 
-  async finish(
+  finish(
     status: Extract<RunStatus, "completed" | "failed" | "cancelled">,
     patch: {
       inputTokens?: number;
@@ -164,15 +164,21 @@ export class RunExecutionContext {
       errorMessage?: string | null;
     } = {},
   ): Promise<void> {
-    if (this.finished) return;
-    this.finished = true;
+    if (this.finishPromise) return this.finishPromise;
     const completedAt = new Date();
-    await this.persistence.updateRun(this.runId, {
+    const operation = this.persistence.updateRun(this.runId, {
       status,
       completedAt,
       updatedAt: completedAt,
       ...patch,
     });
+    this.finishPromise = operation.catch((error) => {
+      // A transient observability write failure may be retried by a later
+      // response lifecycle event. Successful settlement remains idempotent.
+      this.finishPromise = undefined;
+      throw error;
+    });
+    return this.finishPromise;
   }
 }
 
@@ -207,6 +213,23 @@ export function withRunExecutionContext<T>(
 
 export function getRunExecutionContext(): RunExecutionContext | undefined {
   return runStorage.getStore();
+}
+
+/** Mark the current Run failed from an existing synchronous error path. */
+export function failCurrentRun(
+  errorCode: string,
+  errorMessage?: string,
+): void {
+  const context = getRunExecutionContext();
+  if (!context) return;
+  void context
+    .finish("failed", {
+      errorCode: errorCode.slice(0, 100),
+      errorMessage: errorMessage?.slice(0, 1_000),
+    })
+    .catch(() => {
+      // Error-reporting paths must never throw a second failure into chat.
+    });
 }
 
 /**
