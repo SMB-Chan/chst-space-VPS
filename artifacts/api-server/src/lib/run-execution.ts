@@ -82,7 +82,8 @@ function errorFields(error: unknown): {
     const maybeCode = (error as Error & { code?: unknown }).code;
     return {
       errorCode:
-        typeof maybeCode === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(maybeCode)
+        typeof maybeCode === "string" &&
+        /^[A-Za-z0-9_.:-]{1,64}$/.test(maybeCode)
           ? maybeCode
           : error.name || "ERROR",
       errorMessage: error.message.slice(0, 1_000),
@@ -149,7 +150,10 @@ export class RunExecutionContext {
       status,
       completedAt,
       updatedAt: completedAt,
-      durationMs: Math.max(0, completedAt.getTime() - handle.startedAt.getTime()),
+      durationMs: Math.max(
+        0,
+        completedAt.getTime() - handle.startedAt.getTime(),
+      ),
       ...patch,
     });
   }
