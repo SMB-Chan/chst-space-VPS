@@ -8,7 +8,6 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
 
 import { conversations } from "./conversations";
 import { messages } from "./messages";
@@ -141,6 +140,6 @@ export const insertRunStepSchema = createInsertSchema(runSteps).omit({
 });
 
 export type Run = typeof runs.$inferSelect;
-export type InsertRun = z.infer<typeof insertRunSchema>;
+export type InsertRun = typeof runs.$inferInsert;
 export type RunStep = typeof runSteps.$inferSelect;
-export type InsertRunStep = z.infer<typeof insertRunStepSchema>;
+export type InsertRunStep = typeof runSteps.$inferInsert;
