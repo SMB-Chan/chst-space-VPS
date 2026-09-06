@@ -1,4 +1,5 @@
 import { getSearchProviderHealth } from "./search-core";
+import type { SearchSubqueryRole } from "./search-query-planner";
 import type { ApiSearchProvider } from "./search-provider-types";
 
 interface MutableRuntimeStats {
@@ -6,6 +7,14 @@ interface MutableRuntimeStats {
   successes: number;
   failures: number;
   ewmaLatencyMs: number;
+  rolePerformance: Map<SearchSubqueryRole, MutableRolePerformance>;
+}
+
+interface MutableRolePerformance {
+  samples: number;
+  contributionCount: number;
+  opportunityCount: number;
+  contributionQuality: number;
 }
 
 export interface SearchEngineRuntimeSnapshot {
@@ -17,11 +26,26 @@ export interface SearchEngineRuntimeSnapshot {
   ewmaLatencyMs: number;
 }
 
+export interface SearchEngineRoleRuntimeSnapshot {
+  name: string;
+  role: SearchSubqueryRole;
+  samples: number;
+  contributionCount: number;
+  opportunityCount: number;
+  contributionQuality: number;
+  contributionRate: number;
+  correction: number;
+}
+
 const runtimeByEngine = new Map<string, MutableRuntimeStats>();
 const LATENCY_EWMA_ALPHA = 0.25;
 const DEFAULT_LATENCY_SCORE = 0.6;
 const GENERAL_DEFAULT_AFFINITY = 0.62;
 const VERTICAL_DEFAULT_AFFINITY = 0.12;
+export const ADAPTIVE_ROLE_MIN_SAMPLES = 6;
+export const ADAPTIVE_ROLE_MAX_CORRECTION = 0.04;
+export const ADAPTIVE_ROLE_COVERAGE_FLOOR = 5;
+const ADAPTIVE_ROLE_EWMA_ALPHA = 0.25;
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -31,10 +55,34 @@ function clamp01(value: number): number {
 function statsFor(name: string): MutableRuntimeStats {
   let stats = runtimeByEngine.get(name);
   if (!stats) {
-    stats = { samples: 0, successes: 0, failures: 0, ewmaLatencyMs: 0 };
+    stats = {
+      samples: 0,
+      successes: 0,
+      failures: 0,
+      ewmaLatencyMs: 0,
+      rolePerformance: new Map(),
+    };
     runtimeByEngine.set(name, stats);
   }
   return stats;
+}
+
+function rolePerformanceFor(
+  name: string,
+  role: SearchSubqueryRole,
+): MutableRolePerformance {
+  const stats = statsFor(name);
+  let performance = stats.rolePerformance.get(role);
+  if (!performance) {
+    performance = {
+      samples: 0,
+      contributionCount: 0,
+      opportunityCount: 0,
+      contributionQuality: 0,
+    };
+    stats.rolePerformance.set(role, performance);
+  }
+  return performance;
 }
 
 export function recordSearchEngineObservation(
@@ -68,6 +116,75 @@ export function getSearchEngineRuntime(
   };
 }
 
+export function recordSearchEngineRoleContribution(
+  name: string,
+  role: SearchSubqueryRole,
+  observation: {
+    contributionCount: number;
+    finalTopKSize: number;
+    successful: boolean;
+  },
+): void {
+  if (!observation.successful) return;
+  const performance = rolePerformanceFor(name, role);
+  const contributionQuality = clamp01(
+    Math.max(0, observation.contributionCount) /
+      Math.max(
+        ADAPTIVE_ROLE_COVERAGE_FLOOR,
+        Math.max(1, observation.finalTopKSize),
+      ),
+  );
+  performance.samples += 1;
+  performance.contributionCount += Math.max(
+    0,
+    Math.floor(observation.contributionCount),
+  );
+  performance.opportunityCount += Math.max(
+    1,
+    Math.floor(observation.finalTopKSize),
+  );
+  performance.contributionQuality =
+    performance.samples === 1
+      ? contributionQuality
+      : performance.contributionQuality * (1 - ADAPTIVE_ROLE_EWMA_ALPHA) +
+        contributionQuality * ADAPTIVE_ROLE_EWMA_ALPHA;
+}
+
+function roleContributionCorrection(
+  name: string,
+  role: SearchSubqueryRole,
+): number {
+  const performance = rolePerformanceFor(name, role);
+  if (performance.samples < ADAPTIVE_ROLE_MIN_SAMPLES) return 0;
+  return Math.min(
+    ADAPTIVE_ROLE_MAX_CORRECTION,
+    performance.contributionQuality * ADAPTIVE_ROLE_MAX_CORRECTION,
+  );
+}
+
+export function getSearchEngineRoleRuntime(
+  name: string,
+  role: SearchSubqueryRole,
+): SearchEngineRoleRuntimeSnapshot {
+  const performance = rolePerformanceFor(name, role);
+  return {
+    name,
+    role,
+    samples: performance.samples,
+    contributionCount: performance.contributionCount,
+    opportunityCount: performance.opportunityCount,
+    contributionQuality: performance.contributionQuality,
+    contributionRate: performance.contributionQuality,
+    correction:
+      performance.samples >= ADAPTIVE_ROLE_MIN_SAMPLES
+        ? Math.min(
+            ADAPTIVE_ROLE_MAX_CORRECTION,
+            performance.contributionQuality * ADAPTIVE_ROLE_MAX_CORRECTION,
+          )
+        : 0,
+  };
+}
+
 function latencyScore(snapshot: SearchEngineRuntimeSnapshot): number {
   if (snapshot.samples === 0) return DEFAULT_LATENCY_SCORE;
   return 1 / (1 + snapshot.ewmaLatencyMs / 2_500);
@@ -88,7 +205,11 @@ function affinityFor(provider: ApiSearchProvider, query: string): number {
     : GENERAL_DEFAULT_AFFINITY;
 }
 
-function engineScore(provider: ApiSearchProvider, query: string): number {
+function engineScore(
+  provider: ApiSearchProvider,
+  query: string,
+  role: SearchSubqueryRole,
+): number {
   const runtime = getSearchEngineRuntime(provider.name);
   const health = getSearchProviderHealth(provider.name);
   const affinity = affinityFor(provider, query);
@@ -97,13 +218,13 @@ function engineScore(provider: ApiSearchProvider, query: string): number {
   const weight = Math.min(2, Math.max(0.5, provider.weight ?? 1));
   const weightScore = (weight - 0.5) / 1.5;
   const healthMultiplier = health.health === "degraded" ? 0.8 : 1;
-  return (
+  const baseScore =
     (affinity * 0.55 +
       reliability * 0.25 +
       latency * 0.15 +
       weightScore * 0.05) *
-    healthMultiplier
-  );
+    healthMultiplier;
+  return baseScore + roleContributionCorrection(provider.name, role);
 }
 
 /**
@@ -114,12 +235,13 @@ function engineScore(provider: ApiSearchProvider, query: string): number {
 export function rankSearchEngines(
   query: string,
   providers: ApiSearchProvider[],
+  role: SearchSubqueryRole = "primary",
 ): ApiSearchProvider[] {
   return providers
     .map((provider, index) => ({
       provider,
       index,
-      score: engineScore(provider, query),
+      score: engineScore(provider, query, role),
     }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map((entry) => entry.provider);

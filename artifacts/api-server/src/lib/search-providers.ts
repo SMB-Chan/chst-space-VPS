@@ -11,8 +11,10 @@ import {
 } from "./search-core";
 import { fetchSearchJson } from "./search-http";
 import {
+  getSearchEngineRoleRuntime,
   rankSearchEngines,
   recordSearchEngineObservation,
+  recordSearchEngineRoleContribution,
   resetSearchEngineRuntimeForTests,
 } from "./search-engine-scheduler";
 import { getBuiltinVerticalProviders } from "./search-vertical-providers";
@@ -39,6 +41,7 @@ const MIN_VERTICAL_QUERY_AFFINITY = 0.55;
 export { SEARCH_PROVIDER_REDIRECT_POLICY } from "./search-http";
 export type { ApiSearchProvider } from "./search-provider-types";
 export {
+  getSearchEngineRoleRuntime,
   getSearchProviderHealth,
   resetSearchProviderHealthForTests,
   resetSearchEngineRuntimeForTests,
@@ -296,6 +299,15 @@ function logSearchExecutionMetadata(
   const finalResultCount = finalResults.length;
   const finalDistinctDomainCount = distinctDomainCount(finalResults);
   for (const { role, execution } of executions) {
+    const finalTopKContributionCount = contributionCount(
+      execution.results,
+      finalResults,
+    );
+    recordSearchEngineRoleContribution(execution.provider.name, role, {
+      contributionCount: finalTopKContributionCount,
+      finalTopKSize: finalResultCount,
+      successful: execution.success && execution.results.length > 0,
+    });
     logger.debug(
       {
         component: "search-provider",
@@ -305,10 +317,7 @@ function logSearchExecutionMetadata(
         success: execution.success,
         resultCount: execution.results.length,
         latencyMs: execution.latencyMs,
-        finalTopKContributionCount: contributionCount(
-          execution.results,
-          finalResults,
-        ),
+        finalTopKContributionCount,
         finalResultCount,
         finalDistinctDomainCount,
       },
@@ -472,6 +481,7 @@ async function executeSearchWithProviders(
   query: string,
   providers: ApiSearchProvider[],
   signal?: AbortSignal,
+  role: SearchSubqueryRole = "primary",
 ): Promise<ProviderSearchRun> {
   if (providers.length === 0) return { results: [], executions: [] };
   if (signal?.aborted) {
@@ -485,6 +495,7 @@ async function executeSearchWithProviders(
         isSearchProviderAvailable(provider.name) &&
         verticalMatchesQuery(provider, query),
     ),
+    role,
   );
   if (available.length === 0) return { results: [], executions: [] };
 
@@ -575,6 +586,7 @@ export async function searchWithPlannedProviders(
     primary.query,
     providers,
     signal,
+    primary.role,
   );
   if (
     plan.queries.length === 1 ||
@@ -596,7 +608,7 @@ export async function searchWithPlannedProviders(
   const supplemental = plan.queries.slice(1);
   const supplementalRuns = await Promise.all(
     supplemental.map((item) =>
-      executeSearchWithProviders(item.query, providers, signal),
+      executeSearchWithProviders(item.query, providers, signal, item.role),
     ),
   );
   const rankedQueries: RankedProviderResults[] = [

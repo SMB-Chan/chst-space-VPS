@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logger } from "./logger";
 import {
+  getSearchEngineRoleRuntime,
   resetSearchEngineRuntimeForTests,
   resetSearchProviderHealthForTests,
   searchWithPlannedProviders,
@@ -176,6 +177,13 @@ describe("searchWithPlannedProviders", () => {
         finalDistinctDomainCount: 3,
       });
       expect(metadataCall?.[0]).not.toHaveProperty("query");
+      expect(
+        getSearchEngineRoleRuntime("planned-provider", "primary"),
+      ).toMatchObject({
+        samples: 1,
+        contributionCount: 5,
+        opportunityCount: 5,
+      });
     } finally {
       debug.mockRestore();
     }
