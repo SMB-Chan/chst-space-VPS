@@ -15,3 +15,11 @@ description: チャットのSSEストリーミング表示とreact-queryの再�
 3. 二重送信対策自体も必要: 送信ハンドラの実行中ガード（refフラグ、await完了まで保持）、IME確定Enterは `e.nativeEvent.isComposing` で無視、SSEの `done` イベントとストリーム終端の両方から呼ばれる完了処理はフラグで1回に限定。
 
 デバッグ時の教訓: 「二重送信」報告はまずDBを見て、送信が2件か表示が2件かを切り分けること。
+
+## ストリーミング描画のcoalescing
+
+本文deltaはlosslessなrefへ即時蓄積し、React stateとMarkdown描画へ渡す値だけを短い間隔でcoalesceする。完了・停止・失敗時の保存や再取得は、描画stateではなくrefの全文スナップショットを使う。
+
+**Why:** tokenごとのstate更新は長文Markdownの再パースと会話全体の再レンダーを誘発する一方、描画を間引いても保存すべき本文を失ってはいけない。
+
+**How to apply:** ストリーム表示を変更するときは、coalescerのclear/flush/disposeをthread切替・完了・失敗・unmountの全経路に接続し、確定済み行はmemo化してストリーミング行と分離する。

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,6 +37,7 @@ import {
 } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { applyClientPatch } from "@/lib/audit-patch";
+import { createCoalescedTextScheduler } from "@/lib/coalesced-text-scheduler";
 import {
   normalizeFactualityReport,
   type FactualityReport,
@@ -387,6 +388,7 @@ export function ChatPage() {
   const greeting = timeGreeting();
   const abortRef = useRef<AbortController | null>(null);
   const sendingToRef = useRef<number | null>(null);
+  const handleRegenerateRef = useRef<() => void>(() => {});
 
   const [selectedModel, setSelectedModel] = useState(
     initialSettings.defaultModel,
@@ -412,6 +414,10 @@ export function ChatPage() {
     number | null
   >(null);
   const [streamingContent, setStreamingContent] = useState<string>("");
+  const streamRenderScheduler = useMemo(
+    () => createCoalescedTextScheduler(setStreamingContent),
+    [],
+  );
   const [streamingSources, setStreamingSources] = useState<
     {
       title: string;
@@ -472,6 +478,16 @@ export function ChatPage() {
       videoJob.status === "PENDING" ||
       videoJob.status === "RUNNING");
 
+  useEffect(
+    () => () => streamRenderScheduler.dispose(),
+    [streamRenderScheduler],
+  );
+
+  const resetStreamingContent = () => {
+    streamRenderScheduler.clear();
+    setStreamingContent("");
+  };
+
   const stopStreaming = () => {
     const targetId = sendingToRef.current ?? conversationId;
     abortRef.current?.abort();
@@ -484,7 +500,7 @@ export function ChatPage() {
     setStreamingFactuality(null);
     setStreamError(null);
     setSearchWarning(
-      streamingContent
+      streamSnapshotRef.current.content
         ? "生成を停止しました。表示済みの回答を保持しています。"
         : "生成を停止しました。",
     );
@@ -493,12 +509,12 @@ export function ChatPage() {
       const now = new Date().toISOString();
       const stoppedMessages: OpenaiMessage[] = [];
       if (optimisticUserMessage) stoppedMessages.push(optimisticUserMessage);
-      if (streamingContent) {
+      if (streamSnapshotRef.current.content) {
         stoppedMessages.push({
           id: STREAMING_ASSISTANT_ID - privateMessages.length - 1,
           conversationId: 0,
           role: "assistant",
-          content: stripArtifactBlocks(streamingContent),
+          content: stripArtifactBlocks(streamSnapshotRef.current.content),
           sources: streamingSources.length > 0 ? streamingSources : null,
           factuality: streamSnapshotRef.current.factuality,
           createdAt: now,
@@ -507,7 +523,7 @@ export function ChatPage() {
       if (stoppedMessages.length > 0) {
         setPrivateMessages((previous) => [...previous, ...stoppedMessages]);
       }
-      setStreamingContent("");
+      resetStreamingContent();
       setStreamingSources([]);
       setStreamingArtifacts([]);
       setStreamingFiles([]);
@@ -523,7 +539,7 @@ export function ChatPage() {
             queryKey: getGetOpenaiConversationQueryKey(targetId),
           })
           .finally(() => {
-            setStreamingContent("");
+            resetStreamingContent();
             setStreamingSources([]);
             setStreamingArtifacts([]);
             setStreamingFiles([]);
@@ -553,7 +569,7 @@ export function ChatPage() {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStreaming(false);
-    setStreamingContent("");
+    resetStreamingContent();
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
@@ -616,7 +632,7 @@ export function ChatPage() {
       setIsStreaming(false);
       setSearchStatus(null);
       setResearchStep(null);
-      setStreamingContent("");
+      resetStreamingContent();
       setStreamingSources([]);
       setStreamingArtifacts([]);
       setStreamingFiles([]);
@@ -785,7 +801,7 @@ export function ChatPage() {
     }
   };
 
-  const handleRegenerate = () => {
+  handleRegenerateRef.current = () => {
     if (isStreaming) return;
     const allMessages = conversation?.messages ?? [];
     const lastUserMessage = [...allMessages]
@@ -798,6 +814,7 @@ export function ChatPage() {
       );
     });
   };
+  const handleRegenerate = useCallback(() => handleRegenerateRef.current(), []);
 
   // 戻り値: false = 送信ブロック（入力・添付は保持される）
   const handleSend = async (
@@ -864,7 +881,7 @@ export function ChatPage() {
     });
 
     setIsStreaming(true);
-    setStreamingContent("");
+    resetStreamingContent();
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
@@ -907,7 +924,7 @@ export function ChatPage() {
       reasoningLevel,
       (chunk) => {
         streamSnapshotRef.current.content += chunk;
-        setStreamingContent((prev) => prev + chunk);
+        streamRenderScheduler.push(streamSnapshotRef.current.content);
       },
       async () => {
         setSearchStatus(null);
@@ -966,7 +983,7 @@ export function ChatPage() {
           );
         } finally {
           setIsStreaming(false);
-          setStreamingContent("");
+          resetStreamingContent();
           setStreamingSources([]);
           setStreamingArtifacts([]);
           setStreamingFiles([]);
@@ -1013,7 +1030,7 @@ export function ChatPage() {
                 ]
               : []),
           ]);
-          setStreamingContent("");
+          resetStreamingContent();
           setStreamingSources([]);
           setStreamingArtifacts([]);
           setStreamingFiles([]);
@@ -1026,7 +1043,7 @@ export function ChatPage() {
               queryKey: getGetOpenaiConversationQueryKey(targetId),
             })
             .finally(() => {
-              setStreamingContent("");
+              resetStreamingContent();
               setStreamingSources([]);
               setStreamingArtifacts([]);
               setStreamingFiles([]);
@@ -1072,7 +1089,7 @@ export function ChatPage() {
       },
       () => {
         streamSnapshotRef.current.content = "";
-        setStreamingContent("");
+        resetStreamingContent();
       },
       (operations) => {
         const patched = applyClientPatch(
@@ -1081,7 +1098,7 @@ export function ChatPage() {
         );
         if (patched !== null) {
           streamSnapshotRef.current.content = patched;
-          setStreamingContent(patched);
+          streamRenderScheduler.push(patched);
         }
       },
       (file) => {

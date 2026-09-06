@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -9,6 +9,7 @@ interface MarkdownProps {
   content: string;
   className?: string;
   citationScope: string;
+  streaming?: boolean;
 }
 
 const sanitizeSchema = {
@@ -73,10 +74,23 @@ function citeSourceLinks(content: string, citationScope: string): string {
     .join("");
 }
 
-export function Markdown({ content, className, citationScope }: MarkdownProps) {
+export function stabilizeStreamingMarkdown(content: string): string {
+  const fenceCount = (content.match(/```/g) ?? []).length;
+  return fenceCount % 2 === 1 ? `${content}\n\`\`\`` : content;
+}
+
+export const Markdown = memo(function Markdown({
+  content,
+  className,
+  citationScope,
+  streaming = false,
+}: MarkdownProps) {
+  const renderableContent = streaming
+    ? stabilizeStreamingMarkdown(content)
+    : content;
   const processedContent = useMemo(
-    () => citeSourceLinks(content, citationScope),
-    [citationScope, content],
+    () => citeSourceLinks(renderableContent, citationScope),
+    [citationScope, renderableContent],
   );
   const remarkPlugins = useMemo(() => [remarkGfm], []);
   const rehypePlugins = useMemo(
@@ -213,4 +227,4 @@ export function Markdown({ content, className, citationScope }: MarkdownProps) {
       </ReactMarkdown>
     </div>
   );
-}
+});

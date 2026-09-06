@@ -12,6 +12,7 @@ interface SafeMarkdownProps {
   content: string;
   className?: string;
   citationScope: string;
+  streaming?: boolean;
 }
 
 interface SafeMarkdownState {
@@ -113,6 +114,7 @@ function SafeMarkdownComponent({
   content,
   className,
   citationScope,
+  streaming = false,
 }: SafeMarkdownProps) {
   const renderedContent = useBatchedMarkdownContent(content);
 
@@ -122,6 +124,7 @@ function SafeMarkdownComponent({
         content={renderedContent}
         className={className}
         citationScope={citationScope}
+        streaming={streaming}
       />
     </MarkdownErrorBoundary>
   );

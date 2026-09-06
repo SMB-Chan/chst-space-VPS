@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { memo, useRef, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   OpenaiMessage,
@@ -482,6 +482,388 @@ function GenerationBadge({
   );
 }
 
+interface MessageRowProps {
+  message: OpenaiMessage;
+  userInitial: string;
+  userImageUrl?: string;
+  streamingPhase: StreamingPhase;
+  specialistProgress: {
+    capability: string;
+    phase: string;
+    message?: string;
+  } | null;
+  streamingFiles: { id: number; filename: string; mimeType: string }[];
+  streamingAudit: string;
+  streamingFactuality: FactualityReport | null;
+  isStreaming: boolean;
+  onStop?: () => void;
+  streamingWarning?: string | null;
+  onDismissWarning?: () => void;
+  onRegenerate?: () => void;
+  isLastAssistant: boolean;
+  researchStep: { step: number; maxSteps: number } | null;
+}
+
+const MessageRow = memo(function MessageRow({
+  message,
+  userInitial,
+  userImageUrl,
+  streamingPhase,
+  specialistProgress,
+  streamingFiles,
+  streamingAudit,
+  streamingFactuality,
+  isStreaming,
+  onStop,
+  streamingWarning,
+  onDismissWarning,
+  onRegenerate,
+  isLastAssistant,
+  researchStep,
+}: MessageRowProps) {
+  const [copiedId, setCopiedId] = useState<number | string | null>(null);
+  const display = message as DisplayMessage;
+  const isUser = message.role === "user";
+  const parsedUser = isUser
+    ? parseAttachmentMessageForDisplay(message.content)
+    : null;
+  let displayContent = parsedUser?.displayContent ?? message.content;
+  const attachments = parsedUser?.attachments ?? [];
+  const citationScope = `message-${message.id}`;
+  const isStreamingMessage = message.id === STREAMING_ASSISTANT_ID;
+
+  // For assistant messages: prefer DB-persisted sources; fall back to parsing
+  // the legacy inline "参照元:" Markdown block so old messages still show cards.
+  let sources = normalizeSources(message.sources);
+  const factuality = normalizeFactualityReport(display.factuality);
+  const assetIds = normalizeAssetIds(message.assetIds);
+  const generatedAssets = display.generatedAssets ?? [];
+  if (!isUser) {
+    if (!sources || sources.length === 0) {
+      const legacyMatch = displayContent
+        .trimEnd()
+        .match(/\n\n参照元:\n((?:- \[.*?\]\(.*?\)\n?)+)/s);
+      if (legacyMatch) {
+        const extracted: { title: string; url: string }[] = [];
+        const lineRe = /- \[([^\]]*)\]\(([^)]+)\)/g;
+        let match: RegExpExecArray | null;
+        while ((match = lineRe.exec(legacyMatch[1])) !== null) {
+          extracted.push({ title: match[1], url: match[2] });
+        }
+        if (extracted.length > 0) sources = extracted;
+      }
+    }
+    // Remove the legacy block from display content (avoid duplication with cards)
+    displayContent = displayContent
+      .replace(/\n\n参照元:\n(?:- \[.*?\]\(.*?\)\n?)+$/s, "")
+      .trimEnd();
+  }
+
+  return (
+    <motion.div
+      key={message.id}
+      initial={{ opacity: 0, y: 14, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 340, damping: 30 }}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "0 180px" }}
+      className={cn(
+        "group flex gap-2.5 sm:gap-3.5 md:gap-4",
+        isUser ? "flex-row-reverse" : "flex-row",
+      )}
+    >
+      <div className="flex-shrink-0 mt-1">
+        {isUser ? (
+          <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/25 bg-primary/10 text-primary shadow-sm">
+            {userImageUrl ? <AvatarImage src={userImageUrl} alt="" /> : null}
+            <AvatarFallback className="bg-transparent font-medium">
+              {userInitial.toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+        ) : (
+          <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/20 [background:var(--m3-primary-container)] shadow-sm">
+            <AvatarFallback className="bg-transparent text-primary">
+              <Sparkles className="w-4 h-4" />
+            </AvatarFallback>
+          </Avatar>
+        )}
+      </div>
+
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-2",
+          isUser
+            ? "items-end max-w-[90%] md:max-w-[72%]"
+            : "items-start w-full max-w-full md:max-w-[92%]",
+        )}
+      >
+        <div
+          className={cn(
+            "flex items-center gap-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/65",
+            isUser && "flex-row-reverse",
+          )}
+        >
+          <span>{isUser ? "You" : "AI Space"}</span>
+          {!isUser && message.modelId ? (
+            <>
+              <span className="h-1 w-1 rounded-[var(--m3-shape-full)] bg-muted-foreground/30" />
+              <span className="normal-case tracking-normal text-muted-foreground/55">
+                {getModelLabel(message.modelId)}
+              </span>
+            </>
+          ) : null}
+        </div>
+        {isUser && attachments.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-2 max-w-full">
+            {attachments.map((attachment, index) => (
+              <div
+                key={`${attachment.name}-${index}`}
+                className={cn(
+                  surfaceVariants({ tone: "low", shape: "full" }),
+                  "flex max-w-full items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground shadow-[var(--m3-elevation-0)]",
+                )}
+              >
+                <Paperclip className="w-4 h-4 text-primary shrink-0" />
+                <span className="font-medium text-foreground truncate">
+                  {attachment.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!isUser && isStreamingMessage && !displayContent ? (
+          <div
+            className={cn(
+              surfaceVariants({ tone: "container", shape: "large" }),
+              "rounded-tl-[var(--m3-shape-xs)] px-5 py-4",
+            )}
+          >
+            <GenerationBadge
+              phase={streamingPhase}
+              researchStep={researchStep}
+            />
+          </div>
+        ) : (
+          <div
+            className={cn(
+              "break-words rounded-[var(--m3-shape-lg)] px-4 py-3 text-[15px] leading-relaxed [overflow-wrap:anywhere] md:px-5 md:py-4",
+              isUser
+                ? "rounded-tr-[var(--m3-shape-xs)] bg-primary text-primary-foreground font-sans font-normal shadow-[var(--m3-elevation-2)]"
+                : "m3-surface-container rounded-tl-[var(--m3-shape-xs)] font-sans text-foreground prose-p:leading-loose",
+            )}
+          >
+            {isUser ? (
+              <div className="whitespace-pre-wrap">{displayContent}</div>
+            ) : (
+              <>
+                <SafeMarkdown
+                  content={displayContent}
+                  citationScope={citationScope}
+                  streaming={isStreamingMessage && isStreaming}
+                />
+                {isStreamingMessage &&
+                  (streamingPhase === "generating" ||
+                    streamingPhase === "revising") && (
+                    <span
+                      className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
+                      aria-hidden
+                    />
+                  )}
+              </>
+            )}
+          </div>
+        )}
+        {!isUser &&
+          isStreamingMessage &&
+          displayContent &&
+          (streamingPhase === "generating" ||
+            streamingPhase === "revising") && (
+            <GenerationBadge
+              phase={streamingPhase}
+              researchStep={researchStep}
+            />
+          )}
+
+        {!isUser && isStreamingMessage && specialistProgress && (
+          <SpecialistProgress progress={specialistProgress} />
+        )}
+
+        {!isUser &&
+          isStreamingMessage &&
+          (streamingPhase === "generating-file" ||
+            streamingPhase === "reviewing-layout" ||
+            streamingPhase === "revising-layout") && (
+            <FileGenerationPanel
+              phase={streamingPhase as FileGenerationPhase}
+            />
+          )}
+
+        {!isUser && isStreamingMessage && isStreaming && onStop && (
+          <button
+            type="button"
+            onClick={onStop}
+            className="inline-flex items-center gap-2 rounded-[var(--m3-shape-full)] border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
+            aria-label="この回答を停止"
+          >
+            <Square className="h-3 w-3 fill-current" /> 停止
+          </button>
+        )}
+
+        {!isUser && isStreamingMessage && streamingWarning && (
+          <div className="flex items-start gap-2 rounded-[var(--m3-shape-sm)] border [border-color:var(--app-status-warning)] [background:var(--app-status-warning-container)] px-3 py-2 text-xs [color:var(--app-status-warning)]">
+            <span className="shrink-0">⚠️</span>
+            <span className="flex-1">{streamingWarning}</span>
+            <button
+              type="button"
+              onClick={onDismissWarning}
+              className="m3-focus-ring shrink-0 rounded-[var(--m3-shape-xs)] p-0.5 transition-colors hover:bg-foreground/[0.08]"
+              aria-label="警告を閉じる"
+            >
+              <span aria-hidden>×</span>
+            </button>
+          </div>
+        )}
+
+        {!isUser &&
+          (display.auditContent ||
+            (isStreamingMessage &&
+              (streamingAudit || streamingPhase === "auditing"))) && (
+            <AuditCard
+              content={
+                isStreamingMessage
+                  ? streamingAudit || display.auditContent || ""
+                  : display.auditContent || ""
+              }
+              modelId={display.auditModelId}
+              live={isStreamingMessage && streamingPhase === "auditing"}
+              citationScope={citationScope}
+            />
+          )}
+
+        {!isUser &&
+          (isStreamingMessage
+            ? streamingFactuality || factuality
+            : factuality) && (
+            <div className="w-full px-1">
+              <FactualityCard
+                report={
+                  (isStreamingMessage
+                    ? streamingFactuality || factuality
+                    : factuality)!
+                }
+              />
+            </div>
+          )}
+
+        {!isUser && sources && sources.length > 0 && (
+          <div className="w-full px-1">
+            <SourceCards sources={sources} citationScope={citationScope} />
+          </div>
+        )}
+
+        {!isUser && display.artifacts && display.artifacts.length > 0 && (
+          <ArtifactCards artifacts={display.artifacts} />
+        )}
+        {!isUser && generatedAssets.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-1">
+            {generatedAssets.map((asset) => (
+              <FileDownloadButton
+                key={asset.id}
+                assetId={asset.id}
+                filename={asset.filename}
+                mimeType={asset.mimeType}
+              />
+            ))}
+          </div>
+        )}
+        {!isUser &&
+          generatedAssets.length === 0 &&
+          assetIds &&
+          assetIds.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1">
+              {assetIds.map((assetId) => (
+                <FileDownloadButton
+                  key={assetId}
+                  assetId={assetId}
+                  filename={
+                    streamingFiles.find((file) => file.id === assetId)?.filename
+                  }
+                  mimeType={
+                    streamingFiles.find((file) => file.id === assetId)?.mimeType
+                  }
+                />
+              ))}
+            </div>
+          )}
+
+        {!isUser && message.id !== STREAMING_ASSISTANT_ID && displayContent && (
+          <div className="flex items-center gap-1.5 px-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(displayContent);
+                setCopiedId(message.id);
+                setTimeout(() => setCopiedId(null), 2000);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="メッセージをコピー"
+            >
+              {copiedId === message.id ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+              {copiedId === message.id ? "コピー済み" : "コピー"}
+            </button>
+            {onRegenerate && isLastAssistant && (
+              <button
+                type="button"
+                onClick={onRegenerate}
+                className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="回答を再生成"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                再生成
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}, areMessageRowPropsEqual);
+
+function areMessageRowPropsEqual(
+  previous: Readonly<MessageRowProps>,
+  next: Readonly<MessageRowProps>,
+): boolean {
+  if (
+    previous.message !== next.message ||
+    previous.userInitial !== next.userInitial ||
+    previous.userImageUrl !== next.userImageUrl ||
+    previous.isLastAssistant !== next.isLastAssistant
+  ) {
+    return false;
+  }
+  if (previous.message.id !== STREAMING_ASSISTANT_ID) {
+    return previous.isLastAssistant
+      ? previous.onRegenerate === next.onRegenerate
+      : true;
+  }
+  return (
+    previous.streamingPhase === next.streamingPhase &&
+    previous.specialistProgress === next.specialistProgress &&
+    previous.streamingFiles === next.streamingFiles &&
+    previous.streamingAudit === next.streamingAudit &&
+    previous.streamingFactuality === next.streamingFactuality &&
+    previous.isStreaming === next.isStreaming &&
+    previous.onStop === next.onStop &&
+    previous.streamingWarning === next.streamingWarning &&
+    previous.onDismissWarning === next.onDismissWarning &&
+    previous.researchStep === next.researchStep
+  );
+}
+
 export function MessageFeed({
   messages,
   isLoading,
@@ -501,20 +883,37 @@ export function MessageFeed({
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const stickToBottomRef = useRef(true);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
-  const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const { user } = useUser();
   const userInitial =
     user?.firstName?.[0] ?? user?.primaryEmailAddress?.emailAddress?.[0] ?? "U";
 
   useEffect(() => {
     if (!stickToBottomRef.current) return;
-    bottomRef.current?.scrollIntoView({
-      behavior: streamingPhase ? "auto" : "smooth",
-      block: "end",
+    if (scrollFrameRef.current !== null) return;
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      if (!stickToBottomRef.current) return;
+      const container = containerRef.current;
+      if (!container) return;
+      if (streamingPhase) {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      }
     });
   }, [messages, streamingPhase]);
+
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+      }
+    },
+    [],
+  );
 
   if (isLoading) {
     return (
@@ -522,6 +921,16 @@ export function MessageFeed({
         <Loader2 className="w-6 h-6 animate-spin text-primary/50" />
       </div>
     );
+  }
+
+  let lastAssistantId: number | string | null = null;
+  for (const candidate of messages) {
+    if (
+      candidate.role === "assistant" &&
+      candidate.id !== STREAMING_ASSISTANT_ID
+    ) {
+      lastAssistantId = candidate.id;
+    }
   }
 
   return (
@@ -558,344 +967,25 @@ export function MessageFeed({
       )}
       <div className="mx-auto max-w-4xl space-y-8 md:space-y-10">
         {messages.map((message) => {
-          const display = message as DisplayMessage;
-          const isUser = message.role === "user";
-          const parsedUser = isUser
-            ? parseAttachmentMessageForDisplay(message.content)
-            : null;
-          let displayContent = parsedUser?.displayContent ?? message.content;
-          const attachments = parsedUser?.attachments ?? [];
-          const citationScope = `message-${message.id}`;
-
-          // For assistant messages: prefer DB-persisted sources; fall back to parsing
-          // the legacy inline "参照元:" Markdown block so old messages still show cards.
-          let sources = normalizeSources(message.sources);
-          const factuality = normalizeFactualityReport(display.factuality);
-          const assetIds = normalizeAssetIds(message.assetIds);
-          const generatedAssets = display.generatedAssets ?? [];
-          if (!isUser) {
-            if (!sources || sources.length === 0) {
-              // Try to extract legacy sources from the inline block
-              const legacyMatch = displayContent
-                .trimEnd()
-                .match(/\n\n参照元:\n((?:- \[.*?\]\(.*?\)\n?)+)/s);
-              if (legacyMatch) {
-                const extracted: { title: string; url: string }[] = [];
-                const lineRe = /- \[([^\]]*)\]\(([^)]+)\)/g;
-                let m: RegExpExecArray | null;
-                while ((m = lineRe.exec(legacyMatch[1])) !== null) {
-                  extracted.push({ title: m[1], url: m[2] });
-                }
-                if (extracted.length > 0) sources = extracted;
-              }
-            }
-            // Remove the legacy block from display content (avoid duplication with cards)
-            displayContent = displayContent
-              .replace(/\n\n参照元:\n(?:- \[.*?\]\(.*?\)\n?)+$/s, "")
-              .trimEnd();
-          }
-
           return (
-            <motion.div
+            <MessageRow
               key={message.id}
-              initial={{ opacity: 0, y: 14, scale: 0.985 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ type: "spring", stiffness: 340, damping: 30 }}
-              className={cn(
-                "group flex gap-2.5 sm:gap-3.5 md:gap-4",
-                isUser ? "flex-row-reverse" : "flex-row",
-              )}
-            >
-              <div className="flex-shrink-0 mt-1">
-                {isUser ? (
-                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/25 bg-primary/10 text-primary shadow-sm">
-                    {user?.imageUrl ? (
-                      <AvatarImage src={user.imageUrl} alt="" />
-                    ) : null}
-                    <AvatarFallback className="bg-transparent font-medium">
-                      {userInitial.toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                ) : (
-                  <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-primary/20 [background:var(--m3-primary-container)] shadow-sm">
-                    <AvatarFallback className="bg-transparent text-primary">
-                      <Sparkles className="w-4 h-4" />
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-              </div>
-
-              <div
-                className={cn(
-                  "flex min-w-0 flex-col gap-2",
-                  isUser
-                    ? "items-end max-w-[90%] md:max-w-[72%]"
-                    : "items-start w-full max-w-full md:max-w-[92%]",
-                )}
-              >
-                <div
-                  className={cn(
-                    "flex items-center gap-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/65",
-                    isUser && "flex-row-reverse",
-                  )}
-                >
-                  <span>{isUser ? "You" : "AI Space"}</span>
-                  {!isUser && message.modelId ? (
-                    <>
-                      <span className="h-1 w-1 rounded-[var(--m3-shape-full)] bg-muted-foreground/30" />
-                      <span className="normal-case tracking-normal text-muted-foreground/55">
-                        {getModelLabel(message.modelId)}
-                      </span>
-                    </>
-                  ) : null}
-                </div>
-                {isUser && attachments.length > 0 && (
-                  <div className="flex flex-wrap justify-end gap-2 max-w-full">
-                    {attachments.map((attachment, index) => (
-                      <div
-                        key={`${attachment.name}-${index}`}
-                        className={cn(
-                          surfaceVariants({ tone: "low", shape: "full" }),
-                          "flex max-w-full items-center gap-2 px-3.5 py-2 text-sm text-muted-foreground shadow-[var(--m3-elevation-0)]",
-                        )}
-                      >
-                        <Paperclip className="w-4 h-4 text-primary shrink-0" />
-                        <span className="font-medium text-foreground truncate">
-                          {attachment.name}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {!isUser &&
-                message.id === STREAMING_ASSISTANT_ID &&
-                !displayContent ? (
-                  <div
-                    className={cn(
-                      surfaceVariants({ tone: "container", shape: "large" }),
-                      "rounded-tl-[var(--m3-shape-xs)] px-5 py-4",
-                    )}
-                  >
-                    <GenerationBadge
-                      phase={streamingPhase}
-                      researchStep={researchStep}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    className={cn(
-                      "break-words rounded-[var(--m3-shape-lg)] px-4 py-3 text-[15px] leading-relaxed [overflow-wrap:anywhere] md:px-5 md:py-4",
-                      isUser
-                        ? "rounded-tr-[var(--m3-shape-xs)] bg-primary text-primary-foreground font-sans font-normal shadow-[var(--m3-elevation-2)]"
-                        : "m3-surface-container rounded-tl-[var(--m3-shape-xs)] font-sans text-foreground prose-p:leading-loose",
-                    )}
-                  >
-                    {isUser ? (
-                      <div className="whitespace-pre-wrap">
-                        {displayContent}
-                      </div>
-                    ) : (
-                      <>
-                        <SafeMarkdown
-                          content={displayContent}
-                          citationScope={citationScope}
-                        />
-                        {message.id === STREAMING_ASSISTANT_ID &&
-                          (streamingPhase === "generating" ||
-                            streamingPhase === "revising") && (
-                            <span
-                              className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
-                              aria-hidden
-                            />
-                          )}
-                      </>
-                    )}
-                  </div>
-                )}
-                {!isUser &&
-                  message.id === STREAMING_ASSISTANT_ID &&
-                  displayContent &&
-                  (streamingPhase === "generating" ||
-                    streamingPhase === "revising") && (
-                    <GenerationBadge
-                      phase={streamingPhase}
-                      researchStep={researchStep}
-                    />
-                  )}
-
-                {!isUser &&
-                  message.id === STREAMING_ASSISTANT_ID &&
-                  specialistProgress && (
-                    <SpecialistProgress progress={specialistProgress} />
-                  )}
-
-                {!isUser &&
-                  message.id === STREAMING_ASSISTANT_ID &&
-                  (streamingPhase === "generating-file" ||
-                    streamingPhase === "reviewing-layout" ||
-                    streamingPhase === "revising-layout") && (
-                    <FileGenerationPanel
-                      phase={streamingPhase as FileGenerationPhase}
-                    />
-                  )}
-
-                {!isUser &&
-                  message.id === STREAMING_ASSISTANT_ID &&
-                  isStreaming &&
-                  onStop && (
-                    <button
-                      type="button"
-                      onClick={onStop}
-                      className="inline-flex items-center gap-2 rounded-[var(--m3-shape-full)] border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/20"
-                      aria-label="この回答を停止"
-                    >
-                      <Square className="h-3 w-3 fill-current" /> 停止
-                    </button>
-                  )}
-
-                {!isUser &&
-                  message.id === STREAMING_ASSISTANT_ID &&
-                  streamingWarning && (
-                    <div className="flex items-start gap-2 rounded-[var(--m3-shape-sm)] border [border-color:var(--app-status-warning)] [background:var(--app-status-warning-container)] px-3 py-2 text-xs [color:var(--app-status-warning)]">
-                      <span className="shrink-0">⚠️</span>
-                      <span className="flex-1">{streamingWarning}</span>
-                      <button
-                        type="button"
-                        onClick={onDismissWarning}
-                        className="m3-focus-ring shrink-0 rounded-[var(--m3-shape-xs)] p-0.5 transition-colors hover:bg-foreground/[0.08]"
-                        aria-label="警告を閉じる"
-                      >
-                        <span aria-hidden>×</span>
-                      </button>
-                    </div>
-                  )}
-
-                {!isUser &&
-                  (display.auditContent ||
-                    (message.id === STREAMING_ASSISTANT_ID &&
-                      (streamingAudit || streamingPhase === "auditing"))) && (
-                    <AuditCard
-                      content={
-                        message.id === STREAMING_ASSISTANT_ID
-                          ? streamingAudit || display.auditContent || ""
-                          : display.auditContent || ""
-                      }
-                      modelId={display.auditModelId}
-                      live={
-                        message.id === STREAMING_ASSISTANT_ID &&
-                        streamingPhase === "auditing"
-                      }
-                      citationScope={citationScope}
-                    />
-                  )}
-
-                {!isUser &&
-                  (message.id === STREAMING_ASSISTANT_ID
-                    ? streamingFactuality || factuality
-                    : factuality) && (
-                    <div className="w-full px-1">
-                      <FactualityCard
-                        report={
-                          (message.id === STREAMING_ASSISTANT_ID
-                            ? streamingFactuality || factuality
-                            : factuality)!
-                        }
-                      />
-                    </div>
-                  )}
-
-                {!isUser && sources && sources.length > 0 && (
-                  <div className="w-full px-1">
-                    <SourceCards
-                      sources={sources}
-                      citationScope={citationScope}
-                    />
-                  </div>
-                )}
-
-                {!isUser &&
-                  display.artifacts &&
-                  display.artifacts.length > 0 && (
-                    <ArtifactCards artifacts={display.artifacts} />
-                  )}
-                {!isUser && generatedAssets.length > 0 && (
-                  <div className="flex flex-wrap gap-2 px-1">
-                    {generatedAssets.map((asset) => (
-                      <FileDownloadButton
-                        key={asset.id}
-                        assetId={asset.id}
-                        filename={asset.filename}
-                        mimeType={asset.mimeType}
-                      />
-                    ))}
-                  </div>
-                )}
-                {!isUser &&
-                  generatedAssets.length === 0 &&
-                  assetIds &&
-                  assetIds.length > 0 && (
-                    <div className="flex flex-wrap gap-2 px-1">
-                      {assetIds.map((assetId) => (
-                        <FileDownloadButton
-                          key={assetId}
-                          assetId={assetId}
-                          filename={
-                            streamingFiles.find((file) => file.id === assetId)
-                              ?.filename
-                          }
-                          mimeType={
-                            streamingFiles.find((file) => file.id === assetId)
-                              ?.mimeType
-                          }
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                {!isUser &&
-                  message.id !== STREAMING_ASSISTANT_ID &&
-                  displayContent && (
-                    <div className="flex items-center gap-1.5 px-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(displayContent);
-                          setCopiedId(message.id);
-                          setTimeout(() => setCopiedId(null), 2000);
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label="メッセージをコピー"
-                      >
-                        {copiedId === message.id ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                        {copiedId === message.id ? "コピー済み" : "コピー"}
-                      </button>
-                      {onRegenerate &&
-                        messages
-                          .filter(
-                            (m) =>
-                              m.role === "assistant" &&
-                              m.id !== STREAMING_ASSISTANT_ID,
-                          )
-                          .at(-1)?.id === message.id && (
-                          <button
-                            type="button"
-                            onClick={onRegenerate}
-                            className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            aria-label="回答を再生成"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            再生成
-                          </button>
-                        )}
-                    </div>
-                  )}
-              </div>
-            </motion.div>
+              message={message}
+              userInitial={userInitial}
+              userImageUrl={user?.imageUrl}
+              streamingPhase={streamingPhase}
+              specialistProgress={specialistProgress}
+              streamingFiles={streamingFiles}
+              streamingAudit={streamingAudit}
+              streamingFactuality={streamingFactuality}
+              isStreaming={isStreaming}
+              onStop={onStop}
+              streamingWarning={streamingWarning}
+              onDismissWarning={onDismissWarning}
+              onRegenerate={onRegenerate}
+              isLastAssistant={message.id === lastAssistantId}
+              researchStep={researchStep}
+            />
           );
         })}
         {videoJob ? (

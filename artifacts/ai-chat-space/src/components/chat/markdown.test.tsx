@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown } from "./markdown";
+import { Markdown, stabilizeStreamingMarkdown } from "./markdown";
 
 describe("Markdown", () => {
   it("renders GFM tables, task-unrelated lists, and emphasis", () => {
@@ -86,5 +86,29 @@ describe("Markdown", () => {
     const buttonCount = (html.match(/<button/g) ?? []).length;
     expect(buttonCount).toBe(1);
     expect(html).toContain('data-source-target="source-message-test-1"');
+  });
+
+  it("temporarily closes an unfinished streaming code fence", () => {
+    const content = "途中の説明\n\n```ts\nconst value = 1";
+    const stabilized = stabilizeStreamingMarkdown(content);
+
+    expect(stabilized).toBe(`${content}\n\`\`\``);
+    expect(stabilizeStreamingMarkdown(`${content}\n\`\`\``)).toBe(
+      `${content}\n\`\`\``,
+    );
+  });
+
+  it("keeps streaming Markdown safe and readable with incomplete syntax", () => {
+    const html = renderToStaticMarkup(
+      <Markdown
+        content={"説明 [1]\n\n```ts\nconst value = 1"}
+        citationScope="message-stream"
+        streaming
+      />,
+    );
+
+    expect(html).toContain("const value = 1");
+    expect(html).toContain('data-source-target="source-message-stream-1"');
+    expect(html).not.toContain("<script");
   });
 });
