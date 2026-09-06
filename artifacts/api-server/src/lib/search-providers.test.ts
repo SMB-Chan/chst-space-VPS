@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseBraveResults,
+  parseSearxngResults,
   parseTavilyResults,
   parseExaResults,
   getConfiguredApiProviders,
@@ -13,6 +14,9 @@ import {
 import type { SearchResult } from "./search-parse";
 
 const ENV_KEYS = [
+  "SEARXNG_BASE_URL",
+  "SEARXNG_USERNAME",
+  "SEARXNG_PASSWORD",
   "TAVILY_API_KEY",
   "EXA_API_KEY",
   "BRAVE_SEARCH_API_KEY",
@@ -143,7 +147,21 @@ describe("getConfiguredApiProviders", () => {
     expect(getConfiguredApiProviders()).toEqual([]);
   });
 
-  it("orders providers tavily > exa > brave", () => {
+  it("orders providers searxng > tavily > exa > brave", () => {
+    process.env.SEARXNG_BASE_URL = "https://searx.internal.example.com";
+    process.env.TAVILY_API_KEY = "t";
+    process.env.EXA_API_KEY = "e";
+    process.env.BRAVE_SEARCH_API_KEY = "b";
+    expect(getConfiguredApiProviders().map((p) => p.name)).toEqual([
+      "searxng",
+      "tavily",
+      "exa",
+      "brave",
+    ]);
+  });
+
+  it("orders providers tavily > exa > brave without searxng", () => {
+    delete process.env.SEARXNG_BASE_URL;
     process.env.TAVILY_API_KEY = "t";
     process.env.EXA_API_KEY = "e";
     process.env.BRAVE_SEARCH_API_KEY = "b";
@@ -269,5 +287,30 @@ describe("conditional provider ensemble", () => {
       .slice(0, 4)
       .map((item) => new URL(item.url).hostname);
     expect(new Set(firstFourDomains).size).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("parseSearxngResults", () => {
+  it("maps searxng json results and drops invalid entries", () => {
+    expect(
+      parseSearxngResults({
+        results: [
+          {
+            title: "Doc",
+            url: "https://docs.example.com/guide",
+            content: "how to",
+          },
+          { title: "no url", content: "x" },
+          { url: "javascript:alert(1)" },
+        ],
+      }),
+    ).toEqual([
+      {
+        title: "Doc",
+        url: "https://docs.example.com/guide",
+        snippet: "how to",
+      },
+    ]);
+    expect(parseSearxngResults({ results: "nope" })).toEqual([]);
   });
 });
