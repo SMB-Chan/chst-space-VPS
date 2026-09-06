@@ -24,7 +24,9 @@ describe("openrouter generation params", () => {
     expect(opts).not.toHaveProperty("max_completion_tokens");
   });
 
-  it("omits reasoning when the level is off or the model has none", () => {
+  it("actively disables thinking when the level is off", () => {
+    // GLM/Qwen think by default; background stages run with reasoningLevel
+    // "off" and would otherwise burn their token cap on hidden reasoning.
     const off: Record<string, unknown> = {};
     applyGenerationParams(
       off,
@@ -32,7 +34,7 @@ describe("openrouter generation params", () => {
       "openrouter",
       "off",
     );
-    expect(off).not.toHaveProperty("reasoning");
+    expect(off.reasoning).toEqual({ enabled: false });
 
     const plain: Record<string, unknown> = {};
     applyGenerationParams(
