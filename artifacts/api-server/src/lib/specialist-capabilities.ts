@@ -4,7 +4,6 @@ import {
   AVAILABLE_MODELS,
   dashscopeClient,
   openaiClient,
-  openrouterClient,
   type ChatModel,
   type ModelProvider,
 } from "./ai-clients";
@@ -160,7 +159,6 @@ type ModelDiscoveryCache = {
 
 let dashScopeModelCache: ModelDiscoveryCache | null = null;
 let openAiModelCache: ModelDiscoveryCache | null = null;
-let openRouterModelCache: ModelDiscoveryCache | null = null;
 
 async function readModelIds(
   client: OpenAI | null,
@@ -204,16 +202,9 @@ async function readOpenAiModelIds(): Promise<Set<string> | null> {
   });
 }
 
-async function readOpenRouterModelIds(): Promise<Set<string> | null> {
-  return readModelIds(openrouterClient, openRouterModelCache, (next) => {
-    openRouterModelCache = next;
-  });
-}
-
 export function resetModelDiscoveryCache(): void {
   dashScopeModelCache = null;
   openAiModelCache = null;
-  openRouterModelCache = null;
 }
 
 function chatModelCapabilities(model: ChatModel): CapabilityId[] {
@@ -375,23 +366,25 @@ export function mergeAvailableChatModels(
 }
 
 export async function getAvailableChatModels(): Promise<ChatModel[]> {
-  const [dashScopeIds, openAiIds, openRouterIds, openRouterOverBudget] =
-    await Promise.all([
-      readDashScopeModelIds(),
-      readOpenAiModelIds(),
-      readOpenRouterModelIds(),
-      isOpenRouterOverBudget(),
-    ]);
+  const [dashScopeIds, openAiIds, openRouterOverBudget] = await Promise.all([
+    readDashScopeModelIds(),
+    readOpenAiModelIds(),
+    isOpenRouterOverBudget(),
+  ]);
 
-  return mergeAvailableChatModels([
+  const models = mergeAvailableChatModels([
     { provider: "dashscope", ids: dashScopeIds },
     { provider: "openai", ids: openAiIds },
-    // An empty set hides the catalog models when the budget is nearly spent.
-    {
-      provider: "openrouter",
-      ids: openRouterOverBudget ? new Set<string>() : openRouterIds,
-    },
+    // OpenRouter discovery is deliberately disabled: the aggregator lists
+    // hundreds of third-party ids whose vision/reasoning capabilities we
+    // cannot describe, which would flood the picker with unlabelled entries.
+    // The curated catalog is the source of truth for OpenRouter.
+    { provider: "openrouter", ids: null },
   ]);
+  // Hide the OpenRouter catalog once the key budget is nearly spent.
+  return openRouterOverBudget
+    ? models.filter((model) => model.provider !== "openrouter")
+    : models;
 }
 
 export async function getCapabilityRegistryWithAvailability(): Promise<{
@@ -402,7 +395,6 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
     readDashScopeModelIds(),
     isOpenRouterOverBudget(),
   ]);
-  const openRouterIds = await readOpenRouterModelIds();
   const models = getCapabilityModels().map((model) => {
     if (model.provider === "openai") return { ...model, configured: true };
     if (
@@ -411,10 +403,7 @@ export async function getCapabilityRegistryWithAvailability(): Promise<{
     ) {
       return {
         ...model,
-        configured:
-          openRouterConfigured() &&
-          !openRouterOverBudget &&
-          (!openRouterIds || openRouterIds.has(model.id)),
+        configured: openRouterConfigured() && !openRouterOverBudget,
       };
     }
     if (model.capabilities.includes("chat")) {

@@ -67,6 +67,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CapabilityRegistry"
+  /openai/settings:
+    get:
+      operationId: getOpenaiSettings
+      tags: [openai]
+      summary: Get the account's stored UI settings
+      responses:
+        "200":
+          description: Stored settings or null when never saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenaiSettingsEnvelope"
+    put:
+      operationId: putOpenaiSettings
+      tags: [openai]
+      summary: Store the account's UI settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenaiSettings"
+      responses:
+        "204":
+          description: Stored
   /openai/realtime/session:
     post:
       operationId: createOpenaiRealtimeSession
@@ -535,6 +560,51 @@ paths:
                 $ref: "#/components/schemas/OpenaiError"
 components:
   schemas:
+    OpenaiSettings:
+      type: object
+      required:
+        - defaultModel
+        - defaultReasoning
+        - auditEnabled
+        - auditModelId
+        - auditReasoning
+        - translationMode
+      properties:
+        defaultModel:
+          type: string
+          maxLength: 120
+        defaultReasoning:
+          type: string
+          enum: [off, low, medium, high]
+        auditEnabled:
+          type: boolean
+        auditModelId:
+          type: string
+          maxLength: 120
+        auditReasoning:
+          type: string
+          enum: [off, low, medium, high]
+        translationMode:
+          type: string
+          enum:
+            - off
+            - auto
+            - ja-en
+            - en-ja
+            - auto-ko
+            - ja-ko
+            - ko-ja
+            - auto-zh
+            - ja-zh
+            - zh-ja
+    OpenaiSettingsEnvelope:
+      type: object
+      required: [settings]
+      properties:
+        settings:
+          oneOf:
+            - $ref: "#/components/schemas/OpenaiSettings"
+            - type: "null"
     OpenaiMe:
       type: object
       required: [userId, role]

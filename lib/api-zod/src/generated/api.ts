@@ -64,6 +64,48 @@ export const ListOpenaiCapabilitiesResponse = zod.object({
 
 
 /**
+ * @summary Get the account's stored UI settings
+ */
+export const getOpenaiSettingsResponseSettingsOneDefaultModelMax = 120;
+
+export const getOpenaiSettingsResponseSettingsOneAuditModelIdMax = 120;
+
+
+
+export const GetOpenaiSettingsResponse = zod.object({
+  "settings": zod.union([zod.object({
+  "defaultModel": zod.string().max(getOpenaiSettingsResponseSettingsOneDefaultModelMax),
+  "defaultReasoning": zod.enum(['off', 'low', 'medium', 'high']),
+  "auditEnabled": zod.boolean(),
+  "auditModelId": zod.string().max(getOpenaiSettingsResponseSettingsOneAuditModelIdMax),
+  "auditReasoning": zod.enum(['off', 'low', 'medium', 'high']),
+  "translationMode": zod.enum(['off', 'auto', 'ja-en', 'en-ja', 'auto-ko', 'ja-ko', 'ko-ja', 'auto-zh', 'ja-zh', 'zh-ja'])
+}),zod.null()])
+})
+
+
+/**
+ * @summary Store the account's UI settings
+ */
+export const putOpenaiSettingsBodyDefaultModelMax = 120;
+
+export const putOpenaiSettingsBodyAuditModelIdMax = 120;
+
+
+
+export const PutOpenaiSettingsBody = zod.object({
+  "defaultModel": zod.string().max(putOpenaiSettingsBodyDefaultModelMax),
+  "defaultReasoning": zod.enum(['off', 'low', 'medium', 'high']),
+  "auditEnabled": zod.boolean(),
+  "auditModelId": zod.string().max(putOpenaiSettingsBodyAuditModelIdMax),
+  "auditReasoning": zod.enum(['off', 'low', 'medium', 'high']),
+  "translationMode": zod.enum(['off', 'auto', 'ja-en', 'en-ja', 'auto-ko', 'ja-ko', 'ko-ja', 'auto-zh', 'ja-zh', 'zh-ja'])
+})
+
+export const PutOpenaiSettingsResponse = zod.void()
+
+
+/**
  * @summary Create an authenticated Qwen Audio realtime session
  */
 

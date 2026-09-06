@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { ChevronDown, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -304,28 +304,62 @@ function quotaTitle(quota: TokenPlanQuotaHint): string {
   return parts.join(" / ");
 }
 
-/** Live list from the API, falling back to the bundled catalog if the request fails. */
+/**
+ * Live list from the API, falling back to the bundled catalog if the request
+ * fails. The catalog and the API response share one module-level store so
+ * every consumer sees the same list and can tell fallback from loaded data
+ * (settings auto-heal must never run against the fallback catalog).
+ */
+let cachedModels: ModelInfo[] | null = null;
+let modelsInFlight: Promise<void> | null = null;
+const modelStoreListeners = new Set<() => void>();
+
+function notifyModelStore(): void {
+  for (const listener of modelStoreListeners) listener();
+}
+
+function requestModels(): Promise<void> {
+  if (modelsInFlight) return modelsInFlight;
+  modelsInFlight = fetch(`${BASE}/api/openai/models`, {
+    credentials: "include",
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (!Array.isArray(data)) return;
+      const parsed = data.filter(isModelInfo);
+      if (parsed.length > 0) {
+        cachedModels = parsed;
+        notifyModelStore();
+      }
+    })
+    .catch(() => {
+      /* keep fallback catalog */
+    });
+  return modelsInFlight;
+}
+
+function subscribeModelStore(listener: () => void): () => void {
+  modelStoreListeners.add(listener);
+  return () => modelStoreListeners.delete(listener);
+}
+
 export function useAvailableModels(): ModelInfo[] {
-  const [models, setModels] = useState<ModelInfo[]>(MODELS);
-
+  const getSnapshot = () => cachedModels ?? MODELS;
+  const models = useSyncExternalStore(
+    subscribeModelStore,
+    getSnapshot,
+    getSnapshot,
+  );
   useEffect(() => {
-    let cancelled = false;
-    fetch(`${BASE}/api/openai/models`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (cancelled || !Array.isArray(data)) return;
-        const parsed = data.filter(isModelInfo);
-        if (parsed.length > 0) setModels(parsed);
-      })
-      .catch(() => {
-        /* keep fallback catalog */
-      });
-    return () => {
-      cancelled = true;
-    };
+    void requestModels();
   }, []);
-
   return models;
+}
+
+/** "api" once the server catalog arrived; "catalog" while on the fallback. */
+export function useAvailableModelsSource(): "api" | "catalog" {
+  const getSnapshot = () => (cachedModels ? "api" : "catalog");
+  return useSyncExternalStore(subscribeModelStore, getSnapshot, getSnapshot);
 }
 
 export function getModelLabel(

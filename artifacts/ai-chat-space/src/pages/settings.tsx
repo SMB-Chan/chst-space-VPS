@@ -15,6 +15,7 @@ import {
 import {
   ModelSelector,
   useAvailableModels,
+  useAvailableModelsSource,
 } from "@/components/chat/model-selector";
 import { ReasoningSelector } from "@/components/chat/reasoning-selector";
 import { loadSettings, pickAuditModel, saveSettings } from "@/lib/settings";
@@ -63,6 +64,7 @@ function SettingsSection({
 
 export function SettingsPage() {
   const models = useAvailableModels();
+  const modelSource = useAvailableModelsSource();
   const queryClient = useQueryClient();
   const { canInstall, installed, install } = usePwaInstall();
   const [settings, setSettings] = useState(loadSettings);
@@ -72,13 +74,17 @@ export function SettingsPage() {
   const [wipeDone, setWipeDone] = useState(false);
   const [installHint, setInstallHint] = useState<string | null>(null);
 
+  // Heal a stale saved model only against the server-loaded catalog. The
+  // bundled fallback list does not contain OpenRouter models; healing against
+  // it used to overwrite the saved default on every visit (settings reset bug).
   useEffect(() => {
+    if (modelSource !== "api") return;
     const current = models.find((m) => m.id === settings.defaultModel);
     if (!current && models.length > 0) {
       const next = saveSettings({ defaultModel: models[0].id });
       setSettings(next);
     }
-  }, [models, settings.defaultModel]);
+  }, [models, modelSource, settings.defaultModel]);
 
   const handleWipe = async () => {
     setWiping(true);

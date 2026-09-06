@@ -5,6 +5,57 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type OpenaiSettingsDefaultReasoning = typeof OpenaiSettingsDefaultReasoning[keyof typeof OpenaiSettingsDefaultReasoning];
+
+
+export const OpenaiSettingsDefaultReasoning = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type OpenaiSettingsAuditReasoning = typeof OpenaiSettingsAuditReasoning[keyof typeof OpenaiSettingsAuditReasoning];
+
+
+export const OpenaiSettingsAuditReasoning = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type OpenaiSettingsTranslationMode = typeof OpenaiSettingsTranslationMode[keyof typeof OpenaiSettingsTranslationMode];
+
+
+export const OpenaiSettingsTranslationMode = {
+  off: 'off',
+  auto: 'auto',
+  'ja-en': 'ja-en',
+  'en-ja': 'en-ja',
+  'auto-ko': 'auto-ko',
+  'ja-ko': 'ja-ko',
+  'ko-ja': 'ko-ja',
+  'auto-zh': 'auto-zh',
+  'ja-zh': 'ja-zh',
+  'zh-ja': 'zh-ja',
+} as const;
+
+export interface OpenaiSettings {
+  /** @maxLength 120 */
+  defaultModel: string;
+  defaultReasoning: OpenaiSettingsDefaultReasoning;
+  auditEnabled: boolean;
+  /** @maxLength 120 */
+  auditModelId: string;
+  auditReasoning: OpenaiSettingsAuditReasoning;
+  translationMode: OpenaiSettingsTranslationMode;
+}
+
+export interface OpenaiSettingsEnvelope {
+  settings: OpenaiSettings | null;
+}
+
 /**
  * Admins keep full provider access and reach moderation APIs.
  */

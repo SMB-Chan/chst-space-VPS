@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useAuth, useClerk } from "@clerk/react";
+import { hydrateSettingsFromServer } from "@/lib/settings";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const USER_NOT_ALLOWED_CODE = "USER_NOT_ALLOWED";
@@ -39,7 +40,10 @@ export function AccessGate({ children }: { children: ReactNode }) {
           setState(body?.code === USER_NOT_ALLOWED_CODE ? "denied" : "allowed");
           return;
         }
-        setState(res.ok ? "allowed" : "allowed");
+        // Authenticated: pull the account's stored settings over the local
+        // cache so defaults follow the user across browsers and devices.
+        if (res.ok) hydrateSettingsFromServer();
+        setState("allowed");
       })
       .catch(() => {
         if (!cancelled) setState("offline");
