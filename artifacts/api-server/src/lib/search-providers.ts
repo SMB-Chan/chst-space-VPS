@@ -16,6 +16,7 @@ import {
   resetSearchEngineRuntimeForTests,
 } from "./search-engine-scheduler";
 import { getBuiltinVerticalProviders } from "./search-vertical-providers";
+import { planSearchQueries } from "./search-query-planner";
 import type { ApiSearchProvider } from "./search-provider-types";
 
 /**
@@ -452,6 +453,60 @@ export async function searchWithProviders(
   return fuseSearchProviderResults(ranked, MAX_MERGED_API_RESULTS);
 }
 
+/**
+ * Execute the bounded query plan without multiplying routine search cost.
+ * The sanitized primary query always runs first. Supplemental angles only run
+ * when primary coverage is insufficient, and their already-fused result lists
+ * are combined again with weighted RRF so cross-query agreement is rewarded.
+ */
+export async function searchWithPlannedProviders(
+  query: string,
+  providers: ApiSearchProvider[],
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const plan = planSearchQueries(query);
+  const primary = plan.queries[0];
+  if (!primary || providers.length === 0) return [];
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("Search cancelled");
+  }
+
+  const primaryResults = await searchWithProviders(
+    primary.query,
+    providers,
+    signal,
+  );
+  if (
+    plan.queries.length === 1 ||
+    hasSufficientPrimaryCoverage(primaryResults)
+  ) {
+    return primaryResults;
+  }
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("Search cancelled");
+  }
+
+  const supplemental = plan.queries.slice(1);
+  const supplementalResults = await Promise.all(
+    supplemental.map((item) =>
+      searchWithProviders(item.query, providers, signal),
+    ),
+  );
+  const rankedQueries: RankedProviderResults[] = [
+    {
+      providerName: `query:${primary.role}`,
+      weight: primary.weight,
+      results: primaryResults,
+    },
+    ...supplemental.map((item, index) => ({
+      providerName: `query:${item.role}:${index}`,
+      weight: item.weight,
+      results: supplementalResults[index] ?? [],
+    })),
+  ];
+  return fuseSearchProviderResults(rankedQueries, MAX_MERGED_API_RESULTS);
+}
+
 export async function searchWithApiProviders(
   query: string,
   signal?: AbortSignal,
@@ -460,5 +515,5 @@ export async function searchWithApiProviders(
     ...getConfiguredApiProviders(),
     ...getBuiltinVerticalProviders(),
   ];
-  return searchWithProviders(query, providers, signal);
+  return searchWithPlannedProviders(query, providers, signal);
 }
