@@ -11,7 +11,9 @@ import {
 function authenticatedUserId(req: Request): string | undefined {
   const auth = getAuth(req);
   return (
-    (auth?.sessionClaims?.userId as string | undefined) || auth?.userId || undefined
+    (auth?.sessionClaims?.userId as string | undefined) ||
+    auth?.userId ||
+    undefined
   );
 }
 
