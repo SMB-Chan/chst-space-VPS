@@ -23,9 +23,11 @@ timeoutMs = 180000
 
 [userenv.shared]
 DASHSCOPE_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+ADMIN_CLERK_USER_IDS = "user_3I4PXO7vXEuNKPuJkdddXZ75MCB"
 
 [userenv.production]
 FRONTEND_URL = "https://chat-smb.replit.app"
+ADMIN_CLERK_USER_IDS = "user_3I4PXO7vXEuNKPuJkdddXZ75MCB"
 
 [nix]
 channel = "stable-25_05"
