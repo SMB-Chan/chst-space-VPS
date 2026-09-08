@@ -39,6 +39,9 @@ export type ChatCompletionCallback = (
   input: ChatCompletionInput,
 ) => Promise<ChatCompletionPersistenceResult | void>;
 
+export const EMPTY_ASSISTANT_FALLBACK =
+  "信頼できる最新情報を十分に取得できなかったため、確認できませんでした。";
+
 interface ArtifactSsePayload {
   id?: number;
   filename: string;
@@ -82,14 +85,15 @@ export async function persistAndEmitChatCompletion(args: {
   input: ChatCompletionInput;
   includeArtifactContent: boolean;
 }): Promise<boolean> {
+  const input = args.input.content.trim()
+    ? args.input
+    : { ...args.input, content: EMPTY_ASSISTANT_FALLBACK };
   let completion: ChatCompletionPersistenceResult | void;
   try {
     completion = args.onComplete
-      ? await executeRunStep(
-          "persistence",
-          () => args.onComplete!(args.input),
-          { metadata: { phase: "chat_completion" } },
-        )
+      ? await executeRunStep("persistence", () => args.onComplete!(input), {
+          metadata: { phase: "chat_completion" },
+        })
       : undefined;
   } catch (error) {
     failCurrentRun("CHAT_COMPLETION_PERSIST_FAILED");
@@ -103,6 +107,13 @@ export async function persistAndEmitChatCompletion(args: {
       });
     }
     return false;
+  }
+
+  if (!args.input.content.trim() && !args.clientGone()) {
+    writeEvent(args.res, {
+      content: EMPTY_ASSISTANT_FALLBACK,
+      status: "generating",
+    });
   }
 
   if (completion?.quotaExceeded && !args.clientGone()) {
@@ -119,7 +130,7 @@ export async function persistAndEmitChatCompletion(args: {
     }
   }
 
-  const generatedAssets = args.input.generatedAssets ?? [];
+  const generatedAssets = input.generatedAssets ?? [];
   if (
     generatedAssets.length > 0 &&
     !completion?.assets?.length &&
@@ -135,7 +146,7 @@ export async function persistAndEmitChatCompletion(args: {
     });
   }
 
-  const artifacts = args.input.artifacts ?? [];
+  const artifacts = input.artifacts ?? [];
   if (artifacts.length > 0 && !args.clientGone()) {
     writeEvent(args.res, {
       artifacts: buildArtifactSsePayload({

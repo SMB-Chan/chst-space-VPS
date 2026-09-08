@@ -233,4 +233,65 @@ describe("browser egress proxy target policy", () => {
       await new Promise<void>((resolve) => upstream.close(() => resolve()));
     }
   });
+
+  it("absorbs a client CONNECT disconnect without an uncaught exception", async () => {
+    const upstream = createTcpServer((socket) => {
+      socket.on("data", () => {
+        setTimeout(() => {
+          if (!socket.destroyed) socket.write("late-upstream-data");
+        }, 25);
+      });
+    });
+    await new Promise<void>((resolve) =>
+      upstream.listen(0, "127.0.0.1", resolve),
+    );
+    const address = upstream.address();
+    if (!address || typeof address === "string")
+      throw new Error("TCP test server did not bind");
+
+    const proxy = await startBrowserEgressProxy({ lookup: localLookup() });
+    openProxies.push(proxy);
+    const uncaught: unknown[] = [];
+    const unhandled: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("uncaughtException", onUncaught);
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const socket = netConnect({
+          host: new URL(proxy.server).hostname,
+          port: Number(new URL(proxy.server).port),
+        });
+        let response = "";
+        socket.setEncoding("utf8");
+        socket.on("connect", () => {
+          socket.write(
+            `CONNECT public-disconnect.example:${address.port} HTTP/1.1\r\nHost: public-disconnect.example\r\n\r\n`,
+          );
+        });
+        socket.on("data", (chunk) => {
+          response += chunk;
+          if (response.includes("200 Connection Established")) {
+            socket.destroy();
+            resolve();
+          }
+        });
+        socket.on("error", reject);
+        socket.setTimeout(1_000, () => {
+          socket.destroy();
+          reject(new Error("CONNECT disconnect test timed out"));
+        });
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(uncaught).toEqual([]);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("uncaughtException", onUncaught);
+      process.off("unhandledRejection", onUnhandled);
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
 });

@@ -77,6 +77,7 @@ import {
   wantsGeneratedFile,
 } from "./chat-stream-policy";
 import {
+  EMPTY_ASSISTANT_FALLBACK,
   persistAndEmitChatCompletion,
   type ChatCompletionCallback,
   type ChatCompletionInput,
@@ -342,6 +343,7 @@ export async function streamChatReply(args: {
   heartbeat.unref();
 
   let fullResponse = "";
+  let initialDraft = "";
   let streamedResponse = "";
   let failureSources: ChatCompletionInput["sources"] = [];
 
@@ -680,6 +682,7 @@ export async function streamChatReply(args: {
       shouldStop: () => clientGone() || clientAbort.signal.aborted,
       signal: clientAbort.signal,
     });
+    initialDraft = fullResponse;
 
     // A few OpenAI-compatible models sometimes output only a promise to
     // search, without a tool call. Give the same turn one bounded recovery
@@ -1036,13 +1039,27 @@ export async function streamChatReply(args: {
     }
 
     if (!fullResponse.trim()) {
-      if (!clientGone()) {
-        const turnSaved = await persistInterruptedTurn();
+      if (clientGone() || clientAbort.signal.aborted) return;
+      const restoredDraft = initialDraft.trim()
+        ? extractArtifacts(initialDraft).content.trim()
+        : "";
+      const restoredStream = streamedResponse.trim()
+        ? extractArtifacts(streamedResponse).content.trim()
+        : "";
+      fullResponse =
+        restoredDraft || restoredStream || EMPTY_ASSISTANT_FALLBACK;
+      if (!streamedResponse.trim()) {
+        streamedResponse = fullResponse;
         res.write(
-          `data: ${JSON.stringify({ error: "応答が空でした。もう一度お試しください。", turnSaved })}\n\n`,
+          `data: ${JSON.stringify({
+            content: fullResponse,
+            status: "generating",
+          })}\n\n`,
         );
       }
-    } else {
+    }
+
+    {
       const responseSources = [
         ...webContext.sources,
         ...allResearchSources.filter(
@@ -1550,9 +1567,30 @@ export async function streamChatReply(args: {
         fullResponse = finalizeGeneratedFileResponse(fullResponse);
       }
 
+      if (!fullResponse.trim()) {
+        const restoredDraft = initialDraft.trim()
+          ? extractArtifacts(initialDraft).content.trim()
+          : "";
+        const restoredStream = streamedResponse.trim()
+          ? extractArtifacts(streamedResponse).content.trim()
+          : "";
+        fullResponse =
+          restoredDraft || restoredStream || EMPTY_ASSISTANT_FALLBACK;
+      }
+
       // Disconnects that happen after model output but before this boundary
       // must not create a durable message or generated asset.
       if (clientAbort.signal.aborted) return;
+
+      if (!streamedResponse.trim() && !clientGone()) {
+        streamedResponse = fullResponse;
+        res.write(
+          `data: ${JSON.stringify({
+            content: fullResponse,
+            status: "generating",
+          })}\n\n`,
+        );
+      }
 
       const completionEmitted = await persistAndEmitChatCompletion({
         res,

@@ -467,7 +467,11 @@ async function fetchViaFallbacks(
   publishedAt?: string | null;
 } | null> {
   if (PLAYWRIGHT_FALLBACK_ENABLED) {
-    const rendered = await fetchWithBrowser(url, BROWSER_FETCH_TIMEOUT_MS);
+    const rendered = await fetchWithBrowser(
+      url,
+      BROWSER_FETCH_TIMEOUT_MS,
+      signal,
+    );
     if (
       rendered &&
       rendered.text.length >= MIN_CONTENT_CHARS &&
