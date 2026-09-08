@@ -47,6 +47,33 @@ export {
   resetSearchEngineRuntimeForTests,
 };
 
+/**
+ * News-circuit provider ladder:
+ * - news-first: Google News RSS / news vertical only
+ * - general-news: general APIs + news vertical (no encyclopedia/code/paper verticals)
+ * - default: full ensemble used by ordinary web search
+ */
+export type SearchProviderStrategy = "default" | "news-first" | "general-news";
+
+const NON_NEWS_VERTICALS = new Set(["wikipedia", "arxiv", "github"]);
+
+export function providersForStrategy(
+  strategy: SearchProviderStrategy,
+  configured: ApiSearchProvider[] = getConfiguredApiProviders(),
+  verticals: ApiSearchProvider[] = getBuiltinVerticalProviders(),
+): ApiSearchProvider[] {
+  if (strategy === "news-first") {
+    return verticals.filter((provider) => provider.name === "news-rss");
+  }
+  if (strategy === "general-news") {
+    return [
+      ...configured,
+      ...verticals.filter((provider) => !NON_NEWS_VERTICALS.has(provider.name)),
+    ];
+  }
+  return [...configured, ...verticals];
+}
+
 function safeResult(
   title: unknown,
   rawUrl: unknown,
@@ -649,10 +676,12 @@ export async function searchWithApiProviders(
   query: string,
   signal?: AbortSignal,
   suppliedPlan?: SearchQueryPlan,
+  strategy: SearchProviderStrategy = "default",
 ): Promise<SearchResult[]> {
-  const providers = [
-    ...getConfiguredApiProviders(),
-    ...getBuiltinVerticalProviders(),
-  ];
-  return searchWithPlannedProviders(query, providers, signal, suppliedPlan);
+  return searchWithPlannedProviders(
+    query,
+    providersForStrategy(strategy),
+    signal,
+    suppliedPlan,
+  );
 }

@@ -37,7 +37,10 @@ import {
   needsConversationAwareSearchPlan,
 } from "./search-conversation";
 import { fetchWithBrowser } from "./render-fetch";
-import { searchWithApiProviders } from "./search-providers";
+import {
+  searchWithApiProviders,
+  type SearchProviderStrategy,
+} from "./search-providers";
 import {
   formatVisualEvidenceForContext,
   isVisualSearchRequest,
@@ -55,7 +58,9 @@ import type { ModelProvider } from "./ai-clients";
 import {
   assessNewsRetrieval,
   filterNewsResults,
+  newsRelevanceContextFromCircuit,
   type NewsQualityReport,
+  type NewsRelevanceContext,
 } from "./news-quality-gate";
 import { buildNewsSearchCircuit } from "./news-search-circuit";
 
@@ -74,6 +79,8 @@ interface SearchDecisionOptions {
   recentConversation?: string;
   newsSearchBudget?: {
     alternateUsed: boolean;
+    /** Provider strategies already attempted in this request budget. */
+    strategiesTried?: SearchProviderStrategy[];
   };
   transcribeVisuals?: VisualTranscriber;
 }
@@ -104,6 +111,7 @@ export interface WebContext {
 }
 
 export type SearchRoute = "default" | "alternate";
+export type { SearchProviderStrategy };
 
 /** Timeout covering ALL phases (DNS + connect + headers + body) for DDG search. */
 const SEARCH_FETCH_TIMEOUT_MS = 12_000;
@@ -754,6 +762,7 @@ export async function searchWeb(
   signal?: AbortSignal,
   plan?: SearchQueryPlan,
   route: SearchRoute = "default",
+  strategy: SearchProviderStrategy = "default",
 ): Promise<ScoredSearchResult[]> {
   if (route === "default" && !plan) {
     const cached = getCachedResults(query);
@@ -769,7 +778,12 @@ export async function searchWeb(
   if (route === "default") {
     // Keyed search APIs (Tavily/Exa/Brave) are far more reliable than HTML
     // scraping; use them when configured and fall back to DuckDuckGo below.
-    const apiResults = await searchWithApiProviders(query, signal, plan);
+    const apiResults = await searchWithApiProviders(
+      query,
+      signal,
+      plan,
+      strategy,
+    );
     if (apiResults.length > 0) {
       const merged = mergeSearchResults(apiResults, query);
       if (!plan) {
@@ -1105,6 +1119,9 @@ export async function buildWebContext(
   const newsCircuit = buildNewsSearchCircuit(userMessage);
   const newsQueries = newsCircuit?.queries ?? [];
   const executedNewsQueries: string[] = [];
+  const newsRelevanceContext: NewsRelevanceContext | undefined = newsCircuit
+    ? newsRelevanceContextFromCircuit(newsCircuit, userMessage)
+    : undefined;
 
   const urls = extractUrls(userMessage);
   const wantVisuals = isVisualSearchRequest(userMessage);
@@ -1197,6 +1214,7 @@ export async function buildWebContext(
     roundQuery: string,
     roundPlan?: SearchQueryPlan,
     route: SearchRoute = "default",
+    strategy: SearchProviderStrategy = "default",
   ): Promise<void> => {
     onStatus({
       status: "searching",
@@ -1208,6 +1226,7 @@ export async function buildWebContext(
           }
         : {}),
       ...(route === "alternate" ? { route: "alternate" } : {}),
+      ...(strategy !== "default" ? { providerStrategy: strategy } : {}),
     });
     if (signal?.aborted) return;
     if (
@@ -1218,8 +1237,16 @@ export async function buildWebContext(
     ) {
       executedNewsQueries.push(roundQuery);
     }
-    const rawResults = await searchWeb(roundQuery, signal, roundPlan, route);
-    const results = newsCircuit ? filterNewsResults(rawResults) : rawResults;
+    const rawResults = await searchWeb(
+      roundQuery,
+      signal,
+      roundPlan,
+      route,
+      strategy,
+    );
+    const results = newsCircuit
+      ? filterNewsResults(rawResults, newsRelevanceContext)
+      : rawResults;
     if (results.length === 0) {
       const warning = newsCircuit
         ? "外部ニュース取得で利用できる記事根拠を確認できませんでした。"
@@ -1266,6 +1293,7 @@ export async function buildWebContext(
       newsQuality = assessNewsRetrieval({
         results: newsResults,
         queries: executedNewsQueries,
+        context: newsRelevanceContext,
       });
     }
 
@@ -1327,20 +1355,64 @@ export async function buildWebContext(
     searched = true;
     if (newsCircuit) {
       query = newsQueries[0];
-      for (const fastQuery of newsQueries.slice(0, MAX_SEARCH_ROUNDS)) {
-        if (signal?.aborted) break;
-        await runSearchRound(fastQuery);
-        if (newsQuality?.quality === "good") break;
+      // Bounded recovery within MAX_SEARCH_ROUNDS: climb the provider ladder
+      // (news-first → general-news) before the final alternate HTML scrape.
+      const strategyLadder: SearchProviderStrategy[] = [
+        "news-first",
+        "general-news",
+      ];
+      const triedStrategies =
+        options?.newsSearchBudget?.strategiesTried ??
+        (options?.newsSearchBudget
+          ? (options.newsSearchBudget.strategiesTried = [])
+          : []);
+      let roundsUsed = 0;
+      let newsQualityGood = false;
+      for (const strategy of strategyLadder) {
+        if (signal?.aborted || newsQualityGood) break;
+        if (triedStrategies.includes(strategy)) continue;
+        triedStrategies.push(strategy);
+        const remaining = MAX_SEARCH_ROUNDS - roundsUsed;
+        if (remaining <= 0) break;
+        // Prefer a fresh query angle per strategy when available.
+        const queryOffset = strategy === "news-first" ? 0 : 1;
+        const strategyQueries = newsQueries
+          .slice(queryOffset)
+          .concat(newsQueries.slice(0, queryOffset));
+        const budgetForStrategy =
+          strategy === "news-first"
+            ? Math.min(2, remaining)
+            : Math.min(1, remaining);
+        let strategyStarted = false;
+        for (const fastQuery of strategyQueries.slice(0, budgetForStrategy)) {
+          if (signal?.aborted) break;
+          if (!strategyStarted && strategy !== "news-first") {
+            onStatus({
+              status: "search_escalation",
+              query: fastQuery,
+              circuit: newsCircuit.kind,
+              circuitMode: newsCircuit.mode,
+              providerStrategy: strategy,
+            });
+          }
+          strategyStarted = true;
+          await runSearchRound(fastQuery, undefined, "default", strategy);
+          roundsUsed += 1;
+          newsQualityGood = newsQuality?.quality === "good";
+          if (newsQualityGood) break;
+        }
       }
       newsQuality = assessNewsRetrieval({
         results: newsResults,
         queries: executedNewsQueries,
+        context: newsRelevanceContext,
       });
       const alternateAvailable = !options?.newsSearchBudget?.alternateUsed;
       if (
         newsQuality.quality !== "good" &&
         !signal?.aborted &&
-        alternateAvailable
+        alternateAvailable &&
+        roundsUsed < MAX_SEARCH_ROUNDS
       ) {
         const escalationQuery =
           newsQueries[
@@ -1355,14 +1427,15 @@ export async function buildWebContext(
           circuit: newsCircuit.kind,
           circuitMode: newsCircuit.mode,
           route: "alternate",
+          providerStrategy: "general-news",
         });
-        // One explicit alternate route is the final server-side recovery
-        // attempt. It bypasses the API/RSS ensemble and uses Bing HTML so a
+        // Final recovery within the same round budget: Bing HTML scrape so a
         // Google News wrapper cannot be the only available result shape.
         await runSearchRound(escalationQuery, undefined, "alternate");
         newsQuality = assessNewsRetrieval({
           results: newsResults,
           queries: executedNewsQueries,
+          context: newsRelevanceContext,
         });
       }
       if (newsQuality.quality !== "good") {

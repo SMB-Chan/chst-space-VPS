@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assessNewsRetrieval, filterNewsResults } from "./news-quality-gate";
+import {
+  assessNewsRetrieval,
+  filterNewsResults,
+  scoreNewsRelevance,
+  type NewsRelevanceContext,
+} from "./news-quality-gate";
 import type { SearchResult } from "./search-parse";
 
 function result(
@@ -178,5 +183,105 @@ describe("news retrieval quality gate", () => {
       now: new Date("2026-09-08T04:00:00.000Z"),
     });
     expect(report.officialOrMajorSourceCount).toBe(1);
+  });
+
+  it("rejects encyclopedic article-form pages unrelated to the news question", () => {
+    const context: NewsRelevanceContext = {
+      question: "今日の日本のニュースを教えて",
+      dateAnchor: "2026-09-09",
+      temporalScope: "today",
+      mode: "headlines",
+    };
+    const candidates = [
+      result(
+        "https://ja.wikipedia.org/wiki/2026%E5%B9%B4",
+        "2026年",
+        "2026-09-09T00:00:00.000Z",
+      ),
+      result(
+        "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup",
+        "2026 FIFA World Cup",
+        "2026-09-09T00:00:00.000Z",
+      ),
+      result(
+        "https://en.wikipedia.org/wiki/History_of_Singapore",
+        "History of Singapore",
+        "2026-09-09T00:00:00.000Z",
+      ),
+    ];
+
+    expect(filterNewsResults(candidates, context)).toEqual([]);
+    const report = assessNewsRetrieval({
+      results: candidates,
+      context,
+      now: new Date("2026-09-09T04:00:00.000Z"),
+    });
+    expect(report).toMatchObject({
+      quality: "poor",
+      acceptedSourceCount: 0,
+      taskSuccess: "failed",
+    });
+    expect(report.rejected.every((item) => item.reason === "not-news")).toBe(
+      true,
+    );
+  });
+
+  it("keeps major publisher news that matches the date and headline intent", () => {
+    const context: NewsRelevanceContext = {
+      question: "今日の日本のニュースを教えて",
+      dateAnchor: "2026-09-09",
+      temporalScope: "today",
+      mode: "headlines",
+    };
+    const results = [
+      result(
+        "https://www.nhk.or.jp/news/html/20260909/k10010000001.html",
+        "速報: 国内の主要発表",
+        "2026-09-09T01:00:00.000Z",
+      ),
+      result(
+        "https://www.nikkei.com/article/DGXZQOUA09001/",
+        "ニュース: 経済の最新動向",
+        "2026-09-09T02:00:00.000Z",
+      ),
+    ];
+
+    expect(filterNewsResults(results, context)).toHaveLength(2);
+    expect(
+      assessNewsRetrieval({
+        results,
+        context,
+        now: new Date("2026-09-09T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      quality: "good",
+      acceptedSourceCount: 2,
+      freshSourceCount: 2,
+    });
+  });
+
+  it("scores low relevance for off-topic news even when the URL looks like an article", () => {
+    const context: NewsRelevanceContext = {
+      question: "OpenAIの最新ニュース",
+      dateAnchor: "2026-09-09",
+      topic: "OpenAI",
+      temporalScope: "today",
+      mode: "topic",
+    };
+    const offTopic = result(
+      "https://www.example-news.com/news/local-festival-guide",
+      "地域のお祭りガイド",
+      "2026-09-09T03:00:00.000Z",
+    );
+    const scores = scoreNewsRelevance(offTopic, context);
+    expect(scores.topic).toBeLessThan(0.3);
+    expect(scores.combined).toBeLessThan(0.38);
+    expect(
+      assessNewsRetrieval({
+        results: [offTopic],
+        context,
+        now: new Date("2026-09-09T04:00:00.000Z"),
+      }).rejected[0]?.reason,
+    ).toBe("low-relevance");
   });
 });

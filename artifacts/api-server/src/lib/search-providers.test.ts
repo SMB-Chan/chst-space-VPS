@@ -11,6 +11,7 @@ import {
   resetSearchEngineRuntimeForTests,
   resetSearchProviderHealthForTests,
   searchWithProviders,
+  providersForStrategy,
   SEARCH_PROVIDER_REDIRECT_POLICY,
   type ApiSearchProvider,
 } from "./search-providers";
@@ -408,5 +409,33 @@ describe("parseSearxngResults", () => {
       },
     ]);
     expect(parseSearxngResults({ results: "nope" })).toEqual([]);
+  });
+});
+
+describe("providersForStrategy", () => {
+  const configured: ApiSearchProvider[] = [
+    { name: "tavily", kind: "general", search: async () => [] },
+  ];
+  const verticals: ApiSearchProvider[] = [
+    { name: "news-rss", kind: "vertical", search: async () => [] },
+    { name: "wikipedia", kind: "vertical", search: async () => [] },
+    { name: "arxiv", kind: "vertical", search: async () => [] },
+    { name: "github", kind: "vertical", search: async () => [] },
+  ];
+
+  it("keeps only the news vertical for news-first", () => {
+    expect(
+      providersForStrategy("news-first", configured, verticals).map(
+        (p) => p.name,
+      ),
+    ).toEqual(["news-rss"]);
+  });
+
+  it("excludes encyclopedia and code verticals for general-news", () => {
+    expect(
+      providersForStrategy("general-news", configured, verticals).map(
+        (p) => p.name,
+      ),
+    ).toEqual(["tavily", "news-rss"]);
   });
 });
