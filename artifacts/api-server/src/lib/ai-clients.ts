@@ -86,15 +86,20 @@ const XIAOMI_BASE_URL = "https://api.xiaomi.com/v1";
 
 let xiaomiClient: OpenAI | null = null;
 
-if (process.env.XIAOMI_API_KEY) {
+const xiaomiApiKey =
+  process.env.Xiaomi_Mimo_KEY || process.env.XIAOMI_API_KEY;
+
+if (xiaomiApiKey) {
   xiaomiClient = new OpenAI({
-    apiKey: process.env.XIAOMI_API_KEY,
+    apiKey: xiaomiApiKey,
     baseURL: process.env.XIAOMI_BASE_URL || XIAOMI_BASE_URL,
     fetch: llmFetch,
   });
   logger.info("Xiaomi MiMo client initialized");
 } else {
-  logger.warn("XIAOMI_API_KEY not set — Xiaomi MiMo models unavailable");
+  logger.warn(
+    "Xiaomi_Mimo_KEY / XIAOMI_API_KEY not set — Xiaomi MiMo models unavailable",
+  );
 }
 
 export { xiaomiClient };
