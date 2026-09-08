@@ -361,6 +361,9 @@ export async function runResearchLoop(args: {
     args.messages.push({
       role: "assistant",
       content: null,
+      ...(args.provider === "xiaomi"
+        ? { reasoning_content: toolResults[0]?.call.reasoningContent ?? "" }
+        : {}),
       tool_calls: toolResults.map(({ call }) => ({
         id: call.id,
         type: "function" as const,

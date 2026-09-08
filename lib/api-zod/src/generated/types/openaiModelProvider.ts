@@ -12,4 +12,6 @@ export type OpenaiModelProvider = typeof OpenaiModelProvider[keyof typeof Openai
 export const OpenaiModelProvider = {
   openai: 'openai',
   dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
 } as const;

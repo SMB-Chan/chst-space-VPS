@@ -357,7 +357,7 @@ function requestModels(): Promise<void> {
     .then((data) => {
       if (!Array.isArray(data)) return;
       const parsed = data.filter(isModelInfo);
-      if (parsed.length > 0) {
+      if (parsed.length === data.length) {
         cachedModels = parsed;
         notifyModelStore();
       }
@@ -371,6 +371,17 @@ function requestModels(): Promise<void> {
 function subscribeModelStore(listener: () => void): () => void {
   modelStoreListeners.add(listener);
   return () => modelStoreListeners.delete(listener);
+}
+
+/** Resolve saved selections only against the authoritative server catalog. */
+export function resolveAvailableModelId(
+  selected: string,
+  models: Pick<ModelInfo, "id">[],
+  source: "api" | "catalog",
+): string {
+  if (source !== "api" || models.some((model) => model.id === selected))
+    return selected;
+  return models[0]?.id ?? "";
 }
 
 export function useAvailableModels(): ModelInfo[] {
@@ -405,9 +416,8 @@ export function ModelSelector({
   disabled,
 }: ModelSelectorProps) {
   const models = useAvailableModels();
-  const current =
-    models.find((m) => m.id === selectedModel) ?? models[0] ?? MODELS[0];
-  const quota = useTokenPlanQuotaHint(current.provider === "dashscope");
+  const current = models.find((m) => m.id === selectedModel) ?? models[0];
+  const quota = useTokenPlanQuotaHint(current?.provider === "dashscope");
   const [query, setQuery] = useState("");
 
   const q = query.trim().toLowerCase();
@@ -574,9 +584,7 @@ export function ModelSelector({
               <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                 {PROVIDER_LABELS["xiaomi"]}
               </DropdownMenuLabel>
-              {xiaomiModels.map((model) =>
-                renderModelOption(model, "desktop"),
-              )}
+              {xiaomiModels.map((model) => renderModelOption(model, "desktop"))}
             </>
           )}
           {qwenModels.length > 0 && (
@@ -603,14 +611,14 @@ export function ModelSelector({
           className={cn(
             "h-8 gap-1.5 rounded-[var(--m3-shape-full)] px-3 text-xs font-medium transition-all duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
             "border border-border/60 bg-card/50 text-muted-foreground hover:bg-card/80 hover:text-foreground",
-            current.provider === "dashscope" &&
+            current?.provider === "dashscope" &&
               "[color:var(--app-status-accent)] [border-color:var(--app-status-accent)] [background:var(--app-status-accent-container)] hover:[color:var(--app-status-accent)] hover:[border-color:var(--app-status-accent)] hover:[background:var(--app-status-accent-container)]",
             disabled && "cursor-not-allowed opacity-50",
           )}
         >
           <Cpu className="h-3 w-3" />
-          <span>{current.label}</span>
-          {current.provider === "dashscope" && triggerQuota !== undefined ? (
+          <span>{current?.label ?? "利用可能なモデルなし"}</span>
+          {current?.provider === "dashscope" && triggerQuota !== undefined ? (
             <span
               title={quota ? quotaTitle(quota) : undefined}
               className={cn(

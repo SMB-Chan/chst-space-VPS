@@ -22,6 +22,8 @@ timeoutMs = 180000
 [userenv]
 
 [userenv.shared]
+DISABLE_OPENAI_MODELS = "true"
+DISABLE_DASHSCOPE_MODELS = "true"
 DASHSCOPE_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 ADMIN_CLERK_USER_IDS = "user_3I4PXO7vXEuNKPuJkdddXZ75MCB"
 SEARCH_INITIAL_FANOUT = "2"

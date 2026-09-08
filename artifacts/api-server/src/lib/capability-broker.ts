@@ -348,7 +348,7 @@ async function runRouterCall(args: {
     args.provider,
     "off",
   );
-  if (args.provider === "openai") {
+  if (args.provider === "openai" || args.provider === "xiaomi") {
     (options as unknown as Record<string, unknown>).max_completion_tokens = 800;
   } else {
     (options as unknown as Record<string, unknown>).max_tokens = 800;
@@ -371,7 +371,7 @@ async function runRouterCall(args: {
       options as unknown as Record<string, unknown>,
       args.provider,
     );
-    if (args.provider === "openai") {
+    if (args.provider === "openai" || args.provider === "xiaomi") {
       (options as unknown as Record<string, unknown>).max_completion_tokens =
         800;
     } else {

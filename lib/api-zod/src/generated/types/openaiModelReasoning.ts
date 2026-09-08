@@ -13,4 +13,6 @@ export const OpenaiModelReasoning = {
   none: 'none',
   openai: 'openai',
   dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
 } as const;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isProviderFrozen } from "./provider-policy";
 import type OpenAI from "openai";
 import {
   AVAILABLE_MODELS,
@@ -192,12 +193,14 @@ async function readModelIds(
 }
 
 async function readDashScopeModelIds(): Promise<Set<string> | null> {
+  if (isProviderFrozen("dashscope")) return null;
   return readModelIds(dashscopeClient, dashScopeModelCache, (next) => {
     dashScopeModelCache = next;
   });
 }
 
 async function readOpenAiModelIds(): Promise<Set<string> | null> {
+  if (isProviderFrozen("openai")) return null;
   return readModelIds(openaiClient, openAiModelCache, (next) => {
     openAiModelCache = next;
   });
@@ -227,7 +230,12 @@ function chatModelCapabilities(model: ChatModel): CapabilityId[] {
 
 function regularDashScopeTranscriptionConfigured(): boolean {
   const key = process.env.DASHSCOPE_API_KEY?.trim();
-  return Boolean(dashscopeClient && key && !isAlibabaTokenPlanKey(key));
+  return Boolean(
+    !isProviderFrozen("dashscope") &&
+    dashscopeClient &&
+    key &&
+    !isAlibabaTokenPlanKey(key),
+  );
 }
 
 function specialistModelConfigured(model: CapabilityModel): boolean {
@@ -262,13 +270,25 @@ function capabilityStatus(
   id: CapabilityId,
   models: CapabilityModel[],
 ): "available" | "catalog-only" {
-  if (id === "chat" || id === "reasoning" || id === "vision")
-    return "available";
   return models.some(
     (model) => model.configured && model.capabilities.includes(id),
   )
     ? "available"
     : "catalog-only";
+}
+
+function providerConfigured(provider: ModelProvider): boolean {
+  if (isProviderFrozen(provider)) return false;
+  switch (provider) {
+    case "openai":
+      return Boolean(openaiClient);
+    case "dashscope":
+      return Boolean(dashscopeClient);
+    case "openrouter":
+      return openRouterConfigured();
+    case "xiaomi":
+      return Boolean(xiaomiClient);
+  }
 }
 
 export function getCapabilityModels(): CapabilityModel[] {
@@ -277,10 +297,7 @@ export function getCapabilityModels(): CapabilityModel[] {
     label: model.label,
     provider: model.provider,
     capabilities: chatModelCapabilities(model),
-    configured:
-      model.provider === "openai" ||
-      (model.provider === "openrouter" && openRouterConfigured()) ||
-      Boolean(dashscopeClient),
+    configured: providerConfigured(model.provider),
   }));
   const specialistModels = SPECIALIST_MODEL_BASE.map((model) => ({
     ...model,
@@ -339,6 +356,7 @@ export function mergeAvailableChatModels(
   const resultIds = new Set<string>();
 
   for (const model of AVAILABLE_MODELS) {
+    if (!idsByProvider.has(model.provider)) continue;
     const providerIds = idsByProvider.get(model.provider);
     if (!providerIds || providerIds.has(model.id)) {
       result.push(model);
@@ -384,57 +402,33 @@ export async function getAvailableChatModels(): Promise<ChatModel[]> {
       isOpenRouterOverBudget(),
     ]);
 
-  const disableOpenAi =
-    process.env.DISABLE_OPENAI_MODELS?.toLowerCase() === "true";
-  const disableDashScope =
-    process.env.DISABLE_DASHSCOPE_MODELS?.toLowerCase() === "true";
-
   const models = mergeAvailableChatModels([
-    ...(disableDashScope
-      ? []
-      : [{ provider: "dashscope" as const, ids: dashScopeIds }]),
-    ...(disableOpenAi
-      ? []
-      : [{ provider: "openai" as const, ids: openAiIds }]),
+    { provider: "dashscope", ids: dashScopeIds },
+    { provider: "openai", ids: openAiIds },
     { provider: "xiaomi", ids: xiaomiIds },
-    // OpenRouter discovery is deliberately disabled: the aggregator lists
-    // hundreds of third-party ids whose vision/reasoning capabilities we
-    // cannot describe, which would flood the picker with unlabelled entries.
-    // The curated catalog is the source of truth for OpenRouter.
+    // OpenRouter uses only the curated catalog, not aggregator discovery.
     { provider: "openrouter", ids: null },
   ]);
-  // Hide the OpenRouter catalog once the key budget is nearly spent.
-  return openRouterOverBudget
-    ? models.filter((model) => model.provider !== "openrouter")
-    : models;
+  return models.filter(
+    (model) =>
+      providerConfigured(model.provider) &&
+      !(model.provider === "openrouter" && openRouterOverBudget),
+  );
 }
 
 export async function getCapabilityRegistryWithAvailability(): Promise<{
   capabilities: CapabilityDescriptor[];
   models: CapabilityModel[];
 }> {
-  const [ids, openRouterOverBudget] = await Promise.all([
-    readDashScopeModelIds(),
-    isOpenRouterOverBudget(),
-  ]);
+  const available = await getAvailableChatModels();
   const models = getCapabilityModels().map((model) => {
-    if (model.provider === "openai") return { ...model, configured: true };
-    if (
-      model.provider === "openrouter" &&
-      model.capabilities.includes("chat")
-    ) {
-      return {
-        ...model,
-        configured: openRouterConfigured() && !openRouterOverBudget,
-      };
-    }
-    if (model.capabilities.includes("chat")) {
-      return {
-        ...model,
-        configured: Boolean(dashscopeClient) && (!ids || ids.has(model.id)),
-      };
-    }
-    return model;
+    if (!model.capabilities.includes("chat")) return model;
+    return {
+      ...model,
+      configured: available.some(
+        (item) => item.id === model.id && item.provider === model.provider,
+      ),
+    };
   });
   const capabilities = CAPABILITY_IDS.map((id) => ({
     id,
@@ -467,6 +461,8 @@ export interface SpecialistToolResult {
 }
 
 export interface SpecialistToolCall {
+  /** Provider reasoning retained only for tool continuation, never user output. */
+  reasoningContent?: string;
   id: string;
   name: string;
   arguments: string;

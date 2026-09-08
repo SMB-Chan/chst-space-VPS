@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MODELS,
+  resolveAvailableModelId,
   readTokenPlanQuotaHint,
   readTokenPlanQuotaResponse,
 } from "./model-selector";
@@ -133,5 +134,28 @@ describe("model fallback catalog", () => {
       supportsReasoning: true,
       reasoning: "openrouter",
     });
+  });
+});
+
+describe("model selection after a provider freeze", () => {
+  const models = [{ id: "mimo-v2.5" }, { id: "mimo-v2.5-pro" }];
+  it("switches a retired saved model to the first available model", () => {
+    expect(resolveAvailableModelId("gpt-5.6-terra", models, "api")).toBe(
+      "mimo-v2.5",
+    );
+    expect(resolveAvailableModelId("qwen3.8-max", models, "api")).toBe(
+      "mimo-v2.5",
+    );
+  });
+  it("preserves a valid choice and waits for the API before applying a fallback", () => {
+    expect(resolveAvailableModelId("mimo-v2.5-pro", models, "api")).toBe(
+      "mimo-v2.5-pro",
+    );
+    expect(resolveAvailableModelId("saved-model", models, "catalog")).toBe(
+      "saved-model",
+    );
+  });
+  it("never resurrects a bundled model when the server returns an empty catalog", () => {
+    expect(resolveAvailableModelId("gpt-5.6-terra", [], "api")).toBe("");
   });
 });

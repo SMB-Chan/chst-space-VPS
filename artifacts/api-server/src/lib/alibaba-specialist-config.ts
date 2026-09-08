@@ -1,3 +1,5 @@
+import { isProviderFrozen } from "./provider-policy";
+
 const TOKEN_PLAN_KEY_PREFIX = /^sk-sp-/i;
 const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9-]{3,128}$/;
 
@@ -22,6 +24,7 @@ export function isAlibabaTokenPlanKey(value: string | undefined): boolean {
 export function getAlibabaSpecialistConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): AlibabaSpecialistConfig | null {
+  if (isProviderFrozen("dashscope", env)) return null;
   const explicit = env.ALIBABA_SPECIALIST_API_KEY?.trim();
   const fallback = env.DASHSCOPE_API_KEY?.trim();
   const apiKey = explicit || fallback;

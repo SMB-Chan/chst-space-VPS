@@ -228,8 +228,21 @@ async function resolveSharedChatParams(
   }
 
   const modelQuery = typeof req.query.model === "string" ? req.query.model : "";
-  const requestedModelId = parsedData.modelId || modelQuery || DEFAULT_MODEL;
   const availableModels = await getAvailableChatModels();
+  const defaultModel =
+    availableModels.find(
+      (model) =>
+        (req.userRole === "admin" || model.provider === "openrouter") &&
+        model.id === DEFAULT_MODEL,
+    ) ??
+    availableModels.find(
+      (model) => req.userRole === "admin" || model.provider === "openrouter",
+    );
+  const requestedModelId = parsedData.modelId || modelQuery || defaultModel?.id;
+  if (!requestedModelId) {
+    res.status(503).json({ error: "利用可能なモデルがありません。" });
+    return null;
+  }
   const modelDef = availableModels.find(
     (model) => model.id === requestedModelId,
   );

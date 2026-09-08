@@ -1,5 +1,9 @@
 import type OpenAI from "openai";
-import { getClientForModel, modelSupportsVision } from "./ai-clients";
+import {
+  getClientForModel,
+  resolveConfiguredVisionModel,
+  applyGenerationParams,
+} from "./ai-clients";
 import { logger } from "./logger";
 import type { FileFormat } from "./file-generation";
 
@@ -15,8 +19,12 @@ export function getVisionClient(modelId?: string): {
   client: OpenAI;
   modelId: string;
 } {
-  const resolvedModelId =
-    modelId && modelSupportsVision(modelId) ? modelId : DEFAULT_VISION_MODEL;
+  const resolvedModelId = resolveConfiguredVisionModel([
+    modelId ?? "",
+    DEFAULT_VISION_MODEL,
+  ]);
+  if (!resolvedModelId)
+    throw new Error("利用可能な画像理解モデルがありません。");
   const { client } = getClientForModel(resolvedModelId);
   return { client, modelId: resolvedModelId };
 }
@@ -87,12 +95,19 @@ export async function reviewLayout(args: {
     });
   }
 
+  const { provider } = getClientForModel(modelId);
+  const options: Record<string, unknown> = {
+    model: modelId,
+    messages: [{ role: "user", content }],
+  };
+  applyGenerationParams(options, modelId, provider, "off");
+  options[
+    provider === "openai" || provider === "xiaomi"
+      ? "max_completion_tokens"
+      : "max_tokens"
+  ] = 2048;
   const response = await client.chat.completions.create(
-    {
-      model: modelId,
-      messages: [{ role: "user", content }],
-      max_tokens: 2048,
-    },
+    options as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
     { signal },
   );
 

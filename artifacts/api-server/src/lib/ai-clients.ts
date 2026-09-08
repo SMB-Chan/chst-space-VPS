@@ -11,12 +11,19 @@ import {
   getOrCreateCircuitBreaker,
 } from "./circuit-breaker";
 import { resolveOpenRouterApiKey } from "./openrouter-config";
+import { isProviderFrozen } from "./provider-policy";
 
 // Replit-managed OpenAI proxy
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+if (
+  !isProviderFrozen("openai") &&
+  !process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+) {
   throw new Error("AI_INTEGRATIONS_OPENAI_BASE_URL must be set.");
 }
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+if (
+  !isProviderFrozen("openai") &&
+  !process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+) {
   throw new Error("AI_INTEGRATIONS_OPENAI_API_KEY must be set.");
 }
 
@@ -25,11 +32,15 @@ if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
 // through unchanged.
 const llmFetch = createLlmTimeContextFetch();
 
-export const openaiClient = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  fetch: llmFetch,
-});
+export const openaiClient =
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY &&
+  process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+    ? new OpenAI({
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        fetch: llmFetch,
+      })
+    : null;
 
 // DashScope (Alibaba Cloud) — OpenAI-compatible endpoint
 let dashscopeClient: OpenAI | null = null;
@@ -87,12 +98,12 @@ const XIAOMI_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1";
 let xiaomiClient: OpenAI | null = null;
 
 const xiaomiApiKey =
-  process.env.Xiaomi_Mimo_KEY || process.env.XIAOMI_API_KEY;
+  process.env.Xiaomi_Mimo_KEY?.trim() || process.env.XIAOMI_API_KEY?.trim();
 
 if (xiaomiApiKey) {
   xiaomiClient = new OpenAI({
     apiKey: xiaomiApiKey,
-    baseURL: process.env.XIAOMI_BASE_URL || XIAOMI_BASE_URL,
+    baseURL: process.env.XIAOMI_BASE_URL?.trim() || XIAOMI_BASE_URL,
     fetch: llmFetch,
   });
   logger.info("Xiaomi MiMo client initialized");
@@ -105,7 +116,8 @@ if (xiaomiApiKey) {
 export { xiaomiClient };
 
 export type ModelProvider = "openai" | "dashscope" | "openrouter" | "xiaomi";
-export type ReasoningKind = "none" | "openai" | "dashscope" | "openrouter" | "xiaomi";
+export type ReasoningKind =
+  "none" | "openai" | "dashscope" | "openrouter" | "xiaomi";
 export type ReasoningLevel = "off" | "low" | "medium" | "high";
 
 export interface ChatModel {
@@ -343,6 +355,25 @@ export function modelSupportsVision(modelId: string): boolean {
   return model ? model.supportsVision : false;
 }
 
+/** Select a configured, unfrozen vision model for auxiliary image work. */
+export function resolveConfiguredVisionModel(
+  preferred: string[] = [],
+): string | null {
+  for (const id of [
+    ...preferred,
+    ...AVAILABLE_MODELS.map((model) => model.id),
+  ]) {
+    if (!modelSupportsVision(id)) continue;
+    try {
+      getClientForModel(id);
+      return id;
+    } catch {
+      // Frozen or unconfigured providers cannot serve background requests.
+    }
+  }
+  return null;
+}
+
 export function getModelLabel(modelId: string): string {
   return AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
 }
@@ -396,6 +427,12 @@ export function applyGenerationParams(
     return;
   }
 
+  if (provider === "xiaomi") {
+    opts.max_completion_tokens = 8192;
+    opts.thinking = { type: level === "off" ? "disabled" : "enabled" };
+    return;
+  }
+
   opts.max_tokens = 8192;
   // Alibaba's OpenAI-compatible API accepts these vendor parameters at the
   // request-body top level when used through the OpenAI Node.js SDK. The
@@ -425,6 +462,7 @@ export function applySafeGenerationParams(
   provider: ModelProvider,
 ): void {
   delete opts.reasoning;
+  delete opts.thinking;
   delete opts.reasoning_effort;
   delete opts.enable_thinking;
   delete opts.thinking_budget;
@@ -432,7 +470,7 @@ export function applySafeGenerationParams(
   delete opts.tool_stream;
   delete opts.stream_options;
   delete opts.extra_body;
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "xiaomi") {
     opts.max_completion_tokens = 8192;
     delete opts.max_tokens;
   } else {
@@ -455,6 +493,8 @@ export function applyNonReasoningGenerationParams(
   applySafeGenerationParams(opts, provider);
   if (provider === "dashscope") {
     opts.enable_thinking = false;
+  } else if (provider === "xiaomi") {
+    opts.thinking = { type: "disabled" };
   }
 }
 
@@ -476,7 +516,7 @@ export function isUnsupportedGenerationParam(err: unknown): boolean {
   const status = (err as { status?: number }).status;
   const msg = err instanceof Error ? err.message : String(err);
   if (status != null && status !== 400) return false;
-  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning|enable_thinking|thinking_budget|incremental_output|tool_stream/i.test(
+  return /unsupported parameter|unknown parameter|unrecognized|invalid.?request|extra_body|reasoning|thinking|incremental_output|tool_stream/i.test(
     msg,
   );
 }
@@ -489,6 +529,11 @@ export function getClientForModel(
   const provider = explicitProvider ?? model?.provider;
   if (!provider) {
     throw new Error(`未対応のモデルです: ${modelId}`);
+  }
+  if (isProviderFrozen(provider)) {
+    throw new Error(
+      `${provider} のモデルは一時凍結中です。別のモデルを選択してください。`,
+    );
   }
   if (provider === "dashscope") {
     if (!dashscopeClient) {
@@ -509,11 +554,12 @@ export function getClientForModel(
   if (provider === "xiaomi") {
     if (!xiaomiClient) {
       throw new Error(
-        "Xiaomi APIキーが設定されていません。XIAOMI_API_KEY を確認してください。",
+        "Xiaomi APIキーが設定されていません。Xiaomi_Mimo_KEY または XIAOMI_API_KEY を確認してください。",
       );
     }
     return { client: xiaomiClient, provider: "xiaomi" };
   }
+  if (!openaiClient) throw new Error("OpenAI APIが設定されていません。");
   return { client: openaiClient, provider: "openai" };
 }
 
@@ -553,7 +599,7 @@ export async function withCircuitBreaker<T>(
   } catch (err) {
     if (err instanceof CircuitBreakerOpenError) {
       throw new Error(
-        `${provider === "dashscope" ? "DashScope" : "OpenAI"} APIが一時的に利用できません。しばらく待ってから再試行してください。`,
+        `${{ dashscope: "DashScope", openai: "OpenAI", openrouter: "OpenRouter", xiaomi: "Xiaomi MiMo" }[provider]} APIが一時的に利用できません。しばらく待ってから再試行してください。`,
       );
     }
     throw err;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
 
@@ -19,6 +19,16 @@ const audioArgs = () => ({
 });
 
 describe("transcribeAudio", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("does not send audio to either frozen provider", async () => {
+    vi.stubEnv("DISABLE_OPENAI_MODELS", "true");
+    vi.stubEnv("DISABLE_DASHSCOPE_MODELS", "true");
+    await expect(transcribeAudio(audioArgs())).rejects.toThrow(
+      TranscriptionError,
+    );
+    expect(createMock).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     createMock.mockReset();
   });

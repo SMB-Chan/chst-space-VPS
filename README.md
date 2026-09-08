@@ -92,8 +92,10 @@ pnpm run check:api-routes              # OpenAPI と Express の経路契約を�
 - `DATABASE_URL` — Postgres
 - `CLERK_PUBLISHABLE_KEY` / `VITE_CLERK_PUBLISHABLE_KEY` — 認証
 - `FRONTEND_URL` — APIへアクセスできるブラウザOrigin。カンマ区切り可。本番のクロスOrigin構成では必須
-- `AI_INTEGRATIONS_OPENAI_BASE_URL` / `AI_INTEGRATIONS_OPENAI_API_KEY` — OpenAI 互換エンドポイント
+- `AI_INTEGRATIONS_OPENAI_BASE_URL` / `AI_INTEGRATIONS_OPENAI_API_KEY` — OpenAI 互換エンドポイント（OpenAI凍結中は省略可）
 - `AI_STREAM_MAX_ATTEMPTS` / `AI_STREAM_RETRY_BASE_MS` / `AI_STREAM_RETRY_MAX_MS` — ストリーム開始時の一時的な接続障害に対する最大試行回数とバックオフ（既定5回・750ms・6000ms。DashScopeの後半試行は思考と出力上限を軽量化。応答本文の送信後は二重表示防止のため再試行しない）
+- `Xiaomi_Mimo_KEY` / `XIAOMI_API_KEY` — Xiaomi MiMo（前者を優先）。`XIAOMI_BASE_URL` の既定は `https://token-plan-sgp.xiaomimimo.com/v1`
+- `DISABLE_OPENAI_MODELS` / `DISABLE_DASHSCOPE_MODELS` — `true` でモデル一覧・チャット・補助画像処理・音声認識・Alibaba専門能力を凍結。現在の共有起動設定では両方 `true`。解除は `false` に変更してサーバーを再起動
 - `DASHSCOPE_API_KEY` — Qwen 等を使う場合（任意）
 - `ALIBABA_SPECIALIST_API_KEY` / `ALIBABA_SPECIALIST_WORKSPACE_ID` — 通常のAlibaba Model Studioワークスペース資格情報（任意。画像生成・画像編集・Qwen Audio TTS／Realtimeのカスタムバックエンド専門能力用。Token Plan Personal/Teamキーは使用せず、未設定時はcatalog-only）
 - `ALIBABA_SPECIALIST_HTTP_BASE_URL` / `ALIBABA_SPECIALIST_TTS_WS_URL` / `ALIBABA_SPECIALIST_REALTIME_WS_URL` — 専門能力用の許可済みHTTPS/WSSエンドポイント（任意。詳細は[`.env.example`](./.env.example)）

@@ -1,3 +1,4 @@
+import { isProviderFrozen } from "./provider-policy";
 import type OpenAI from "openai";
 import { dashscopeClient, openaiClient } from "./ai-clients";
 import { AlibabaAsrError, transcribeQwenAudio } from "./alibaba-asr";
@@ -95,6 +96,9 @@ export async function transcribeDashScopeAudio(
   },
   model = QWEN_TRANSCRIBE_MODEL,
 ): Promise<string> {
+  if (isProviderFrozen("dashscope")) {
+    throw new TranscriptionError("Alibaba Cloudのモデルは一時凍結中です。");
+  }
   if (model === QWEN_TRANSCRIBE_MODEL) {
     try {
       const text = await transcribeQwenAudio(args);
@@ -149,9 +153,11 @@ export async function transcribeAudio(args: {
 }): Promise<string> {
   const failures: string[] = [];
 
-  for (const model of openAiCandidateModels()) {
+  for (const model of openaiClient && !isProviderFrozen("openai")
+    ? openAiCandidateModels()
+    : []) {
     try {
-      const text = await callTranscription(openaiClient, model, args);
+      const text = await callTranscription(openaiClient!, model, args);
       cachedOpenAiModel = model;
       logger.info(
         {
@@ -172,7 +178,10 @@ export async function transcribeAudio(args: {
     }
   }
 
-  if (dashscopeClient || isAlibabaSpecialistConfigured()) {
+  if (
+    !isProviderFrozen("dashscope") &&
+    (dashscopeClient || isAlibabaSpecialistConfigured())
+  ) {
     try {
       const text = await transcribeDashScopeAudio(args);
       return text;

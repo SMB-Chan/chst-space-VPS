@@ -872,6 +872,9 @@ export async function streamChatReply(args: {
         workingMessages.push({
           role: "assistant",
           content: null,
+          ...(provider === "xiaomi"
+            ? { reasoning_content: toolCall.reasoningContent ?? "" }
+            : {}),
           tool_calls: [
             {
               id: toolCall.id,
@@ -991,6 +994,9 @@ export async function streamChatReply(args: {
         workingMessages.push({
           role: "assistant",
           content: null,
+          ...(provider === "xiaomi"
+            ? { reasoning_content: toolCall.reasoningContent ?? "" }
+            : {}),
           tool_calls: [
             {
               id: toolCall.id,
@@ -1658,7 +1664,7 @@ function applyOutputTokenLimit(
   ) {
     return;
   }
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "xiaomi") {
     options.max_completion_tokens = maxOutputTokens;
   } else {
     options.max_tokens = maxOutputTokens;
@@ -2039,6 +2045,9 @@ export async function streamModelText(
   }
   const completedToolCalls = validToolCalls();
   if (completedToolCalls.length > 0) {
+    if (args.provider === "xiaomi") {
+      for (const call of completedToolCalls) call.reasoningContent = reasoning;
+    }
     args.onToolCalls?.(completedToolCalls);
   }
   return splitThinkTags(full).content;

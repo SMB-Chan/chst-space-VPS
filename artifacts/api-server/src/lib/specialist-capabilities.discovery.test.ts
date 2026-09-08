@@ -10,10 +10,12 @@ const { clients, dashScopeList, openAiList, openRouterList, budgetState } =
       dashscopeClient: unknown;
       openaiClient: unknown;
       openrouterClient: unknown;
+      xiaomiClient: unknown;
     } = {
       dashscopeClient: { models: { list: dashScopeList } },
       openaiClient: { models: { list: openAiList } },
       openrouterClient: { models: { list: openRouterList } },
+      xiaomiClient: null,
     };
     return {
       clients,
@@ -34,6 +36,9 @@ vi.mock("./ai-clients", async (importOriginal) => {
     get openaiClient() {
       return clients.openaiClient;
     },
+    get xiaomiClient() {
+      return clients.xiaomiClient;
+    },
     get openrouterClient() {
       return clients.openrouterClient;
     },
@@ -45,12 +50,13 @@ vi.mock("./openrouter-budget", async (importOriginal) => {
   return {
     ...actual,
     isOpenRouterOverBudget: async () => budgetState.over,
-    openRouterConfigured: () => true,
+    openRouterConfigured: () => Boolean(clients.openrouterClient),
   };
 });
 
 import {
   getAvailableChatModels,
+  getCapabilityRegistryWithAvailability,
   mergeAvailableChatModels,
   resetModelDiscoveryCache,
 } from "./specialist-capabilities";
@@ -66,6 +72,7 @@ describe("dynamic chat model discovery", () => {
     openAiList.mockReset();
     openRouterList.mockReset();
     budgetState.over = false;
+    clients.xiaomiClient = null;
     clients.dashscopeClient = { models: { list: dashScopeList } };
     clients.openaiClient = { models: { list: openAiList } };
     clients.openrouterClient = { models: { list: openRouterList } };
@@ -73,6 +80,7 @@ describe("dynamic chat model discovery", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("keeps provider source when a model name resembles another provider", () => {
@@ -235,14 +243,14 @@ describe("dynamic chat model discovery", () => {
     );
   });
 
-  it("does not query or remove catalogs when provider clients are unavailable", async () => {
+  it("does not query or offer models when provider clients are unavailable", async () => {
     clients.dashscopeClient = null;
     clients.openaiClient = null;
     clients.openrouterClient = null;
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(20);
+    expect(models).toHaveLength(0);
     expect(dashScopeList).not.toHaveBeenCalled();
     expect(openAiList).not.toHaveBeenCalled();
     expect(openRouterList).not.toHaveBeenCalled();
@@ -277,7 +285,74 @@ describe("dynamic chat model discovery", () => {
     const models = await pending;
     await getAvailableChatModels();
 
-    expect(models).toHaveLength(20);
+    expect(models).toHaveLength(3);
     expect(openAiList).toHaveBeenCalledTimes(1);
+  });
+  it("omits absent providers but retains a configured provider after discovery failure", () => {
+    const models = mergeAvailableChatModels([
+      { provider: "xiaomi", ids: null },
+    ]);
+    expect(models.map((model) => model.id)).toEqual([
+      "mimo-v2.5",
+      "mimo-v2.5-pro",
+    ]);
+  });
+
+  it("freezes both providers without discovery traffic and reports MiMo independently", async () => {
+    vi.stubEnv("DISABLE_OPENAI_MODELS", " TRUE ");
+    vi.stubEnv("DISABLE_DASHSCOPE_MODELS", "true");
+    vi.stubEnv("ALIBABA_SPECIALIST_API_KEY", "regular-test-key");
+    const mimoList = vi.fn().mockResolvedValue(modelList("mimo-v2.5"));
+    clients.xiaomiClient = { models: { list: mimoList } };
+    const models = await getAvailableChatModels();
+    expect(
+      models.some((model) => ["openai", "dashscope"].includes(model.provider)),
+    ).toBe(false);
+    expect(
+      models
+        .filter((model) => model.provider === "xiaomi")
+        .map((model) => model.id),
+    ).toEqual(["mimo-v2.5"]);
+    expect(dashScopeList).not.toHaveBeenCalled();
+    expect(openAiList).not.toHaveBeenCalled();
+    const registry = await getCapabilityRegistryWithAvailability();
+    expect(
+      registry.models
+        .filter((model) => ["openai", "dashscope"].includes(model.provider))
+        .every((model) => !model.configured),
+    ).toBe(true);
+    expect(
+      registry.models.find((model) => model.id === "mimo-v2.5")?.configured,
+    ).toBe(true);
+    expect(
+      registry.models.find((model) => model.id === "mimo-v2.5-pro")?.configured,
+    ).toBe(false);
+    expect(mimoList).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps MiMo after discovery failure only while its client is configured", async () => {
+    const list = vi.fn().mockRejectedValue(new Error("discovery unavailable"));
+    clients.xiaomiClient = { models: { list } };
+    expect(
+      (await getAvailableChatModels()).filter(
+        (model) => model.provider === "xiaomi",
+      ),
+    ).toHaveLength(2);
+    clients.xiaomiClient = null;
+    expect(
+      (await getAvailableChatModels()).some(
+        (model) => model.provider === "xiaomi",
+      ),
+    ).toBe(false);
+  });
+
+  it("reports no chat capability when every provider is unavailable", async () => {
+    clients.openaiClient = null;
+    clients.dashscopeClient = null;
+    clients.openrouterClient = null;
+    const registry = await getCapabilityRegistryWithAvailability();
+    expect(
+      registry.capabilities.find((item) => item.id === "chat")?.status,
+    ).toBe("catalog-only");
   });
 });

@@ -20,7 +20,11 @@ import {
   type FileFormat,
   type VideoGenerationInput,
 } from "@/components/chat/message-input";
-import { useAvailableModels } from "@/components/chat/model-selector";
+import {
+  useAvailableModels,
+  useAvailableModelsSource,
+  resolveAvailableModelId,
+} from "@/components/chat/model-selector";
 import {
   conversationTitle,
   timeGreeting,
@@ -386,13 +390,19 @@ export function ChatPage() {
   const conversationId = Number.isFinite(parsedId) ? parsedId : null;
   const queryClient = useQueryClient();
   const models = useAvailableModels();
+  const modelsSource = useAvailableModelsSource();
   const greeting = timeGreeting();
   const abortRef = useRef<AbortController | null>(null);
   const sendingToRef = useRef<number | null>(null);
   const handleRegenerateRef = useRef<() => void>(() => {});
 
-  const [selectedModel, setSelectedModel] = useState(
+  const [savedSelectedModel, setSelectedModel] = useState(
     initialSettings.defaultModel,
+  );
+  const selectedModel = resolveAvailableModelId(
+    savedSelectedModel,
+    models,
+    modelsSource,
   );
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(
     initialSettings.defaultReasoning,
@@ -679,7 +689,12 @@ export function ChatPage() {
 
   // Restore the last used model when opening an existing conversation
   useEffect(() => {
-    if (isPrivate || !conversation || modelRestoredForConv === conversation.id)
+    if (
+      modelsSource !== "api" ||
+      isPrivate ||
+      !conversation ||
+      modelRestoredForConv === conversation.id
+    )
       return;
     const msgs = conversation.messages ?? [];
     const lastAssistant = [...msgs]
@@ -692,7 +707,7 @@ export function ChatPage() {
       setSelectedModel(lastAssistant.modelId);
     }
     setModelRestoredForConv(conversation.id);
-  }, [conversation, modelRestoredForConv, models, isPrivate]);
+  }, [conversation, modelRestoredForConv, models, modelsSource, isPrivate]);
 
   const createConversation = useCreateOpenaiConversation();
 
@@ -845,6 +860,10 @@ export function ChatPage() {
     files?: OutgoingAttachment[],
     fileFormat?: FileFormat,
   ): Promise<boolean> => {
+    if (!selectedModel) {
+      setStreamError("利用可能なモデルがありません。");
+      return false;
+    }
     let finalContent = content;
     let visionBridgeNote: string | null = null;
 
@@ -1322,7 +1341,12 @@ export function ChatPage() {
         <div className="mx-auto max-w-4xl">
           <MessageInput
             onSend={handleSend}
-            disabled={isStreaming || videoBusy || createConversation.isPending}
+            disabled={
+              !selectedModel ||
+              isStreaming ||
+              videoBusy ||
+              createConversation.isPending
+            }
             conversationId={conversationId}
             selectedModel={selectedModel}
             onSelectModel={setSelectedModel}

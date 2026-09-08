@@ -1,8 +1,8 @@
 import type OpenAI from "openai";
 import {
   applyGenerationParams,
-  dashscopeClient,
   getClientForModel,
+  resolveConfiguredVisionModel,
   modelSupportsVision,
 } from "./ai-clients";
 import { logger } from "./logger";
@@ -17,14 +17,13 @@ const DEFAULT_BRIDGE_MODEL_DASHSCOPE = "qwen3.6-flash";
 const DEFAULT_BRIDGE_MODEL_OPENAI = "gpt-5.6-luna";
 
 function resolveBridgeModelId(): string | null {
-  const override = process.env.VISION_BRIDGE_MODEL;
-  if (override) {
-    return modelSupportsVision(override) ? override : null;
-  }
-  // Prefer a fast, cheap vision model on whichever provider is configured.
-  return dashscopeClient
-    ? DEFAULT_BRIDGE_MODEL_DASHSCOPE
-    : DEFAULT_BRIDGE_MODEL_OPENAI;
+  const override = process.env.VISION_BRIDGE_MODEL?.trim();
+  if (override && !modelSupportsVision(override)) return null;
+  return resolveConfiguredVisionModel([
+    process.env.VISION_BRIDGE_MODEL?.trim() ?? "",
+    DEFAULT_BRIDGE_MODEL_DASHSCOPE,
+    DEFAULT_BRIDGE_MODEL_OPENAI,
+  ]);
 }
 
 export function isVisionBridgeAvailable(): boolean {
