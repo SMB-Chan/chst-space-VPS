@@ -146,6 +146,43 @@ const MODELS: ModelInfo[] = [
     supportsReasoning: true,
     reasoning: "openrouter",
   },
+  // Xiaomi MiMo models (V2.5 family)
+  {
+    id: "MiMo-V2.5-Pro",
+    label: "MiMo V2.5 Pro",
+    provider: "xiaomi",
+    description: "最高性能・推論特化",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
+  {
+    id: "MiMo-Auto",
+    label: "MiMo Auto",
+    provider: "xiaomi",
+    description: "自動ルーティング・最適選択",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
+  {
+    id: "MiMo-V2.5-Pro-UltraSpeed",
+    label: "MiMo V2.5 Pro UltraSpeed",
+    provider: "xiaomi",
+    description: "高速推論・低レイテンシ",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
+  {
+    id: "MiMo-V2.5",
+    label: "MiMo V2.5",
+    provider: "xiaomi",
+    description: "標準モデル・バランス",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {
