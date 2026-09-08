@@ -20,12 +20,24 @@ export interface FactualityClaim {
   reason: string;
 }
 
+export interface NewsQualityReport {
+  kind: "news";
+  quality: "good" | "partial" | "poor";
+  taskSuccess: "succeeded" | "failed" | "unknown";
+  acceptedSourceCount: number;
+  freshSourceCount: number;
+  independentDomainCount: number;
+  officialOrMajorSourceCount: number;
+  queries: string[];
+}
+
 export interface FactualityReport {
   status: FactualityStatus;
   summary: string;
   claims: FactualityClaim[];
   modelId: string;
   corrected: boolean;
+  researchQuality?: NewsQualityReport;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,6 +97,45 @@ export function normalizeFactualityReport(
     claims,
     modelId: value.modelId.slice(0, 200),
     corrected: value.corrected === true,
+    researchQuality: normalizeNewsQuality(value.researchQuality),
+  };
+}
+
+function normalizeNewsQuality(value: unknown): NewsQualityReport | undefined {
+  if (!isRecord(value) || value.kind !== "news") return undefined;
+  if (
+    value.quality !== "good" &&
+    value.quality !== "partial" &&
+    value.quality !== "poor"
+  ) {
+    return undefined;
+  }
+  if (
+    value.taskSuccess !== "succeeded" &&
+    value.taskSuccess !== "failed" &&
+    value.taskSuccess !== "unknown"
+  ) {
+    return undefined;
+  }
+  const count = (input: unknown) =>
+    typeof input === "number" && Number.isSafeInteger(input)
+      ? Math.max(0, Math.min(100, input))
+      : 0;
+  const queries = Array.isArray(value.queries)
+    ? value.queries
+        .filter((query): query is string => typeof query === "string")
+        .map((query) => query.slice(0, 240))
+        .slice(0, 3)
+    : [];
+  return {
+    kind: "news",
+    quality: value.quality,
+    taskSuccess: value.taskSuccess,
+    acceptedSourceCount: count(value.acceptedSourceCount),
+    freshSourceCount: count(value.freshSourceCount),
+    independentDomainCount: count(value.independentDomainCount),
+    officialOrMajorSourceCount: count(value.officialOrMajorSourceCount),
+    queries,
   };
 }
 
@@ -142,8 +193,14 @@ const verdictUi: Record<
 };
 
 export function FactualityCard({ report }: { report: FactualityReport }) {
-  const [expanded, setExpanded] = useState(report.status !== "verified");
-  const ui = statusUi[report.status];
+  const quality = report.researchQuality;
+  const overallStatus =
+    quality &&
+    (quality.quality !== "good" || quality.taskSuccess !== "succeeded")
+      ? "mixed"
+      : report.status;
+  const [expanded, setExpanded] = useState(overallStatus !== "verified");
+  const ui = statusUi[overallStatus];
   const StatusIcon = ui.icon;
   const supportedCount = report.claims.filter(
     (claim) => claim.verdict === "supported",
@@ -157,7 +214,7 @@ export function FactualityCard({ report }: { report: FactualityReport }) {
         ui.containerClassName,
       )}
       aria-label="回答の根拠チェック"
-      data-status={report.status}
+      data-status={overallStatus}
     >
       <button
         type="button"
@@ -201,6 +258,44 @@ export function FactualityCard({ report }: { report: FactualityReport }) {
           aria-hidden="true"
         />
       </button>
+
+      {quality && (
+        <div className="grid gap-2 border-t border-[var(--m3-outline-variant)] px-3.5 py-3 sm:grid-cols-3">
+          <QualityMetric
+            label="根拠整合"
+            value={
+              report.status === "verified"
+                ? "成功"
+                : report.status === "mixed"
+                  ? "一部確認"
+                  : "不足"
+            }
+            good={report.status === "verified"}
+          />
+          <QualityMetric
+            label="質問達成"
+            value={
+              quality.taskSuccess === "succeeded"
+                ? "成功"
+                : quality.taskSuccess === "failed"
+                  ? "未達"
+                  : "不明"
+            }
+            good={quality.taskSuccess === "succeeded"}
+          />
+          <QualityMetric
+            label="検索品質"
+            value={
+              quality.quality === "good"
+                ? `${quality.freshSourceCount}件・${quality.independentDomainCount}ドメイン`
+                : quality.quality === "partial"
+                  ? "一部のみ"
+                  : "不足"
+            }
+            good={quality.quality === "good"}
+          />
+        </div>
+      )}
 
       {expanded && report.claims.length > 0 && (
         <ol className="space-y-2 border-t border-[var(--m3-outline-variant)] px-3.5 py-3">
@@ -250,5 +345,33 @@ export function FactualityCard({ report }: { report: FactualityReport }) {
         </ol>
       )}
     </section>
+  );
+}
+
+function QualityMetric({
+  label,
+  value,
+  good,
+}: {
+  label: string;
+  value: string;
+  good: boolean;
+}) {
+  return (
+    <div className="rounded-[var(--m3-shape-sm)] bg-foreground/[0.04] px-2.5 py-2">
+      <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-1 text-xs font-medium",
+          good
+            ? "[color:var(--app-status-success)]"
+            : "[color:var(--app-status-warning)]",
+        )}
+      >
+        {value}
+      </div>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  publishedAt?: string | null;
 }
 
 const TRACKING_QUERY_KEYS = new Set([

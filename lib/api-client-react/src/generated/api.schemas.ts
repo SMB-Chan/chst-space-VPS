@@ -226,12 +226,49 @@ export const OpenaiFactualityReportStatus = {
   insufficient: 'insufficient',
 } as const;
 
+export type OpenaiNewsQualityReportKind = typeof OpenaiNewsQualityReportKind[keyof typeof OpenaiNewsQualityReportKind];
+
+
+export const OpenaiNewsQualityReportKind = {
+  news: 'news',
+} as const;
+
+export type OpenaiNewsQualityReportQuality = typeof OpenaiNewsQualityReportQuality[keyof typeof OpenaiNewsQualityReportQuality];
+
+
+export const OpenaiNewsQualityReportQuality = {
+  good: 'good',
+  partial: 'partial',
+  poor: 'poor',
+} as const;
+
+export type OpenaiNewsQualityReportTaskSuccess = typeof OpenaiNewsQualityReportTaskSuccess[keyof typeof OpenaiNewsQualityReportTaskSuccess];
+
+
+export const OpenaiNewsQualityReportTaskSuccess = {
+  succeeded: 'succeeded',
+  failed: 'failed',
+  unknown: 'unknown',
+} as const;
+
+export interface OpenaiNewsQualityReport {
+  kind: OpenaiNewsQualityReportKind;
+  quality: OpenaiNewsQualityReportQuality;
+  taskSuccess: OpenaiNewsQualityReportTaskSuccess;
+  acceptedSourceCount: number;
+  freshSourceCount: number;
+  independentDomainCount: number;
+  officialOrMajorSourceCount: number;
+  queries: string[];
+}
+
 export interface OpenaiFactualityReport {
   status: OpenaiFactualityReportStatus;
   summary: string;
   claims: OpenaiFactualityClaim[];
   modelId: string;
   corrected: boolean;
+  researchQuality?: OpenaiNewsQualityReport | null;
 }
 
 export interface OpenaiMessage {

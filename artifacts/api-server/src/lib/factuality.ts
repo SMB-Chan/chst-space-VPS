@@ -1,5 +1,9 @@
 import { compactAuditSourceText } from "./audit";
 import type { AuditPatchOperation } from "./audit-patch";
+import {
+  normalizeNewsQualityReport,
+  type NewsQualityReport,
+} from "./news-quality-gate";
 
 export type FactualityVerdict = "supported" | "contradicted" | "unknown";
 export type FactualityStatus = "verified" | "mixed" | "insufficient";
@@ -17,6 +21,7 @@ export interface FactualityReport {
   claims: FactualityClaim[];
   modelId: string;
   corrected: boolean;
+  researchQuality?: NewsQualityReport;
 }
 
 export interface ParsedFactualityVerification {
@@ -262,6 +267,11 @@ export function parseStoredFactuality(
     sourceCount,
   });
   return parsed
-    ? { ...parsed.report, corrected: root.corrected === true }
+    ? {
+        ...parsed.report,
+        corrected: root.corrected === true,
+        researchQuality:
+          normalizeNewsQualityReport(root.researchQuality) ?? undefined,
+      }
     : null;
 }

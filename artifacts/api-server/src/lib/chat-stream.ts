@@ -51,7 +51,11 @@ import { describeImagesForTextModel } from "./vision-bridge";
 import type { TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
-import type { FactualityReport, FactualitySource } from "./factuality";
+import {
+  unavailableFactualityReport,
+  type FactualityReport,
+  type FactualitySource,
+} from "./factuality";
 import {
   executeSpecialistTool,
   getSpecialistTools,
@@ -487,6 +491,7 @@ export async function streamChatReply(args: {
         );
 
     failureSources = webContext.sources;
+    let activeNewsQuality = webContext.newsQuality;
 
     if (webContext.contextText) {
       const today = new Intl.DateTimeFormat("en-CA", {
@@ -1371,6 +1376,8 @@ export async function streamChatReply(args: {
 
           fullResponse = recoveredResponse;
           failureSources = recoveredWebContext.sources;
+          activeNewsQuality =
+            recoveredWebContext.newsQuality ?? activeNewsQuality;
           const recoverySourceText = recoveredWebContext.contextText;
           if (
             shouldVerifySearchBackedAnswer({
@@ -1440,6 +1447,27 @@ export async function streamChatReply(args: {
               })}\n\n`,
             );
           }
+        }
+      }
+
+      // News retrieval has three independent outcomes. Keep the evidence
+      // verifier's result separate from retrieval quality and task completion,
+      // and persist the structured report even when no source passed the gate.
+      if (activeNewsQuality && !translationMode) {
+        const taskSuccess =
+          activeNewsQuality.quality === "good" &&
+          !isResearchAnnouncementOnly(fullResponse)
+            ? "succeeded"
+            : "failed";
+        factuality = {
+          ...(factuality ?? unavailableFactualityReport(modelId)),
+          researchQuality: {
+            ...activeNewsQuality,
+            taskSuccess,
+          },
+        };
+        if (!clientGone()) {
+          res.write(`data: ${JSON.stringify({ factuality })}\n\n`);
         }
       }
 

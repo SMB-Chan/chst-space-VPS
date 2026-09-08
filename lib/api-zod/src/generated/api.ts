@@ -350,7 +350,17 @@ export const GetOpenaiConversationResponse = zod.object({
   "reason": zod.string()
 })),
   "modelId": zod.string(),
-  "corrected": zod.boolean()
+  "corrected": zod.boolean(),
+  "researchQuality": zod.object({
+  "kind": zod.enum(['news']),
+  "quality": zod.enum(['good', 'partial', 'poor']),
+  "taskSuccess": zod.enum(['succeeded', 'failed', 'unknown']),
+  "acceptedSourceCount": zod.number().int(),
+  "freshSourceCount": zod.number().int(),
+  "independentDomainCount": zod.number().int(),
+  "officialOrMajorSourceCount": zod.number().int(),
+  "queries": zod.array(zod.string())
+}).nullish()
 }).nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
   "generatedAssets": zod.array(zod.object({
@@ -444,7 +454,17 @@ export const ListOpenaiMessagesResponseItem = zod.object({
   "reason": zod.string()
 })),
   "modelId": zod.string(),
-  "corrected": zod.boolean()
+  "corrected": zod.boolean(),
+  "researchQuality": zod.object({
+  "kind": zod.enum(['news']),
+  "quality": zod.enum(['good', 'partial', 'poor']),
+  "taskSuccess": zod.enum(['succeeded', 'failed', 'unknown']),
+  "acceptedSourceCount": zod.number().int(),
+  "freshSourceCount": zod.number().int(),
+  "independentDomainCount": zod.number().int(),
+  "officialOrMajorSourceCount": zod.number().int(),
+  "queries": zod.array(zod.string())
+}).nullish()
 }).nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
   "generatedAssets": zod.array(zod.object({

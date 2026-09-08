@@ -44,6 +44,13 @@ import {
   type SearchSubqueryRole,
 } from "./search-query-planner";
 import type { ModelProvider } from "./ai-clients";
+import {
+  assessNewsRetrieval,
+  buildNewsFastPathQueries,
+  isNewsFastPathQuestion,
+  filterNewsResults,
+  type NewsQualityReport,
+} from "./news-quality-gate";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
@@ -79,6 +86,7 @@ export interface WebContext {
   }[];
   contextText: string;
   searchWarning?: string;
+  newsQuality?: NewsQualityReport;
 }
 
 /** Timeout covering ALL phases (DNS + connect + headers + body) for DDG search. */
@@ -1014,6 +1022,11 @@ export async function buildWebContext(
   let searched = false;
   let query: string | undefined;
   let searchWarning: string | undefined;
+  let newsQuality: NewsQualityReport | undefined;
+  const newsResults: SearchResult[] = [];
+  const newsQueries = isNewsFastPathQuestion(userMessage)
+    ? buildNewsFastPathQueries(userMessage)
+    : [];
 
   const urls = extractUrls(userMessage);
 
@@ -1086,10 +1099,21 @@ export async function buildWebContext(
   ): Promise<void> => {
     onStatus({ status: "searching", query: roundQuery });
     if (signal?.aborted) return;
-    const results = await searchWeb(roundQuery, signal, roundPlan);
+    const rawResults = await searchWeb(roundQuery, signal, roundPlan);
+    const results = isNewsFastPathQuestion(userMessage)
+      ? filterNewsResults(rawResults)
+      : rawResults;
+    if (isNewsFastPathQuestion(userMessage)) {
+      newsResults.push(...results);
+      newsQuality = assessNewsRetrieval({
+        results: newsResults,
+        queries: newsQueries,
+      });
+    }
     if (results.length === 0) {
-      const warning =
-        "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
+      const warning = isNewsFastPathQuestion(userMessage)
+        ? "ニュース検索の品質基準（記事ページ・発行日時・独立ドメイン）を満たす結果がありませんでした。"
+        : "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
       searchWarning = warning;
       onStatus({ status: "search_warning", message: warning });
       parts.push(
@@ -1116,7 +1140,7 @@ export async function buildWebContext(
       sources.push({
         title: result.title,
         url: result.url,
-        publishedAt: page?.publishedAt ?? null,
+        publishedAt: page?.publishedAt ?? result.publishedAt ?? null,
         fetchedAt,
       });
     }
@@ -1165,32 +1189,58 @@ export async function buildWebContext(
     }
   };
 
-  if (decision.search) {
+  if (decision.search || newsQueries.length > 0) {
     searched = true;
-    query = decision.query;
-    await runSearchRound(decision.query, decision.plan);
+    if (newsQueries.length > 0) {
+      query = newsQueries[0];
+      for (const fastQuery of newsQueries.slice(0, MAX_SEARCH_ROUNDS)) {
+        if (signal?.aborted) break;
+        await runSearchRound(fastQuery);
+        if (newsQuality?.quality === "good") break;
+      }
+      newsQuality = assessNewsRetrieval({
+        results: newsResults,
+        queries: newsQueries.slice(0, MAX_SEARCH_ROUNDS),
+      });
+      if (newsQuality.quality !== "good") {
+        const warning =
+          "ニュース検索の根拠が不足しています。複数の新鮮な独立報道を確認できなかったため、検索品質を成功扱いにしません。";
+        searchWarning = warning;
+        onStatus({ status: "search_warning", message: warning });
+        parts.push(
+          `【ニュース検索品質】${JSON.stringify({
+            quality: newsQuality.quality,
+            freshSourceCount: newsQuality.freshSourceCount,
+            independentDomainCount: newsQuality.independentDomainCount,
+          })}`,
+        );
+      }
+    } else {
+      query = decision.query;
+      await runSearchRound(decision.query, decision.plan);
 
-    // Multi-step research: re-search while the model judges the gathered
-    // material insufficient, up to MAX_SEARCH_ROUNDS total rounds.
-    const previousQueries = new Set([normalizeQuery(decision.query)]);
-    for (let round = 1; round < MAX_SEARCH_ROUNDS; round++) {
-      if (signal?.aborted) break;
-      const followUp = await decideFollowUpSearch(
-        client,
-        model,
-        provider,
-        userMessage,
-        decision.query,
-        parts.join("\n\n"),
-        options?.recentConversation ?? "",
-        signal,
-      );
-      if (!followUp.search || !followUp.query) break;
-      const normalized = normalizeQuery(followUp.query);
-      if (previousQueries.has(normalized)) break;
-      previousQueries.add(normalized);
-      onStatus({ status: "searching", query: followUp.query });
-      await runSearchRound(followUp.query);
+      // Multi-step research: re-search while the model judges the gathered
+      // material insufficient, up to MAX_SEARCH_ROUNDS total rounds.
+      const previousQueries = new Set([normalizeQuery(decision.query)]);
+      for (let round = 1; round < MAX_SEARCH_ROUNDS; round++) {
+        if (signal?.aborted) break;
+        const followUp = await decideFollowUpSearch(
+          client,
+          model,
+          provider,
+          userMessage,
+          decision.query,
+          parts.join("\n\n"),
+          options?.recentConversation ?? "",
+          signal,
+        );
+        if (!followUp.search || !followUp.query) break;
+        const normalized = normalizeQuery(followUp.query);
+        if (previousQueries.has(normalized)) break;
+        previousQueries.add(normalized);
+        onStatus({ status: "searching", query: followUp.query });
+        await runSearchRound(followUp.query);
+      }
     }
   }
 
@@ -1200,5 +1250,6 @@ export async function buildWebContext(
     sources,
     contextText: parts.join("\n\n"),
     searchWarning,
+    newsQuality,
   };
 }

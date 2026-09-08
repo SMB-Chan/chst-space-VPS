@@ -7,6 +7,7 @@
  */
 import type { OpenaiFactualityClaim } from './openaiFactualityClaim';
 import type { OpenaiFactualityReportStatus } from './openaiFactualityReportStatus';
+import type { OpenaiNewsQualityReport } from './openaiNewsQualityReport';
 
 export interface OpenaiFactualityReport {
   status: OpenaiFactualityReportStatus;
@@ -14,4 +15,5 @@ export interface OpenaiFactualityReport {
   claims: OpenaiFactualityClaim[];
   modelId: string;
   corrected: boolean;
+  researchQuality?: OpenaiNewsQualityReport | null;
 }

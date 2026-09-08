@@ -18,7 +18,8 @@ function decodeEntities(value: string): string {
 }
 
 function stripMarkup(value: string): string {
-  return decodeEntities(value.replace(/<[^>]+>/g, " "))
+  return decodeEntities(value)
+    .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -37,6 +38,27 @@ function safeResult(
     url,
     snippet: typeof snippet === "string" ? snippet.trim() : "",
   };
+}
+
+export function parseGoogleNewsRssResults(xml: string): SearchResult[] {
+  const entries = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? [];
+  return entries.flatMap((entry): SearchResult[] => {
+    const title = extractXmlTag(entry, "title");
+    const url = extractXmlTag(entry, "link");
+    const snippet = extractXmlTag(entry, "description");
+    const rawDate = extractXmlTag(entry, "pubDate");
+    const parsedDate = Date.parse(rawDate);
+    const result = safeResult(title, url, snippet);
+    if (!result) return [];
+    return [
+      {
+        ...result,
+        publishedAt: Number.isFinite(parsedDate)
+          ? new Date(parsedDate).toISOString()
+          : null,
+      },
+    ];
+  });
 }
 
 function hasJapanese(text: string): boolean {
@@ -92,6 +114,33 @@ function wikipediaProvider(): ApiSearchProvider {
         signal,
       );
       return parseWikipediaResults(json, language);
+    },
+  };
+}
+
+function newsProvider(): ApiSearchProvider {
+  return {
+    name: "news-rss",
+    kind: "vertical",
+    weight: 1.25,
+    queryAffinity(query) {
+      return /ニュース|速報|最新|報道|news|breaking|latest/i.test(query)
+        ? 0.98
+        : 0;
+    },
+    async search(query, signal) {
+      const url = new URL("https://news.google.com/rss/search");
+      url.searchParams.set("q", query);
+      url.searchParams.set("hl", "ja");
+      url.searchParams.set("gl", "JP");
+      url.searchParams.set("ceid", "JP:ja");
+      const xml = await fetchSearchText(
+        url.href,
+        { headers: { Accept: "application/rss+xml, application/xml;q=0.9" } },
+        signal,
+        /\b(?:application\/rss\+xml|application\/xml|text\/xml)\b/i,
+      );
+      return parseGoogleNewsRssResults(xml);
     },
   };
 }
@@ -226,5 +275,10 @@ function githubProvider(): ApiSearchProvider {
 }
 
 export function getBuiltinVerticalProviders(): ApiSearchProvider[] {
-  return [wikipediaProvider(), arxivProvider(), githubProvider()];
+  return [
+    newsProvider(),
+    wikipediaProvider(),
+    arxivProvider(),
+    githubProvider(),
+  ];
 }

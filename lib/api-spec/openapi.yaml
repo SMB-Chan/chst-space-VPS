@@ -825,12 +825,49 @@ components:
           type: string
         corrected:
           type: boolean
+        researchQuality:
+          allOf:
+            - $ref: "#/components/schemas/OpenaiNewsQualityReport"
+          nullable: true
       required:
         - status
         - summary
         - claims
         - modelId
         - corrected
+    OpenaiNewsQualityReport:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [news]
+        quality:
+          type: string
+          enum: [good, partial, poor]
+        taskSuccess:
+          type: string
+          enum: [succeeded, failed, unknown]
+        acceptedSourceCount:
+          type: integer
+        freshSourceCount:
+          type: integer
+        independentDomainCount:
+          type: integer
+        officialOrMajorSourceCount:
+          type: integer
+        queries:
+          type: array
+          items:
+            type: string
+      required:
+        - kind
+        - quality
+        - taskSuccess
+        - acceptedSourceCount
+        - freshSourceCount
+        - independentDomainCount
+        - officialOrMajorSourceCount
+        - queries
     OpenaiMessage:
       type: object
       properties:
