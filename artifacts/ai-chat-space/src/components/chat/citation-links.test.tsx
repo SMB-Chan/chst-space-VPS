@@ -4,7 +4,7 @@ import { Markdown } from "./markdown";
 import { SourceCards } from "./source-cards";
 
 describe("message-scoped citations", () => {
-  it("connects identical citation numbers to cards in their own message", () => {
+  it("keeps identical citation numbers scoped to their own source sheets", () => {
     const html = renderToStaticMarkup(
       <>
         <Markdown content="前の回答 [1]" citationScope="message-101" />
@@ -21,9 +21,8 @@ describe("message-scoped citations", () => {
     );
 
     expect(html).toContain('data-source-target="source-message-101-1"');
-    expect(html).toContain('id="source-message-101-1"');
     expect(html).toContain('data-source-target="source-message-202-1"');
-    expect(html).toContain('id="source-message-202-1"');
-    expect(html).not.toContain('id="source-1"');
+    expect(html.match(/aria-label="出典を開く（1件）"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-source-target="source-1"');
   });
 });

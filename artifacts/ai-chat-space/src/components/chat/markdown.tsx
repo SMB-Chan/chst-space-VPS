@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
-import { citationSourceId } from "./citation-links";
+import { citationSourceId, requestCitationSourceOpen } from "./citation-links";
 import { splitStreamingMarkdown } from "@/lib/streaming-markdown";
 
 interface MarkdownProps {
@@ -115,8 +115,16 @@ const FullMarkdown = memo(function FullMarkdown({
               <button
                 type="button"
                 onClick={() => {
-                  const el = document.getElementById(href.slice(1));
-                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  const targetId = href.slice(1);
+                  requestCitationSourceOpen(targetId);
+                  // Keep the legacy inline-card behavior as a fallback for
+                  // messages rendered without the source-sheet listener.
+                  window.requestAnimationFrame(() => {
+                    document.getElementById(targetId)?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "center",
+                    });
+                  });
                 }}
                 data-source-target={href.slice(1)}
                 aria-label={`参照元${String(children)}へ移動`}
