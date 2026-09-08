@@ -12,6 +12,7 @@ import { SourceCards } from "./source-cards";
 import {
   FactualityCard,
   normalizeFactualityReport,
+  shouldRenderAuditCard,
   type FactualityReport,
 } from "./factuality-card";
 import {
@@ -545,6 +546,10 @@ const MessageRow = memo(function MessageRow({
   // the legacy inline "参照元:" Markdown block so old messages still show cards.
   let sources = normalizeSources(message.sources);
   const factuality = normalizeFactualityReport(display.factuality);
+  const visibleFactuality = isStreamingMessage
+    ? streamingFactuality || factuality
+    : factuality;
+  const hasResearchQuality = Boolean(visibleFactuality?.researchQuality);
   const assetIds = normalizeAssetIds(message.assetIds);
   const generatedAssets = display.generatedAssets ?? [];
   if (!isUser) {
@@ -734,9 +739,13 @@ const MessageRow = memo(function MessageRow({
         )}
 
         {!isUser &&
-          (display.auditContent ||
-            (isStreamingMessage &&
-              (streamingAudit || streamingPhase === "auditing"))) && (
+          shouldRenderAuditCard({
+            hasResearchQuality,
+            auditContent: display.auditContent,
+            isStreaming: isStreamingMessage,
+            streamingAudit,
+            streamingPhase,
+          }) && (
             <AuditCard
               content={
                 isStreamingMessage
@@ -749,20 +758,11 @@ const MessageRow = memo(function MessageRow({
             />
           )}
 
-        {!isUser &&
-          (isStreamingMessage
-            ? streamingFactuality || factuality
-            : factuality) && (
-            <div className="w-full px-1">
-              <FactualityCard
-                report={
-                  (isStreamingMessage
-                    ? streamingFactuality || factuality
-                    : factuality)!
-                }
-              />
-            </div>
-          )}
+        {!isUser && visibleFactuality && (
+          <div className="w-full px-1">
+            <FactualityCard report={visibleFactuality} />
+          </div>
+        )}
 
         {!isUser && sources && sources.length > 0 && (
           <div className="w-full px-1">

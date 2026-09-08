@@ -142,6 +142,13 @@ export async function startBrowserEgressProxy(
 ): Promise<BrowserEgressProxy> {
   const safeLookup = options.lookup ?? createSafeDnsLookup();
   const sockets = new Set<Socket>();
+  const handleSocketError = (socket: Socket, error: unknown): void => {
+    logger.warn(
+      safeFailureFields(error, "browser-egress-proxy", "PROXY_SOCKET_FAILED"),
+      "Browser proxy socket failed; closing the socket",
+    );
+    if (!socket.destroyed) socket.destroy();
+  };
 
   const server: Server = createServer((req, res) => {
     metrics.httpRequests += 1;
@@ -196,6 +203,14 @@ export async function startBrowserEgressProxy(
     upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () =>
       upstream.destroy(new Error("Browser proxy upstream timeout")),
     );
+    req.on("error", (error) => {
+      handleSocketError(req.socket as Socket, error);
+      upstream.destroy();
+    });
+    res.on("error", (error) => {
+      handleSocketError(req.socket as Socket, error);
+      upstream.destroy();
+    });
     upstream.on("error", (error) => {
       if (isBlockedError(error)) metrics.blockedTargets += 1;
       else metrics.upstreamErrors += 1;
@@ -241,6 +256,9 @@ export async function startBrowserEgressProxy(
       port: target.port,
       lookup: safeLookup,
     });
+    clientSocket.once("close", () => {
+      if (!upstream.destroyed) upstream.destroy();
+    });
     upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () =>
       upstream.destroy(new Error("Browser proxy CONNECT timeout")),
     );
@@ -272,6 +290,7 @@ export async function startBrowserEgressProxy(
 
   server.on("connection", (socket: Socket) => {
     sockets.add(socket);
+    socket.on("error", (error) => handleSocketError(socket, error));
     socket.once("close", () => sockets.delete(socket));
   });
   server.requestTimeout = UPSTREAM_TIMEOUT_MS;

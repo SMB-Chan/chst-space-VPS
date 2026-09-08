@@ -40,6 +40,29 @@ function safeResult(
   };
 }
 
+function extractXmlAttribute(
+  block: string,
+  tag: string,
+  attribute: string,
+): string {
+  const match = block.match(
+    new RegExp(`<${tag}\\b[^>]*\\b${attribute}\\s*=\\s*["']([^"']*)["']`, "i"),
+  );
+  return match ? decodeEntities(match[1] ?? "") : "";
+}
+
+function isGoogleNewsArticleUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.toLowerCase() === "news.google.com" &&
+      /^\/rss\/articles\//i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function parseGoogleNewsRssResults(xml: string): SearchResult[] {
   const entries = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? [];
   return entries.flatMap((entry): SearchResult[] => {
@@ -47,12 +70,27 @@ export function parseGoogleNewsRssResults(xml: string): SearchResult[] {
     const url = extractXmlTag(entry, "link");
     const snippet = extractXmlTag(entry, "description");
     const rawDate = extractXmlTag(entry, "pubDate");
+    const sourceBlock = entry.match(
+      /<source(?:\s[^>]*)?>[\s\S]*?<\/source>/i,
+    )?.[0];
+    const publisherName = sourceBlock
+      ? extractXmlTag(sourceBlock, "source")
+      : "";
+    const publisherUrl = sourceBlock
+      ? normalizeExternalHttpUrl(
+          extractXmlAttribute(sourceBlock, "source", "url"),
+        )
+      : null;
     const parsedDate = Date.parse(rawDate);
     const result = safeResult(title, url, snippet);
     if (!result) return [];
+    const isWrapper = isGoogleNewsArticleUrl(result.url);
     return [
       {
         ...result,
+        ...(publisherName ? { publisherName } : {}),
+        ...(publisherUrl ? { publisherUrl } : {}),
+        ...(isWrapper ? { articleUrl: null } : {}),
         publishedAt: Number.isFinite(parsedDate)
           ? new Date(parsedDate).toISOString()
           : null,

@@ -275,6 +275,34 @@ describe("response cancellation", () => {
       "メッセージの保存に失敗しました",
     );
   });
+
+  it("completes with a non-empty fallback when the model emits no text", async () => {
+    const response = new StreamingResponse();
+    const client = {
+      chat: {
+        completions: {
+          create: vi.fn().mockResolvedValue(emptyStream()),
+        },
+      },
+    } as unknown as OpenAI;
+
+    await streamChatReply({
+      res: response as unknown as Response,
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      reasoningLevel: "off",
+      userText: "hello",
+      chatMessages: [{ role: "user", content: "hello" }],
+      translationMode: "ja-en",
+      publicAiError: () => "error",
+    });
+
+    const output = response.writes.join("\n");
+    expect(output).toContain("信頼できる最新情報を十分に取得できなかった");
+    expect(output).toContain('"done":true');
+    expect(output).not.toContain("応答が空でした");
+  });
 });
 
 describe("model stream recovery", () => {
@@ -532,7 +560,7 @@ describe("model stream recovery", () => {
     },
   );
 
-  it("reports an error after a clean empty response is retried once", async () => {
+  it("completes with a fallback after a clean empty response is retried once", async () => {
     const response = new StreamingResponse();
     const create = vi.fn().mockImplementation(async () => emptyStream());
     const client = {
@@ -552,9 +580,9 @@ describe("model stream recovery", () => {
     });
 
     expect(create).toHaveBeenCalledTimes(2);
-    expect(response.writes.join("\n")).toContain(
-      '"error":"応答が空でした。もう一度お試しください。"',
-    );
+    const output = response.writes.join("\n");
+    expect(output).toContain("信頼できる最新情報を十分に取得できなかった");
+    expect(output).toContain('"done":true');
   });
 
   it("drops an unadvertised GLM tool call and retries without tools", async () => {

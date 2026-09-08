@@ -3,6 +3,11 @@ export interface SearchResult {
   url: string;
   snippet: string;
   publishedAt?: string | null;
+  /** Publisher metadata carried by vertical feeds such as Google News RSS. */
+  publisherName?: string | null;
+  publisherUrl?: string | null;
+  /** Canonical article URL when a provider exposes one separately. */
+  articleUrl?: string | null;
 }
 
 const TRACKING_QUERY_KEYS = new Set([

@@ -101,6 +101,21 @@ export function normalizeFactualityReport(
   };
 }
 
+export function shouldRenderAuditCard(args: {
+  hasResearchQuality: boolean;
+  auditContent?: string | null;
+  isStreaming: boolean;
+  streamingAudit?: string | null;
+  streamingPhase?: string | null;
+}): boolean {
+  if (args.hasResearchQuality) return false;
+  return Boolean(
+    args.auditContent ||
+    (args.isStreaming &&
+      (args.streamingAudit || args.streamingPhase === "auditing")),
+  );
+}
+
 function normalizeNewsQuality(value: unknown): NewsQualityReport | undefined {
   if (!isRecord(value) || value.kind !== "news") return undefined;
   if (
@@ -125,7 +140,7 @@ function normalizeNewsQuality(value: unknown): NewsQualityReport | undefined {
     ? value.queries
         .filter((query): query is string => typeof query === "string")
         .map((query) => query.slice(0, 240))
-        .slice(0, 3)
+        .slice(0, 4)
     : [];
   return {
     kind: "news",

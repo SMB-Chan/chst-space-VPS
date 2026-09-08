@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assessNewsRetrieval,
-  buildNewsFastPathQueries,
-  filterNewsResults,
-} from "./news-quality-gate";
+import { assessNewsRetrieval, filterNewsResults } from "./news-quality-gate";
 import type { SearchResult } from "./search-parse";
 
 function result(
@@ -68,16 +64,119 @@ describe("news retrieval quality gate", () => {
     });
   });
 
-  it("rewrites news queries with a concrete JST date and bounds fan-out", () => {
+  it("accepts Google News RSS wrappers when publisher metadata is present", () => {
+    const results = [
+      {
+        ...result(
+          "https://news.google.com/rss/articles/one",
+          "速報: World news",
+        ),
+        articleUrl: null,
+        publisherName: "Reuters",
+        publisherUrl: "https://www.reuters.com/world",
+      },
+      {
+        ...result(
+          "https://news.google.com/rss/articles/two",
+          "Breaking news: World update",
+        ),
+        articleUrl: null,
+        publisherName: "BBC",
+        publisherUrl: "https://www.bbc.com/news",
+      },
+    ];
+
+    expect(filterNewsResults(results)).toHaveLength(2);
     expect(
-      buildNewsFastPathQueries(
-        "今日のニュースについて分かるか？",
-        new Date("2026-09-07T16:30:00.000Z"),
+      assessNewsRetrieval({
+        results,
+        now: new Date("2026-09-08T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      quality: "good",
+      independentDomainCount: 2,
+      freshSourceCount: 2,
+    });
+  });
+
+  it("deduplicates a resolved article seen through multiple result shapes", () => {
+    const direct = result(
+      "https://www.reuters.com/world/article-a",
+      "速報: World news",
+    );
+    const wrapper = {
+      ...result(
+        "https://news.google.com/rss/articles/one",
+        "速報: World news mirror",
       ),
-    ).toEqual([
-      "2026-09-08 日本 国内 主要ニュース 公式 報道",
-      "2026-09-08 国際 主要ニュース 公式 報道",
-      "2026-09-08 最新ニュース 主要報道",
-    ]);
+      articleUrl: direct.url,
+      publisherName: "Reuters",
+      publisherUrl: "https://www.reuters.com/world",
+    };
+
+    expect(
+      assessNewsRetrieval({
+        results: [direct, wrapper],
+        now: new Date("2026-09-08T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      acceptedSourceCount: 1,
+      independentDomainCount: 1,
+    });
+  });
+
+  it("deduplicates an unresolved Google News wrapper by publisher and title", () => {
+    const direct = {
+      ...result("https://www.reuters.com/world/article-a", "速報: World news"),
+    };
+    const wrapper = {
+      ...result("https://news.google.com/rss/articles/one", "速報: World news"),
+      articleUrl: null,
+      publisherName: "Reuters",
+      publisherUrl: "https://www.reuters.com/world",
+    };
+
+    expect(
+      assessNewsRetrieval({
+        results: [direct, wrapper],
+        now: new Date("2026-09-08T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      acceptedSourceCount: 1,
+      independentDomainCount: 1,
+    });
+  });
+
+  it("preserves the initial circuit queries and one alternate query", () => {
+    const report = assessNewsRetrieval({
+      results: [
+        result("https://www.reuters.com/world/article-a", "速報: World news"),
+        result(
+          "https://www.bbc.com/news/article-b",
+          "Breaking news: World update",
+        ),
+      ],
+      queries: ["q1", "q2", "q3", "q4"],
+      now: new Date("2026-09-08T04:00:00.000Z"),
+    });
+
+    expect(report.queries).toEqual(["q1", "q2", "q3", "q4"]);
+  });
+
+  it("recognizes major publisher subdomains without trusting lookalikes", () => {
+    const accepted = result(
+      "https://jp.reuters.com/world/article-a",
+      "World update",
+    );
+    const lookalike = result(
+      "https://reuters.com.example.net/world/article-b",
+      "World update",
+    );
+
+    const report = assessNewsRetrieval({
+      results: [accepted, lookalike],
+      now: new Date("2026-09-08T04:00:00.000Z"),
+    });
+    expect(report.officialOrMajorSourceCount).toBe(1);
   });
 });

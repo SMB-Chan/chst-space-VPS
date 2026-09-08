@@ -21,6 +21,8 @@ export interface Source {
   snippet?: string | null;
   publishedAt?: string | null;
   fetchedAt?: string | null;
+  publisherName?: string | null;
+  publisherUrl?: string | null;
 }
 
 interface SourceCardsProps {
@@ -249,6 +251,9 @@ export function SourceCards({ sources, citationScope }: SourceCardsProps) {
                     highlightedTarget !== null &&
                     citationIds.includes(highlightedTarget);
                   const snippet = normalizeSnippet(source.snippet);
+                  const publisherUrl = source.publisherUrl
+                    ? normalizeSourceUrl(source.publisherUrl)
+                    : null;
                   return (
                     <article
                       key={url.href}
@@ -277,7 +282,7 @@ export function SourceCards({ sources, citationScope }: SourceCardsProps) {
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
                             <span className="truncate font-medium">
-                              {domain}
+                              {source.publisherName || domain}
                             </span>
                             <span className="ml-auto shrink-0 font-mono text-[10px] [color:var(--m3-primary)]">
                               [{citationNumbers.join(", ")}]
@@ -299,6 +304,17 @@ export function SourceCards({ sources, citationScope }: SourceCardsProps) {
                             <p className="mt-1.5 line-clamp-3 text-[12px] leading-relaxed text-muted-foreground">
                               {snippet}
                             </p>
+                          ) : null}
+                          {publisherUrl ? (
+                            <a
+                              href={publisherUrl.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              referrerPolicy="no-referrer"
+                              className="m3-focus-ring mt-1 inline-flex max-w-full text-[11px] text-muted-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:[color:var(--m3-primary)]"
+                            >
+                              媒体サイト: {publisherUrl.hostname}
+                            </a>
                           ) : null}
                           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground/80">
                             <span>

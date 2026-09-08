@@ -34,6 +34,8 @@ export interface FactualitySource {
   url: string;
   publishedAt?: string | null;
   fetchedAt?: string | null;
+  publisherName?: string | null;
+  publisherUrl?: string | null;
 }
 
 const MAX_CLAIMS = 8;

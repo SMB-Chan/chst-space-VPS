@@ -46,11 +46,10 @@ import {
 import type { ModelProvider } from "./ai-clients";
 import {
   assessNewsRetrieval,
-  buildNewsFastPathQueries,
-  isNewsFastPathQuestion,
   filterNewsResults,
   type NewsQualityReport,
 } from "./news-quality-gate";
+import { buildNewsSearchCircuit } from "./news-search-circuit";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
@@ -65,6 +64,9 @@ interface SearchDecisionOptions {
   forceQuery?: string;
   signal?: AbortSignal;
   recentConversation?: string;
+  newsSearchBudget?: {
+    alternateUsed: boolean;
+  };
 }
 
 export interface SearchDecision {
@@ -83,11 +85,15 @@ export interface WebContext {
     url: string;
     publishedAt?: string | null;
     fetchedAt?: string | null;
+    publisherName?: string | null;
+    publisherUrl?: string | null;
   }[];
   contextText: string;
   searchWarning?: string;
   newsQuality?: NewsQualityReport;
 }
+
+export type SearchRoute = "default" | "alternate";
 
 /** Timeout covering ALL phases (DNS + connect + headers + body) for DDG search. */
 const SEARCH_FETCH_TIMEOUT_MS = 12_000;
@@ -332,7 +338,11 @@ async function fetchWithTimeout(
     headers?: Record<string, string>;
     signal?: AbortSignal;
   },
-): Promise<{ response: UndiciResponse; cancel: () => void }> {
+): Promise<{
+  response: UndiciResponse;
+  cancel: () => void;
+  finalUrl: string;
+}> {
   const controller = new AbortController();
   const abortParent = () =>
     controller.abort(opts?.signal?.reason ?? new Error("Operation cancelled"));
@@ -363,7 +373,7 @@ async function fetchWithTimeout(
       });
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
-        if (!location) return { response: res, cancel };
+        if (!location) return { response: res, cancel, finalUrl: url.href };
         // Do not leave a redirect body pinned to the connection pool.
         try {
           await res.body?.cancel();
@@ -373,7 +383,7 @@ async function fetchWithTimeout(
         current = new URL(location, url).href;
         continue;
       }
-      return { response: res, cancel };
+      return { response: res, cancel, finalUrl: url.href };
     }
     throw new Error("Too many redirects");
   } catch (err) {
@@ -457,7 +467,11 @@ async function fetchViaFallbacks(
   publishedAt?: string | null;
 } | null> {
   if (PLAYWRIGHT_FALLBACK_ENABLED) {
-    const rendered = await fetchWithBrowser(url, BROWSER_FETCH_TIMEOUT_MS);
+    const rendered = await fetchWithBrowser(
+      url,
+      BROWSER_FETCH_TIMEOUT_MS,
+      signal,
+    );
     if (
       rendered &&
       rendered.text.length >= MIN_CONTENT_CHARS &&
@@ -480,6 +494,34 @@ async function fetchViaFallbacks(
       };
   }
   return null;
+}
+
+function isGoogleNewsWrapperUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.toLowerCase() === "news.google.com" &&
+      /^\/rss\/articles\//i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function enrichNewsResult(
+  result: SearchResult,
+  page: Awaited<ReturnType<typeof fetchPageText>> | undefined,
+): SearchResult {
+  const resolvedUrl = page?.url;
+  return {
+    ...result,
+    articleUrl:
+      result.articleUrl ??
+      (resolvedUrl && !isGoogleNewsWrapperUrl(resolvedUrl)
+        ? resolvedUrl
+        : null),
+    publishedAt: page?.publishedAt ?? result.publishedAt ?? null,
+  };
 }
 
 const PUBLICATION_META_KEYS = new Set([
@@ -552,13 +594,14 @@ export async function fetchPageText(
   title: string;
   text: string;
   publishedAt?: string | null;
+  url?: string;
 } | null> {
   try {
-    const { response: res, cancel } = await fetchWithTimeout(
-      url,
-      PAGE_FETCH_TIMEOUT_MS,
-      { signal },
-    );
+    const {
+      response: res,
+      cancel,
+      finalUrl,
+    } = await fetchWithTimeout(url, PAGE_FETCH_TIMEOUT_MS, { signal });
     try {
       if (!res.ok) {
         logger.warn(
@@ -625,6 +668,7 @@ export async function fetchPageText(
             title: title === url ? fallback.title : title,
             text: fallback.text,
             publishedAt: fallback.publishedAt ?? null,
+            url: finalUrl,
           };
         }
         logger.warn(
@@ -637,6 +681,7 @@ export async function fetchPageText(
         title,
         text: text.slice(0, MAX_PAGE_CHARS),
         publishedAt: extractPublishedAtFromHtml(html),
+        url: finalUrl,
       };
     } finally {
       cancel(); // disarm only after body has been fully consumed
@@ -687,8 +732,9 @@ export async function searchWeb(
   query: string,
   signal?: AbortSignal,
   plan?: SearchQueryPlan,
+  route: SearchRoute = "default",
 ): Promise<ScoredSearchResult[]> {
-  if (!plan) {
+  if (route === "default" && !plan) {
     const cached = getCachedResults(query);
     if (cached) {
       logger.debug(
@@ -699,38 +745,47 @@ export async function searchWeb(
     }
   }
 
-  // Keyed search APIs (Tavily/Exa/Brave) are far more reliable than HTML
-  // scraping; use them when configured and fall back to DuckDuckGo below.
-  const apiResults = await searchWithApiProviders(query, signal, plan);
-  if (apiResults.length > 0) {
-    const merged = mergeSearchResults(apiResults, query);
-    if (!plan) {
-      setCachedResults(
-        query,
-        merged.map(({ score: _score, ...rest }) => rest),
-      );
+  if (route === "default") {
+    // Keyed search APIs (Tavily/Exa/Brave) are far more reliable than HTML
+    // scraping; use them when configured and fall back to DuckDuckGo below.
+    const apiResults = await searchWithApiProviders(query, signal, plan);
+    if (apiResults.length > 0) {
+      const merged = mergeSearchResults(apiResults, query);
+      if (!plan) {
+        setCachedResults(
+          query,
+          merged.map(({ score: _score, ...rest }) => rest),
+        );
+      }
+      return merged;
     }
-    return merged;
   }
 
   const queries = expandSearchQueries(query);
   // Bing is the essential fallback: DuckDuckGo answers datacenter IPs with a
   // bot challenge (HTTP 202), which silently starved every scrape-based search.
   const endpoints: { url: string; parse: (html: string) => SearchResult[] }[] =
-    [
-      {
-        url: `https://html.duckduckgo.com/html/?q=`,
-        parse: (html) => parseSearchHtml(html),
-      },
-      {
-        url: `https://lite.duckduckgo.com/lite/?q=`,
-        parse: (html) => parseSearchHtml(html),
-      },
-      {
-        url: `https://www.bing.com/search?q=`,
-        parse: (html) => parseSearchBingHtml(html),
-      },
-    ];
+    route === "alternate"
+      ? [
+          {
+            url: `https://www.bing.com/search?q=`,
+            parse: (html) => parseSearchBingHtml(html),
+          },
+        ]
+      : [
+          {
+            url: `https://html.duckduckgo.com/html/?q=`,
+            parse: (html) => parseSearchHtml(html),
+          },
+          {
+            url: `https://lite.duckduckgo.com/lite/?q=`,
+            parse: (html) => parseSearchHtml(html),
+          },
+          {
+            url: `https://www.bing.com/search?q=`,
+            parse: (html) => parseSearchBingHtml(html),
+          },
+        ];
 
   // Search all query-angle × endpoint combinations in parallel.
   const searchCalls: Promise<SearchResult[]>[] = [];
@@ -754,7 +809,7 @@ export async function searchWeb(
   if (allResults.length === 0) return [];
 
   const merged = mergeSearchResults(allResults, query);
-  if (!plan) {
+  if (route === "default" && !plan) {
     setCachedResults(
       query,
       merged.map(({ score: _score, ...rest }) => rest),
@@ -1016,6 +1071,8 @@ export async function buildWebContext(
     url: string;
     publishedAt?: string | null;
     fetchedAt?: string | null;
+    publisherName?: string | null;
+    publisherUrl?: string | null;
   }[] = [];
   const parts: string[] = [];
   const fetchedAt = new Date().toISOString();
@@ -1024,9 +1081,9 @@ export async function buildWebContext(
   let searchWarning: string | undefined;
   let newsQuality: NewsQualityReport | undefined;
   const newsResults: SearchResult[] = [];
-  const newsQueries = isNewsFastPathQuestion(userMessage)
-    ? buildNewsFastPathQueries(userMessage)
-    : [];
+  const newsCircuit = buildNewsSearchCircuit(userMessage);
+  const newsQueries = newsCircuit?.queries ?? [];
+  const executedNewsQueries: string[] = [];
 
   const urls = extractUrls(userMessage);
 
@@ -1036,11 +1093,17 @@ export async function buildWebContext(
 
   // Start URL fetching and search-decision in parallel — they are independent
   const signal = options?.signal;
+  const decisionPromise: Promise<SearchDecision> = newsCircuit
+    ? Promise.resolve<SearchDecision>({
+        search: true,
+        query: newsQueries[0] ?? "",
+      })
+    : decideSearch(client, model, provider, userMessage, options);
   const [urlPages, decision] = await Promise.all([
     urls.length > 0
       ? Promise.all(urls.map((u) => fetchPageText(u, signal)))
       : Promise.resolve([] as Awaited<ReturnType<typeof fetchPageText>>[]),
-    decideSearch(client, model, provider, userMessage, options),
+    decisionPromise,
   ]);
 
   // Process user-provided URL pages; notify when any fail
@@ -1080,8 +1143,9 @@ export async function buildWebContext(
     searchWarning = warning;
     onStatus({ status: "search_warning", message: warning });
   } else if (decision.skippedDueToError) {
-    const warning =
-      "検索判定に失敗したため、Web検索をスキップしました。手元の知識でお答えします。";
+    const warning = newsCircuit
+      ? "ニュース検索の判定に失敗しました。外部ニュース取得を試行します。"
+      : "検索判定に失敗したため、Web検索をスキップしました。手元の知識でお答えします。";
     searchWarning = warning;
     onStatus({ status: "search_warning", message: warning });
   }
@@ -1096,23 +1160,33 @@ export async function buildWebContext(
   const runSearchRound = async (
     roundQuery: string,
     roundPlan?: SearchQueryPlan,
+    route: SearchRoute = "default",
   ): Promise<void> => {
-    onStatus({ status: "searching", query: roundQuery });
+    onStatus({
+      status: "searching",
+      query: roundQuery,
+      ...(newsCircuit
+        ? {
+            circuit: newsCircuit.kind,
+            circuitMode: newsCircuit.mode,
+          }
+        : {}),
+      ...(route === "alternate" ? { route: "alternate" } : {}),
+    });
     if (signal?.aborted) return;
-    const rawResults = await searchWeb(roundQuery, signal, roundPlan);
-    const results = isNewsFastPathQuestion(userMessage)
-      ? filterNewsResults(rawResults)
-      : rawResults;
-    if (isNewsFastPathQuestion(userMessage)) {
-      newsResults.push(...results);
-      newsQuality = assessNewsRetrieval({
-        results: newsResults,
-        queries: newsQueries,
-      });
+    if (
+      newsCircuit &&
+      !executedNewsQueries.some(
+        (attempted) => normalizeQuery(attempted) === normalizeQuery(roundQuery),
+      )
+    ) {
+      executedNewsQueries.push(roundQuery);
     }
+    const rawResults = await searchWeb(roundQuery, signal, roundPlan, route);
+    const results = newsCircuit ? filterNewsResults(rawResults) : rawResults;
     if (results.length === 0) {
-      const warning = isNewsFastPathQuestion(userMessage)
-        ? "ニュース検索の品質基準（記事ページ・発行日時・独立ドメイン）を満たす結果がありませんでした。"
+      const warning = newsCircuit
+        ? "外部ニュース取得で利用できる記事根拠を確認できませんでした。"
         : "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
       searchWarning = warning;
       onStatus({ status: "search_warning", message: warning });
@@ -1134,22 +1208,35 @@ export async function buildWebContext(
     const fetchedPages = new Map(
       top.map((result, index) => [result.url, pages[index]]),
     );
-    for (const result of newResults) {
+    const enrichedResults = newResults.map((result) =>
+      enrichNewsResult(result, fetchedPages.get(result.url)),
+    );
+    for (const result of enrichedResults) {
       seenSourceUrls.add(result.url);
-      const page = fetchedPages.get(result.url);
+      if (result.articleUrl) seenSourceUrls.add(result.articleUrl);
       sources.push({
         title: result.title,
-        url: result.url,
-        publishedAt: page?.publishedAt ?? result.publishedAt ?? null,
+        url: result.articleUrl ?? result.url,
+        publishedAt: result.publishedAt ?? null,
         fetchedAt,
+        publisherName: result.publisherName ?? null,
+        publisherUrl: result.publisherUrl ?? null,
       });
     }
     if (newResults.length === 0) return; // follow-up round found only duplicates
 
-    const snippetBlock = newResults
+    if (newsCircuit) {
+      newsResults.push(...enrichedResults);
+      newsQuality = assessNewsRetrieval({
+        results: newsResults,
+        queries: executedNewsQueries,
+      });
+    }
+
+    const snippetBlock = enrichedResults
       .map((r) => {
         sourceIndex++;
-        return `[${sourceIndex}] ${r.title}\n    URL: ${r.url}\n    概要: ${r.snippet}`;
+        return `[${sourceIndex}] ${r.title}\n    URL: ${r.articleUrl ?? r.url}\n    媒体: ${r.publisherName ?? "不明"}\n    概要: ${r.snippet}`;
       })
       .join("\n");
     const expandedQueries = expandSearchQueries(roundQuery);
@@ -1164,7 +1251,7 @@ export async function buildWebContext(
     const urlToIndex = new Map<string, number>();
     {
       let idx = sourceIndex - newResults.length + 1;
-      for (const r of newResults) {
+      for (const r of enrichedResults) {
         urlToIndex.set(r.url, idx++);
       }
     }
@@ -1189,9 +1276,9 @@ export async function buildWebContext(
     }
   };
 
-  if (decision.search || newsQueries.length > 0) {
+  if (decision.search || newsCircuit) {
     searched = true;
-    if (newsQueries.length > 0) {
+    if (newsCircuit) {
       query = newsQueries[0];
       for (const fastQuery of newsQueries.slice(0, MAX_SEARCH_ROUNDS)) {
         if (signal?.aborted) break;
@@ -1200,11 +1287,40 @@ export async function buildWebContext(
       }
       newsQuality = assessNewsRetrieval({
         results: newsResults,
-        queries: newsQueries.slice(0, MAX_SEARCH_ROUNDS),
+        queries: executedNewsQueries,
       });
+      const alternateAvailable = !options?.newsSearchBudget?.alternateUsed;
+      if (
+        newsQuality.quality !== "good" &&
+        !signal?.aborted &&
+        alternateAvailable
+      ) {
+        const escalationQuery =
+          newsQueries[
+            Math.min(MAX_SEARCH_ROUNDS - 1, newsQueries.length - 1)
+          ] ?? query;
+        if (options?.newsSearchBudget) {
+          options.newsSearchBudget.alternateUsed = true;
+        }
+        onStatus({
+          status: "search_escalation",
+          query: escalationQuery,
+          circuit: newsCircuit.kind,
+          circuitMode: newsCircuit.mode,
+          route: "alternate",
+        });
+        // One explicit alternate route is the final server-side recovery
+        // attempt. It bypasses the API/RSS ensemble and uses Bing HTML so a
+        // Google News wrapper cannot be the only available result shape.
+        await runSearchRound(escalationQuery, undefined, "alternate");
+        newsQuality = assessNewsRetrieval({
+          results: newsResults,
+          queries: executedNewsQueries,
+        });
+      }
       if (newsQuality.quality !== "good") {
         const warning =
-          "ニュース検索の根拠が不足しています。複数の新鮮な独立報道を確認できなかったため、検索品質を成功扱いにしません。";
+          "外部ニュース取得の品質が不足しているため、最新ニュースを確認できませんでした。";
         searchWarning = warning;
         onStatus({ status: "search_warning", message: warning });
         parts.push(

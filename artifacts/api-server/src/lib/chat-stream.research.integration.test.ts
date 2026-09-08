@@ -3,17 +3,14 @@ import type OpenAI from "openai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  buildWebContext: vi.fn(),
   executeSpecialistTool: vi.fn(),
   findRelevantMemories: vi.fn(),
   runMemoryMaintenance: vi.fn(),
 }));
 
 vi.mock("./web-search", () => ({
-  buildWebContext: vi.fn().mockResolvedValue({
-    searched: false,
-    sources: [],
-    contextText: "",
-  }),
+  buildWebContext: mocks.buildWebContext,
 }));
 
 vi.mock("./capability-broker", () => ({
@@ -78,6 +75,12 @@ function modelStream(
 
 function textStream(text: string) {
   return modelStream([{ delta: { content: text }, finish_reason: "stop" }]);
+}
+
+function emptyStream() {
+  return (async function* () {
+    return;
+  })();
 }
 
 function partialFailureStream(text: string) {
@@ -164,6 +167,11 @@ async function runTurn(
 describe("streamChatReply research completion", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.buildWebContext.mockResolvedValue({
+      searched: false,
+      sources: [],
+      contextText: "",
+    });
     mocks.executeSpecialistTool.mockResolvedValue({
       ok: true,
       capability: "web_search",
@@ -245,6 +253,44 @@ describe("streamChatReply research completion", () => {
     });
     expect(result.sse).toContain('"turnSaved":true');
     expect(result.sse).toContain('"error":"error"');
+  });
+
+  it("returns a non-empty fallback when poor news quality remains after alternate failure", async () => {
+    mocks.buildWebContext.mockResolvedValueOnce({
+      searched: true,
+      sources: [],
+      contextText: "",
+      newsQuality: {
+        kind: "news",
+        quality: "poor",
+        taskSuccess: "failed",
+        acceptedSourceCount: 0,
+        freshSourceCount: 0,
+        independentDomainCount: 0,
+        officialOrMajorSourceCount: 0,
+        queries: ["今日のニュース", "今日のニュース alternate"],
+        rejected: [],
+      },
+    });
+    const create = vi.fn().mockImplementation(async () => emptyStream());
+
+    const result = await runTurn(create);
+
+    expect(result.onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content:
+          "信頼できる最新情報を十分に取得できなかったため、確認できませんでした。",
+        factuality: expect.objectContaining({
+          researchQuality: expect.objectContaining({
+            quality: "poor",
+            taskSuccess: "failed",
+          }),
+        }),
+      }),
+    );
+    expect(result.sse).toContain("信頼できる最新情報を十分に取得できなかった");
+    expect(result.sse).toContain('"done":true');
+    expect(result.sse).not.toContain("応答が空でした");
   });
 
   it("uses long-term memory only when a user-scoped context is enabled", async () => {

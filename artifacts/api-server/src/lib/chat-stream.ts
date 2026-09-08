@@ -77,6 +77,7 @@ import {
   wantsGeneratedFile,
 } from "./chat-stream-policy";
 import {
+  EMPTY_ASSISTANT_FALLBACK,
   persistAndEmitChatCompletion,
   type ChatCompletionCallback,
   type ChatCompletionInput,
@@ -342,6 +343,7 @@ export async function streamChatReply(args: {
   heartbeat.unref();
 
   let fullResponse = "";
+  let initialDraft = "";
   let streamedResponse = "";
   let failureSources: ChatCompletionInput["sources"] = [];
 
@@ -470,6 +472,7 @@ export async function streamChatReply(args: {
 
     // Translation mode works from the conversation alone; web search would
     // only add latency and untrusted noise.
+    const newsSearchBudget = { alternateUsed: false };
     const webContext = translationMode
       ? { searched: false, sources: [], contextText: "" }
       : await buildWebContext(
@@ -487,6 +490,7 @@ export async function streamChatReply(args: {
               userText,
             ),
             signal: clientAbort.signal,
+            newsSearchBudget,
           },
         );
 
@@ -516,6 +520,18 @@ export async function streamChatReply(args: {
           `data: ${JSON.stringify({ sources: webContext.sources })}\n\n`,
         );
       }
+    }
+    if (
+      !translationMode &&
+      webContext.newsQuality &&
+      webContext.newsQuality.quality !== "good"
+    ) {
+      workingMessages.push({
+        role: "system",
+        content:
+          "今回の依頼は最新ニュースの確認が必要です。外部ニュース取得の品質基準を満たす根拠が得られなかったため、現在のニュースを断定して補完しないでください。" +
+          "知識カットオフを主な理由にしたり、ユーザーへニュースサイトの手動確認・再試行を促したりせず、必要なら「外部ニュース取得の品質が不足しているため確認できませんでした」と簡潔に説明してください。",
+      });
     }
 
     // Only inject the research/tool-use prompt when no web data was already
@@ -666,6 +682,7 @@ export async function streamChatReply(args: {
       shouldStop: () => clientGone() || clientAbort.signal.aborted,
       signal: clientAbort.signal,
     });
+    initialDraft = fullResponse;
 
     // A few OpenAI-compatible models sometimes output only a promise to
     // search, without a tool call. Give the same turn one bounded recovery
@@ -1022,13 +1039,27 @@ export async function streamChatReply(args: {
     }
 
     if (!fullResponse.trim()) {
-      if (!clientGone()) {
-        const turnSaved = await persistInterruptedTurn();
+      if (clientGone() || clientAbort.signal.aborted) return;
+      const restoredDraft = initialDraft.trim()
+        ? extractArtifacts(initialDraft).content.trim()
+        : "";
+      const restoredStream = streamedResponse.trim()
+        ? extractArtifacts(streamedResponse).content.trim()
+        : "";
+      fullResponse =
+        restoredDraft || restoredStream || EMPTY_ASSISTANT_FALLBACK;
+      if (!streamedResponse.trim()) {
+        streamedResponse = fullResponse;
         res.write(
-          `data: ${JSON.stringify({ error: "応答が空でした。もう一度お試しください。", turnSaved })}\n\n`,
+          `data: ${JSON.stringify({
+            content: fullResponse,
+            status: "generating",
+          })}\n\n`,
         );
       }
-    } else {
+    }
+
+    {
       const responseSources = [
         ...webContext.sources,
         ...allResearchSources.filter(
@@ -1254,6 +1285,7 @@ export async function streamChatReply(args: {
       // this server has a working web-search path. Recover once, only for
       // normal chat: translation must never turn into an answer/research turn.
       if (
+        !activeNewsQuality &&
         shouldRecoverWithWeb({
           question: userText,
           answer: fullResponse,
@@ -1294,6 +1326,7 @@ export async function streamChatReply(args: {
                 userText,
               ),
               signal: clientAbort.signal,
+              newsSearchBudget,
             },
           );
           if (
@@ -1534,9 +1567,30 @@ export async function streamChatReply(args: {
         fullResponse = finalizeGeneratedFileResponse(fullResponse);
       }
 
+      if (!fullResponse.trim()) {
+        const restoredDraft = initialDraft.trim()
+          ? extractArtifacts(initialDraft).content.trim()
+          : "";
+        const restoredStream = streamedResponse.trim()
+          ? extractArtifacts(streamedResponse).content.trim()
+          : "";
+        fullResponse =
+          restoredDraft || restoredStream || EMPTY_ASSISTANT_FALLBACK;
+      }
+
       // Disconnects that happen after model output but before this boundary
       // must not create a durable message or generated asset.
       if (clientAbort.signal.aborted) return;
+
+      if (!streamedResponse.trim() && !clientGone()) {
+        streamedResponse = fullResponse;
+        res.write(
+          `data: ${JSON.stringify({
+            content: fullResponse,
+            status: "generating",
+          })}\n\n`,
+        );
+      }
 
       const completionEmitted = await persistAndEmitChatCompletion({
         res,
