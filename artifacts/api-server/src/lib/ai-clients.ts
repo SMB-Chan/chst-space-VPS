@@ -81,8 +81,26 @@ if (openRouterApiKey) {
 
 export { openrouterClient };
 
-export type ModelProvider = "openai" | "dashscope" | "openrouter";
-export type ReasoningKind = "none" | "openai" | "dashscope" | "openrouter";
+// Xiaomi MiMo — OpenAI-compatible endpoint
+const XIAOMI_BASE_URL = "https://api.xiaomi.com/v1";
+
+let xiaomiClient: OpenAI | null = null;
+
+if (process.env.XIAOMI_API_KEY) {
+  xiaomiClient = new OpenAI({
+    apiKey: process.env.XIAOMI_API_KEY,
+    baseURL: process.env.XIAOMI_BASE_URL || XIAOMI_BASE_URL,
+    fetch: llmFetch,
+  });
+  logger.info("Xiaomi MiMo client initialized");
+} else {
+  logger.warn("XIAOMI_API_KEY not set — Xiaomi MiMo models unavailable");
+}
+
+export { xiaomiClient };
+
+export type ModelProvider = "openai" | "dashscope" | "openrouter" | "xiaomi";
+export type ReasoningKind = "none" | "openai" | "dashscope" | "openrouter" | "xiaomi";
 export type ReasoningLevel = "off" | "low" | "medium" | "high";
 
 export interface ChatModel {
@@ -286,6 +304,43 @@ export const AVAILABLE_MODELS = [
     supportsReasoning: true,
     reasoning: "none" as ReasoningKind,
   },
+  // Xiaomi MiMo models
+  {
+    id: "mimo-7b",
+    label: "MiMo 7B",
+    provider: "xiaomi" as ModelProvider,
+    description: "高速・軽量",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "xiaomi" as ReasoningKind,
+  },
+  {
+    id: "mimo-13b",
+    label: "MiMo 13B",
+    provider: "xiaomi" as ModelProvider,
+    description: "高性能・バランス",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "xiaomi" as ReasoningKind,
+  },
+  {
+    id: "mimo-7b-chat",
+    label: "MiMo 7B Chat",
+    provider: "xiaomi" as ModelProvider,
+    description: "対話特化・高速",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "xiaomi" as ReasoningKind,
+  },
+  {
+    id: "mimo-13b-chat",
+    label: "MiMo 13B Chat",
+    provider: "xiaomi" as ModelProvider,
+    description: "対話特化・高性能",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "xiaomi" as ReasoningKind,
+  },
 ] as const satisfies readonly ChatModel[];
 
 export type ModelId = string;
@@ -464,6 +519,14 @@ export function getClientForModel(
     }
     return { client: openrouterClient, provider: "openrouter" };
   }
+  if (provider === "xiaomi") {
+    if (!xiaomiClient) {
+      throw new Error(
+        "Xiaomi APIキーが設定されていません。XIAOMI_API_KEY を確認してください。",
+      );
+    }
+    return { client: xiaomiClient, provider: "xiaomi" };
+  }
   return { client: openaiClient, provider: "openai" };
 }
 
@@ -479,12 +542,17 @@ const openrouterCircuit = getOrCreateCircuitBreaker("openrouter", {
   failureThreshold: 5,
   resetTimeoutMs: 30_000,
 });
+const xiaomiCircuit = getOrCreateCircuitBreaker("xiaomi", {
+  failureThreshold: 5,
+  resetTimeoutMs: 30_000,
+});
 
 export function getCircuitBreakerForProvider(
   provider: ModelProvider,
 ): CircuitBreaker {
   if (provider === "dashscope") return dashscopeCircuit;
   if (provider === "openrouter") return openrouterCircuit;
+  if (provider === "xiaomi") return xiaomiCircuit;
   return openaiCircuit;
 }
 

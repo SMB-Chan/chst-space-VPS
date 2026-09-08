@@ -163,7 +163,7 @@ export function subscribeSettings(
 
 export function pickAuditModel(
   primaryId: string,
-  models: { id: string; provider: "openai" | "dashscope" | "openrouter" }[],
+  models: { id: string; provider: "openai" | "dashscope" | "openrouter" | "xiaomi" }[],
   preferred?: string,
 ): string {
   // The saved choice is the source of truth whenever it still exists in the

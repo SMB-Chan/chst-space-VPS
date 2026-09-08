@@ -4,6 +4,7 @@ import {
   AVAILABLE_MODELS,
   dashscopeClient,
   openaiClient,
+  xiaomiClient,
   type ChatModel,
   type ModelProvider,
 } from "./ai-clients";
@@ -202,9 +203,18 @@ async function readOpenAiModelIds(): Promise<Set<string> | null> {
   });
 }
 
+let xiaomiModelCache: ModelDiscoveryCache | null = null;
+
+async function readXiaomiModelIds(): Promise<Set<string> | null> {
+  return readModelIds(xiaomiClient, xiaomiModelCache, (next) => {
+    xiaomiModelCache = next;
+  });
+}
+
 export function resetModelDiscoveryCache(): void {
   dashScopeModelCache = null;
   openAiModelCache = null;
+  xiaomiModelCache = null;
 }
 
 function chatModelCapabilities(model: ChatModel): CapabilityId[] {
@@ -366,15 +376,27 @@ export function mergeAvailableChatModels(
 }
 
 export async function getAvailableChatModels(): Promise<ChatModel[]> {
-  const [dashScopeIds, openAiIds, openRouterOverBudget] = await Promise.all([
-    readDashScopeModelIds(),
-    readOpenAiModelIds(),
-    isOpenRouterOverBudget(),
-  ]);
+  const [dashScopeIds, openAiIds, xiaomiIds, openRouterOverBudget] =
+    await Promise.all([
+      readDashScopeModelIds(),
+      readOpenAiModelIds(),
+      readXiaomiModelIds(),
+      isOpenRouterOverBudget(),
+    ]);
+
+  const disableOpenAi =
+    process.env.DISABLE_OPENAI_MODELS?.toLowerCase() === "true";
+  const disableDashScope =
+    process.env.DISABLE_DASHSCOPE_MODELS?.toLowerCase() === "true";
 
   const models = mergeAvailableChatModels([
-    { provider: "dashscope", ids: dashScopeIds },
-    { provider: "openai", ids: openAiIds },
+    ...(disableDashScope
+      ? []
+      : [{ provider: "dashscope" as const, ids: dashScopeIds }]),
+    ...(disableOpenAi
+      ? []
+      : [{ provider: "openai" as const, ids: openAiIds }]),
+    { provider: "xiaomi", ids: xiaomiIds },
     // OpenRouter discovery is deliberately disabled: the aggregator lists
     // hundreds of third-party ids whose vision/reasoning capabilities we
     // cannot describe, which would flood the picker with unlabelled entries.
