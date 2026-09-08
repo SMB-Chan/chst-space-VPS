@@ -1,4 +1,10 @@
+import {
+  annotateSearchResultsWithEvidence,
+  annotateSearchResultsWithProvider,
+  mergeSearchEvidenceMetadata,
+} from "./search-evidence-vector";
 import type { SearchResult } from "./search-parse";
+import type { SearchSubqueryRole } from "./search-query-planner";
 
 export type SearchProviderFailureKind =
   "rate_limited" | "blocked" | "timeout" | "server_error" | "transient";
@@ -35,6 +41,16 @@ const TRANSIENT_COOLDOWN_MS = 10_000;
 const GENERIC_FAILURES_BEFORE_COOLDOWN = 2;
 const RRF_K = 60;
 const DOMAIN_SOFT_CAP = 2;
+const SEARCH_SUBQUERY_ROLES = new Set<SearchSubqueryRole>([
+  "primary",
+  "official",
+  "freshness",
+  "counterevidence",
+  "comparison",
+  "research",
+  "technical",
+  "cross_language",
+]);
 
 function stateFor(name: string): MutableProviderHealth {
   let state = healthByProvider.get(name);
@@ -174,6 +190,25 @@ function domainOf(result: SearchResult): string {
   }
 }
 
+function queryRoleFromRankedSetName(
+  providerName: string,
+): SearchSubqueryRole | undefined {
+  if (!providerName.startsWith("query:")) return undefined;
+  const role = providerName.slice("query:".length).split(":", 1)[0];
+  return SEARCH_SUBQUERY_ROLES.has(role as SearchSubqueryRole)
+    ? (role as SearchSubqueryRole)
+    : undefined;
+}
+
+function resultsWithFusionProvenance(
+  set: RankedProviderResults,
+): SearchResult[] {
+  const queryRole = queryRoleFromRankedSetName(set.providerName);
+  return queryRole
+    ? annotateSearchResultsWithEvidence(set.results, { role: queryRole })
+    : annotateSearchResultsWithProvider(set.results, set.providerName);
+}
+
 interface FusedCandidate {
   result: SearchResult;
   score: number;
@@ -185,6 +220,8 @@ interface FusedCandidate {
  * Independent weighted Reciprocal Rank Fusion for provider-ranked search lists.
  * A URL confirmed by more than one provider naturally rises without requiring
  * provider-specific score scales. Provider weights are optional and bounded.
+ * Provider and query-lane provenance are accumulated while duplicate URLs fuse
+ * so later evidence-gap decisions can reuse already-collected work.
  */
 export function fuseSearchProviderResults(
   sets: RankedProviderResults[],
@@ -198,7 +235,7 @@ export function fuseSearchProviderResults(
     const rawWeight = set.weight ?? 1;
     const weight = Math.min(4, Math.max(0.1, rawWeight));
     const seenInProvider = new Set<string>();
-    set.results.forEach((result, index) => {
+    resultsWithFusionProvenance(set).forEach((result, index) => {
       if (seenInProvider.has(result.url)) return;
       seenInProvider.add(result.url);
       const rank = index + 1;
@@ -224,6 +261,11 @@ export function fuseSearchProviderResults(
       ) {
         existing.result = { ...existing.result, title: result.title };
       }
+      const evidence = mergeSearchEvidenceMetadata(
+        existing.result.evidence,
+        result.evidence,
+      );
+      if (evidence) existing.result = { ...existing.result, evidence };
     });
   }
 

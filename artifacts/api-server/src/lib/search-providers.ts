@@ -23,6 +23,11 @@ import {
   type SearchQueryPlan,
   type SearchSubqueryRole,
 } from "./search-query-planner";
+import {
+  annotateSearchResultsWithEvidence,
+  assessSearchRetrievalEvidence,
+  supplementalRolesForEvidenceDimensions,
+} from "./search-evidence-vector";
 import type { ApiSearchProvider } from "./search-provider-types";
 
 /**
@@ -572,63 +577,45 @@ export async function searchWithProviders(
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const run = await executeSearchWithProviders(query, providers, signal);
+  const results = annotateSearchResultsWithEvidence(run.results, {
+    role: "primary",
+  });
   logSearchExecutionMetadata(
     run.executions.map((execution) => ({
       role: "primary",
       execution,
     })),
-    run.results,
+    results,
   );
-  return run.results;
+  return results;
 }
 
-function requiredSupplementalRoles(
+function logRetrievalEvidenceGaps(
   plan: SearchQueryPlan,
-): Set<SearchSubqueryRole> {
-  const required = new Set<SearchSubqueryRole>();
-  for (const lane of plan.taskProfile.lanes) {
-    if (!lane.required) continue;
-    switch (lane.kind) {
-      case "primary_source":
-        required.add("official");
-        break;
-      case "freshness":
-        required.add("freshness");
-        break;
-      case "counterevidence":
-        required.add("counterevidence");
-        break;
-      case "comparison":
-        required.add("comparison");
-        break;
-      case "academic":
-        required.add("research");
-        break;
-      case "technical":
-        required.add("technical");
-        break;
-      case "independent":
-        // Independence is measured over result provenance/domain diversity;
-        // it does not justify a synthetic query by itself.
-        break;
-    }
-  }
-  return required;
-}
-
-function needsRequiredSupplementalCoverage(plan: SearchQueryPlan): boolean {
-  const required = requiredSupplementalRoles(plan);
-  if (required.size === 0) return false;
-  return plan.queries.slice(1).some((item) => required.has(item.role));
+  results: SearchResult[],
+): void {
+  const coverage = assessSearchRetrievalEvidence(plan, results);
+  if (coverage.missingRequiredDimensions.length === 0) return;
+  logger.debug(
+    {
+      component: "search-provider",
+      eventCode: "SEARCH_RETRIEVAL_EVIDENCE_GAPS",
+      task: plan.taskProfile.task,
+      missingRequiredDimensions: coverage.missingRequiredDimensions,
+      coveredDimensions: coverage.coveredDimensions,
+      distinctDomains: coverage.distinctDomains,
+      resultCount: results.length,
+    },
+    "Required retrieval evidence remains incomplete",
+  );
 }
 
 /**
  * Execute the bounded query plan without multiplying routine search cost.
- * The sanitized primary query always runs first. Supplemental angles run when
- * ordinary primary coverage is insufficient, or when the task profile marks a
- * specific evidence lane as required. This preserves cheap early-stop behavior
- * for routine lookup while allowing fact-check, comparison, research, weather,
- * and other evidence-sensitive tasks to collect their required dimensions.
+ * The sanitized primary query always runs first. When primary quantity is
+ * already sufficient, only query lanes corresponding to still-missing required
+ * evidence dimensions run. This is a finite-horizon evidence-gap transition:
+ * already-covered lanes are reused rather than searched again.
  */
 export async function searchWithPlannedProviders(
   query: string,
@@ -657,25 +644,73 @@ export async function searchWithPlannedProviders(
     signal,
     primary.role,
   );
-  const requiresSupplemental = needsRequiredSupplementalCoverage(plan);
+  const primaryResults = annotateSearchResultsWithEvidence(primaryRun.results, {
+    role: "primary",
+    extraDimensions: plan.primaryEvidenceDimensions,
+  });
+  const primaryQuantitySufficient =
+    hasSufficientPrimaryCoverage(primaryResults);
+  const primaryEvidenceCoverage = assessSearchRetrievalEvidence(
+    plan,
+    primaryResults,
+  );
+
   if (
     plan.queries.length === 1 ||
-    (hasSufficientPrimaryCoverage(primaryRun.results) && !requiresSupplemental)
+    (primaryQuantitySufficient &&
+      primaryEvidenceCoverage.missingRequiredDimensions.length === 0)
   ) {
     logSearchExecutionMetadata(
       primaryRun.executions.map((execution) => ({
         role: primary.role,
         execution,
       })),
-      primaryRun.results,
+      primaryResults,
     );
-    return primaryRun.results;
+    logRetrievalEvidenceGaps(plan, primaryResults);
+    return primaryResults;
   }
   if (signal?.aborted) {
     throw signal.reason ?? new Error("Search cancelled");
   }
 
-  const supplemental = plan.queries.slice(1);
+  const allSupplemental = plan.queries.slice(1);
+  let supplemental = allSupplemental;
+  if (primaryQuantitySufficient) {
+    const missingRoles = supplementalRolesForEvidenceDimensions(
+      primaryEvidenceCoverage.missingRequiredDimensions,
+    );
+    supplemental = allSupplemental.filter((item) =>
+      missingRoles.has(item.role),
+    );
+
+    // Independence is a corpus property and intentionally has no synthetic
+    // query role. If it is the only remaining gap, spend at most one already
+    // planned alternate lane to seek another domain rather than inventing an
+    // unbounded "independent source" query.
+    if (
+      supplemental.length === 0 &&
+      primaryEvidenceCoverage.missingRequiredDimensions.includes(
+        "independence",
+      ) &&
+      allSupplemental.length > 0
+    ) {
+      supplemental = [allSupplemental[0]];
+    }
+  }
+
+  if (supplemental.length === 0) {
+    logSearchExecutionMetadata(
+      primaryRun.executions.map((execution) => ({
+        role: primary.role,
+        execution,
+      })),
+      primaryResults,
+    );
+    logRetrievalEvidenceGaps(plan, primaryResults);
+    return primaryResults;
+  }
+
   const supplementalRuns = await Promise.all(
     supplemental.map((item) =>
       executeSearchWithProviders(item.query, providers, signal, item.role),
@@ -685,7 +720,7 @@ export async function searchWithPlannedProviders(
     {
       providerName: `query:${primary.role}`,
       weight: primary.weight,
-      results: primaryRun.results,
+      results: primaryResults,
     },
     ...supplemental.map((item, index) => ({
       providerName: `query:${item.role}:${index}`,
@@ -712,6 +747,7 @@ export async function searchWithPlannedProviders(
     ],
     finalResults,
   );
+  logRetrievalEvidenceGaps(plan, finalResults);
   return finalResults;
 }
 

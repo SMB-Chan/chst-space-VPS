@@ -105,6 +105,51 @@ describe("weighted reciprocal rank fusion", () => {
     expect(fused[0]?.url).toBe(confirmed.url);
   });
 
+  it("preserves evidence vectors when duplicate URLs fuse across lanes", () => {
+    const url = "https://shared.example/source";
+    const fused = fuseSearchProviderResults(
+      [
+        {
+          providerName: "query:official:0",
+          results: [
+            {
+              title: "source",
+              url,
+              snippet: "official",
+              evidence: {
+                dimensions: { primary_source: 1 },
+                queryRoles: ["official"],
+                providerNames: ["brave"],
+              },
+            },
+          ],
+        },
+        {
+          providerName: "query:counterevidence:1",
+          results: [
+            {
+              title: "source",
+              url,
+              snippet: "counter evidence with a longer snippet",
+              evidence: {
+                dimensions: { counterevidence: 1 },
+                queryRoles: ["counterevidence"],
+                providerNames: ["exa"],
+              },
+            },
+          ],
+        },
+      ],
+      2,
+    );
+
+    expect(fused[0]?.evidence).toEqual({
+      dimensions: { primary_source: 1, counterevidence: 1 },
+      queryRoles: ["official", "counterevidence"],
+      providerNames: ["brave", "exa"],
+    });
+  });
+
   it("uses provider weights without allowing extreme values to dominate unboundedly", () => {
     const weighted = result("weighted.example", "a");
     const consensus = result("consensus.example", "b");

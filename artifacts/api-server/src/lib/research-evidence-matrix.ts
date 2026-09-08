@@ -1,5 +1,6 @@
 import type { FactualitySource } from "./factuality";
 import { sanitizeSearchQuery } from "./search-enhance";
+import { buildSearchTaskProfile } from "./search-task-profile";
 import type { SpecialistToolCall } from "./specialist-capabilities";
 
 export type EvidenceFacet =
@@ -49,16 +50,10 @@ const FACET_QUERY_SUFFIXES: Record<EvidenceFacet, string[]> = {
   comparison: ["比較 違い 評価 benchmark", "比較 対照 長所 短所"],
 };
 
-const RECENCY_RE =
-  /(最新|現在|今日|今週|今月|直近|速報|動向|更新|recent|latest|current|today|this week|breaking|update)/i;
 const CAUSAL_RE =
   /(なぜ|どうして|原因|理由|背景|経緯|メカニズム|仕組み|why|cause|reason|background|mechanism)/i;
 const IMPACT_RE =
   /(影響|効果|結果|リスク|危険|副作用|問題点|課題|outcome|impact|effect|risk|harm|consequence)/i;
-const COMPARISON_RE =
-  /(比較|違い|差|対照|どちら|vs\.?|versus|compare|comparison|difference|benchmark)/i;
-const COUNTER_RE =
-  /(反対意見|反証|批判|異論|例外|限界|弱点|欠点|監査|検証|評価|問題点|課題|包括的|総合的|thorough|comprehensive|critique|counter|exception|limitation|audit|evaluate)/i;
 
 function requirement(
   facet: EvidenceFacet,
@@ -67,10 +62,19 @@ function requirement(
   return { facet, label: FACET_LABELS[facet], reason };
 }
 
+/**
+ * Build the semantic evidence contract for Deep Research from the same stable
+ * task profile used by bounded search planning. This prevents the search path
+ * and the evidence matrix from independently reclassifying equivalent queries
+ * into different freshness/counterevidence/comparison requirements. Causal and
+ * impact facets remain matrix-specific because they describe answer semantics,
+ * not retrieval source types.
+ */
 export function inferRequiredEvidenceFacets(
   question: string,
 ): EvidenceFacetRequirement[] {
   const normalized = question.replace(/\s+/g, " ").trim();
+  const profile = buildSearchTaskProfile(normalized);
   const required: EvidenceFacetRequirement[] = [
     requirement(
       "primary_source",
@@ -78,7 +82,7 @@ export function inferRequiredEvidenceFacets(
     ),
   ];
 
-  if (RECENCY_RE.test(normalized)) {
+  if (profile.dimensions.includes("freshness")) {
     required.push(
       requirement("recency", "質問が現在・最新・更新状況を求めているため"),
     );
@@ -96,12 +100,12 @@ export function inferRequiredEvidenceFacets(
       requirement("impact", "質問が影響・結果・リスクの評価を求めているため"),
     );
   }
-  if (COMPARISON_RE.test(normalized)) {
+  if (profile.dimensions.includes("comparison")) {
     required.push(
       requirement("comparison", "質問が複数対象の比較・差分を求めているため"),
     );
   }
-  if (COUNTER_RE.test(normalized)) {
+  if (profile.dimensions.includes("counterevidence")) {
     required.push(
       requirement(
         "counterevidence",

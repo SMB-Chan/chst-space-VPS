@@ -1,6 +1,7 @@
 import { normalizeQuery, sanitizeSearchQuery } from "./search-enhance";
 import {
   buildSearchTaskProfile,
+  type SearchEvidenceDimension,
   type SearchRetrievalLane,
   type SearchTaskProfile,
 } from "./search-task-profile";
@@ -26,6 +27,12 @@ export interface SearchQueryPlan {
   queries: SearchSubquery[];
   maxQueries: number;
   taskProfile: SearchTaskProfile;
+  /**
+   * Evidence dimensions already encoded as concrete constraints in the primary
+   * query itself. These are retrieval signals, not claims that the returned
+   * pages semantically satisfy the dimension.
+   */
+  primaryEvidenceDimensions: SearchEvidenceDimension[];
 }
 
 export interface SearchQueryPlannerOptions {
@@ -132,6 +139,22 @@ function officialVariant(base: string, isJapanese: boolean): string | null {
     : `${base} official primary source`;
 }
 
+function primaryEvidenceDimensionForLane(
+  lane: SearchRetrievalLane,
+  base: string,
+): SearchEvidenceDimension | undefined {
+  if (
+    lane.kind === "primary_source" &&
+    OFFICIAL_QUERY_CONSTRAINT_RE.test(base)
+  ) {
+    return "primary_source";
+  }
+  if (lane.kind === "freshness" && FRESHNESS_QUERY_CONSTRAINT_RE.test(base)) {
+    return "freshness";
+  }
+  return undefined;
+}
+
 function laneVariant(
   lane: SearchRetrievalLane,
   base: string,
@@ -201,9 +224,25 @@ export function planSearchQueries(
     taskProfile.recommendedMaxQueries,
   );
   if (!originalQuery) {
-    return { originalQuery: "", queries: [], maxQueries, taskProfile };
+    return {
+      originalQuery: "",
+      queries: [],
+      maxQueries,
+      taskProfile,
+      primaryEvidenceDimensions: [],
+    };
   }
 
+  const primaryEvidenceDimensions = [
+    ...new Set(
+      taskProfile.lanes
+        .map((lane) => primaryEvidenceDimensionForLane(lane, originalQuery))
+        .filter(
+          (dimension): dimension is SearchEvidenceDimension =>
+            dimension !== undefined,
+        ),
+    ),
+  ];
   const queries: SearchSubquery[] = [];
   addCandidate(queries, originalQuery, "primary", maxQueries);
 
@@ -235,5 +274,11 @@ export function planSearchQueries(
     );
   }
 
-  return { originalQuery, queries, maxQueries, taskProfile };
+  return {
+    originalQuery,
+    queries,
+    maxQueries,
+    taskProfile,
+    primaryEvidenceDimensions,
+  };
 }

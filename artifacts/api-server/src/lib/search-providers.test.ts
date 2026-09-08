@@ -255,7 +255,13 @@ describe("conditional provider ensemble", () => {
     ]);
 
     const results = await searchWithProviders("query", [primary, secondary]);
-    expect(results).toEqual(primaryResults);
+    expect(results).toMatchObject(primaryResults);
+    expect(
+      results.every((item) => item.evidence?.queryRoles.includes("primary")),
+    ).toBe(true);
+    expect(
+      results.every((item) => item.evidence?.providerNames.includes("primary")),
+    ).toBe(true);
     expect(primary.search).toHaveBeenCalledOnce();
     expect(secondary.search).not.toHaveBeenCalled();
   });
@@ -306,7 +312,15 @@ describe("conditional provider ensemble", () => {
     const secondary = stubProvider("secondary", async () => secondaryResults);
 
     const results = await searchWithProviders("query", [primary, secondary]);
-    expect(results).toEqual(secondaryResults);
+    expect(results).toMatchObject(secondaryResults);
+    expect(
+      results.every((item) => item.evidence?.queryRoles.includes("primary")),
+    ).toBe(true);
+    expect(
+      results.every((item) =>
+        item.evidence?.providerNames.includes("secondary"),
+      ),
+    ).toBe(true);
     expect(primary.search).toHaveBeenCalledOnce();
     expect(secondary.search).toHaveBeenCalledOnce();
   });

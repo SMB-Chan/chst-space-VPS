@@ -1,3 +1,5 @@
+import type { SearchEvidenceMetadata } from "./search-evidence-vector";
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -8,6 +10,8 @@ export interface SearchResult {
   publisherUrl?: string | null;
   /** Canonical article URL when a provider exposes one separately. */
   articleUrl?: string | null;
+  /** Internal retrieval provenance used for bounded evidence-gap recovery. */
+  evidence?: SearchEvidenceMetadata;
 }
 
 const TRACKING_QUERY_KEYS = new Set([
