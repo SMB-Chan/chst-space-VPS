@@ -21,6 +21,10 @@ import {
 } from "./stream-delta";
 import { getClientForModel } from "./ai-clients";
 import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
+import {
+  TRANSLATION_AUDIT_SYSTEM_PROMPT,
+  buildTranslationAuditUserMessage,
+} from "./translation-audit";
 import { buildWebContext } from "./web-search";
 import { buildRecentSearchConversation } from "./search-conversation";
 import { composeSkillSearchQuery } from "./skills";
@@ -1078,16 +1082,25 @@ export async function streamChatReply(args: {
               `data: ${JSON.stringify({ status: "auditing", model: auditModel.id })}\n\n`,
             );
           }
-          const auditUserText = buildAuditUserMessage({
-            question: userText,
-            answer: fullResponse,
-            sourceText: webContext.contextText,
-            attachmentText: attachmentsForAudit?.textFiles.length
-              ? attachmentsForAudit.textFiles
-                  .map((file) => `--- ${file.name} ---\n${file.content}`)
-                  .join("\n\n")
-              : undefined,
-          });
+          const auditAttachmentText = attachmentsForAudit?.textFiles.length
+            ? attachmentsForAudit.textFiles
+                .map((file) => `--- ${file.name} ---\n${file.content}`)
+                .join("\n\n")
+            : undefined;
+          const auditUserText = translationMode
+            ? buildTranslationAuditUserMessage({
+                mode: translationMode,
+                source: userText,
+                translation: fullResponse,
+                history: chatMessages,
+                attachmentText: auditAttachmentText,
+              })
+            : buildAuditUserMessage({
+                question: userText,
+                answer: fullResponse,
+                sourceText: webContext.contextText,
+                attachmentText: auditAttachmentText,
+              });
           const auditImageUrls = attachmentsForAudit?.imageDataUrls ?? [];
           // Forward attached images to the auditor only when it can actually
           // see them; otherwise fall back to the vision-bridge transcript so
@@ -1150,7 +1163,12 @@ export async function streamChatReply(args: {
                     ? AUDIT_MAX_OUTPUT_TOKENS
                     : AUDIT_REASONING_MAX_OUTPUT_TOKENS,
                 messages: [
-                  { role: "system", content: AUDIT_SYSTEM_PROMPT },
+                  {
+                    role: "system",
+                    content: translationMode
+                      ? TRANSLATION_AUDIT_SYSTEM_PROMPT
+                      : AUDIT_SYSTEM_PROMPT,
+                  },
                   {
                     role: "user",
                     content: auditUserContent,

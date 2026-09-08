@@ -294,6 +294,10 @@ function AuditCard({
   citationScope: string;
 }) {
   const [open, setOpen] = useState(!!live);
+  const translationAudit = /^翻訳チェック[:：]/.test(content.trim());
+  const displayContent = translationAudit
+    ? content.replace(/^翻訳チェック[:：]\s*/, "").trim()
+    : content;
   if (!content && !live) return null;
   return (
     <div
@@ -307,7 +311,9 @@ function AuditCard({
         onClick={() => setOpen((v) => !v)}
         className="m3-focus-ring flex w-full items-center gap-2 px-3 py-2 text-xs [color:var(--app-status-info)] transition-colors hover:bg-foreground/[0.04]"
       >
-        <span className="font-medium">{live ? "監査中" : "点検メモ"}</span>
+        <span className="font-medium">
+          {live ? "監査中" : translationAudit ? "翻訳チェック" : "点検メモ"}
+        </span>
         {modelId ? <span className="opacity-70">{modelId}</span> : null}
         {live ? <PhaseDots /> : null}
         <ChevronDown
@@ -319,7 +325,10 @@ function AuditCard({
       </button>
       {open && content ? (
         <div className="px-3 pb-3 text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]">
-          <SafeMarkdown content={content} citationScope={citationScope} />
+          <SafeMarkdown
+            content={displayContent}
+            citationScope={citationScope}
+          />
         </div>
       ) : null}
     </div>
