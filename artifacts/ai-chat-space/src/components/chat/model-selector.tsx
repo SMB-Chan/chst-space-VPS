@@ -24,11 +24,11 @@ const QUOTA_HEADERS = {
 export interface ModelInfo {
   id: string;
   label: string;
-  provider: "openai" | "dashscope" | "openrouter";
+  provider: "openai" | "dashscope" | "openrouter" | "xiaomi";
   description: string;
   supportsVision: boolean;
   supportsReasoning: boolean;
-  reasoning?: "none" | "openai" | "dashscope" | "openrouter";
+  reasoning?: "none" | "openai" | "dashscope" | "openrouter" | "xiaomi";
 }
 
 export interface TokenPlanQuotaHint {
@@ -146,12 +146,50 @@ const MODELS: ModelInfo[] = [
     supportsReasoning: true,
     reasoning: "openrouter",
   },
+  // Xiaomi MiMo models (V2.5 family)
+  {
+    id: "MiMo-V2.5-Pro",
+    label: "MiMo V2.5 Pro",
+    provider: "xiaomi",
+    description: "最高性能・推論特化",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
+  {
+    id: "MiMo-Auto",
+    label: "MiMo Auto",
+    provider: "xiaomi",
+    description: "自動ルーティング・最適選択",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
+  {
+    id: "MiMo-V2.5-Pro-UltraSpeed",
+    label: "MiMo V2.5 Pro UltraSpeed",
+    provider: "xiaomi",
+    description: "高速推論・低レイテンシ",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
+  {
+    id: "MiMo-V2.5",
+    label: "MiMo V2.5",
+    provider: "xiaomi",
+    description: "標準モデル・バランス",
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "xiaomi",
+  },
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
   dashscope: "Alibaba Cloud (Qwen)",
   openrouter: "OpenRouter",
+  xiaomi: "Xiaomi MiMo",
 };
 
 interface ModelSelectorProps {
@@ -168,7 +206,8 @@ function isModelInfo(value: unknown): value is ModelInfo {
     typeof v.label === "string" &&
     (v.provider === "openai" ||
       v.provider === "dashscope" ||
-      v.provider === "openrouter") &&
+      v.provider === "openrouter" ||
+      v.provider === "xiaomi") &&
     typeof v.description === "string" &&
     typeof v.supportsVision === "boolean" &&
     typeof v.supportsReasoning === "boolean"
@@ -408,6 +447,9 @@ export function ModelSelector({
   const openRouterModels = filterModels(
     models.filter((m) => m.provider === "openrouter"),
   );
+  const xiaomiModels = filterModels(
+    models.filter((m) => m.provider === "xiaomi"),
+  );
   const triggerQuota =
     quota?.weeklyRemainingPercent ?? quota?.limitingRemainingPercent;
   const triggerQuotaLabel =
@@ -501,7 +543,8 @@ export function ModelSelector({
   const noResults =
     openaiModels.length === 0 &&
     qwenModels.length === 0 &&
-    openRouterModels.length === 0;
+    openRouterModels.length === 0 &&
+    xiaomiModels.length === 0;
 
   const searchInput = (
     <div className="px-1 pb-1 pt-0.5">
@@ -539,6 +582,17 @@ export function ModelSelector({
                 {PROVIDER_LABELS["openrouter"]}
               </DropdownMenuLabel>
               {openRouterModels.map((model) =>
+                renderModelOption(model, "desktop"),
+              )}
+            </>
+          )}
+          {xiaomiModels.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                {PROVIDER_LABELS["xiaomi"]}
+              </DropdownMenuLabel>
+              {xiaomiModels.map((model) =>
                 renderModelOption(model, "desktop"),
               )}
             </>
@@ -628,6 +682,17 @@ export function ModelSelector({
                     {PROVIDER_LABELS["openrouter"]}
                   </div>
                   {openRouterModels.map((model) =>
+                    renderModelOption(model, "mobile", close),
+                  )}
+                </>
+              )}
+              {xiaomiModels.length > 0 && (
+                <>
+                  <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
+                  <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                    {PROVIDER_LABELS["xiaomi"]}
+                  </div>
+                  {xiaomiModels.map((model) =>
                     renderModelOption(model, "mobile", close),
                   )}
                 </>
