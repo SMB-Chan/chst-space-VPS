@@ -35,4 +35,8 @@ SEARCH_INITIAL_FANOUT = "2"
 
 [nix]
 channel = "stable-25_05"
-packages = ["libreoffice", "ipaexfont", "chromium", "codex"]
+# ffmpeg/ffprobe are runtime dependencies of the audio pipeline, not a
+# convenience: MiMo ASR accepts only wav and mp3 so other containers are
+# transcoded, and ffprobe measures duration before the upload limits apply.
+# Declared explicitly rather than relying on chromium/libreoffice pulling it in.
+packages = ["libreoffice", "ipaexfont", "chromium", "codex", "ffmpeg"]

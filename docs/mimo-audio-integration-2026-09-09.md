@@ -116,7 +116,7 @@ OpenAI の `/v1/audio/speech` ではなく **`POST /v1/chat/completions` + `audi
 
 ## 運用上の注意
 
-- **ffmpeg が必須になった**。MiMo ASR は wav/mp3 しか受け付けないため、m4a/ogg/flac/webm の添付はトランスコードする。ffprobe は Qwen ASR が既に必要としているので、通常は同じパッケージで揃う。無い場合は当該形式を非再試行エラーで拒否し、ほかのプロバイダが使えるならチェーンがそちらへ進む
+- **ffmpeg / ffprobe が実行時依存になった**。MiMo ASR は wav/mp3 しか受け付けないため、m4a/ogg/flac/webm の添付は 16kHz モノラル WAV へトランスコードする。ffprobe は長さ検査に使う。`.replit` の `[nix] packages` に `ffmpeg` を明示宣言した。それまでは chromium/libreoffice の推移的依存として `ffmpeg-full-6.1.2` が入っていただけで、それらを外すと消える状態だった。Replit の nixpkgs-25.05 では `ffmpeg` = `ffmpeg-7.1.1` で、`ffmpeg-7.1.1-bin` はストアに既存のためビルド不要なことを確認済み。ffmpeg が無い環境では当該形式を非再試行エラーで拒否し、ほかのプロバイダが使えるならチェーンがそちらへ進む
 - **voiceclone は未実装（実装しない方針を利用者が決定）**。`mimo-v2.5-tts-voiceclone` は Token Plan ホストで応答し、`audio.voice` に声サンプルの DataURL を要求する（公式ドキュメントの base64 記載は実APIと食い違う）。他人の声の複製になり得るため今回は入れない。将来入れる場合は同意・管理者限定・サイズと長さの制限を先に決めること
 - **音声ツールは一般ユーザーにも開放した**。`chat-stream.ts` の `RESTRICTED_SPECIALIST_TOOL_NAMES` はもともと「メディアツールは管理者のAlibaba資格情報で動く」という理由で `synthesize_speech` / `transcribe_audio` を管理者限定にしていたが、MiMo 音声は MiMo チャットと同じキーで動くため根拠が消えた。利用者の方針決定により2つを外し、残りは `generate_image` / `edit_image`（引き続き管理者のAlibaba資格情報）。あわせて
   - 能力ルーターを一般ユーザーにも走らせるよう変更。ただし `couldNeedSpeechCapabilityTool`（音声意図だけの狭いゲート）を通ったときのみで、画像・動画の文言ではルーター呼び出しを買わない
