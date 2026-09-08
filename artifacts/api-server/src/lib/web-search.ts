@@ -39,6 +39,14 @@ import {
 import { fetchWithBrowser } from "./render-fetch";
 import { searchWithApiProviders } from "./search-providers";
 import {
+  formatVisualEvidenceForContext,
+  isVisualSearchRequest,
+  transcribeVisualEvidence,
+  type VisualCandidate,
+  type VisualTranscriber,
+  type WebVisualEvidence,
+} from "./visual-evidence";
+import {
   planSearchQueries,
   type SearchQueryPlan,
   type SearchSubqueryRole,
@@ -67,6 +75,7 @@ interface SearchDecisionOptions {
   newsSearchBudget?: {
     alternateUsed: boolean;
   };
+  transcribeVisuals?: VisualTranscriber;
 }
 
 export interface SearchDecision {
@@ -91,6 +100,7 @@ export interface WebContext {
   contextText: string;
   searchWarning?: string;
   newsQuality?: NewsQualityReport;
+  visualEvidences?: WebVisualEvidence[];
 }
 
 export type SearchRoute = "default" | "alternate";
@@ -461,16 +471,20 @@ async function fetchViaRenderProxy(
 async function fetchViaFallbacks(
   url: string,
   signal?: AbortSignal,
+  captureVisuals?: boolean,
 ): Promise<{
   title: string;
   text: string;
   publishedAt?: string | null;
+  visuals?: VisualCandidate[];
 } | null> {
   if (PLAYWRIGHT_FALLBACK_ENABLED) {
     const rendered = await fetchWithBrowser(
       url,
       BROWSER_FETCH_TIMEOUT_MS,
       signal,
+      undefined,
+      { captureVisuals },
     );
     if (
       rendered &&
@@ -481,6 +495,7 @@ async function fetchViaFallbacks(
         title: rendered.title,
         text: rendered.text.slice(0, MAX_PAGE_CHARS),
         publishedAt: null,
+        visuals: rendered.visuals,
       };
     }
   }
@@ -590,11 +605,13 @@ export function extractPublishedAtFromHtml(html: string): string | null {
 export async function fetchPageText(
   url: string,
   signal?: AbortSignal,
+  captureVisuals?: boolean,
 ): Promise<{
   title: string;
   text: string;
   publishedAt?: string | null;
   url?: string;
+  visuals?: VisualCandidate[];
 } | null> {
   try {
     const {
@@ -617,7 +634,7 @@ export async function fetchPageText(
         // Bot-protection commonly answers with 401/403/429/503; the fallback
         // chain (browser, then proxy) may still be able to read the page.
         if ([401, 403, 429, 503].includes(res.status)) {
-          return await fetchViaFallbacks(url, signal);
+          return await fetchViaFallbacks(url, signal, captureVisuals);
         }
         return null;
       }
@@ -637,7 +654,7 @@ export async function fetchPageText(
       // challenge independently of content length: never serve it as an
       // article — go straight to the fallback chain.
       if (isBotChallengePage(html)) {
-        const fallback = await fetchViaFallbacks(url, signal);
+        const fallback = await fetchViaFallbacks(url, signal, captureVisuals);
         if (fallback) return fallback;
         logger.warn(
           { component: "web-search", errorCode: "BOT_CHALLENGE_PAGE" },
@@ -662,13 +679,14 @@ export async function fetchPageText(
       if (text.length < MIN_CONTENT_CHARS) {
         // Still unreadable (JS shell, interstitial): hand over to the
         // browser/proxy fallback chain, keeping the HTML-derived title.
-        const fallback = await fetchViaFallbacks(url, signal);
+        const fallback = await fetchViaFallbacks(url, signal, captureVisuals);
         if (fallback) {
           return {
             title: title === url ? fallback.title : title,
             text: fallback.text,
             publishedAt: fallback.publishedAt ?? null,
             url: finalUrl,
+            visuals: fallback.visuals,
           };
         }
         logger.warn(
@@ -1086,6 +1104,10 @@ export async function buildWebContext(
   const executedNewsQueries: string[] = [];
 
   const urls = extractUrls(userMessage);
+  const wantVisuals = isVisualSearchRequest(userMessage);
+  const visualCandidates: Array<
+    VisualCandidate & { sourceUrl: string; sourceTitle: string }
+  > = [];
 
   if (urls.length > 0) {
     onStatus({ status: "fetching", urls });
@@ -1101,7 +1123,7 @@ export async function buildWebContext(
     : decideSearch(client, model, provider, userMessage, options);
   const [urlPages, decision] = await Promise.all([
     urls.length > 0
-      ? Promise.all(urls.map((u) => fetchPageText(u, signal)))
+      ? Promise.all(urls.map((u) => fetchPageText(u, signal, wantVisuals)))
       : Promise.resolve([] as Awaited<ReturnType<typeof fetchPageText>>[]),
     decisionPromise,
   ]);
@@ -1121,6 +1143,17 @@ export async function buildWebContext(
         `【ユーザー提供URL: [${sourceNumber}] ${urls[i]}】\n` +
           `[${sourceNumber}] ${page.title}\n    URL: ${urls[i]}\n    本文抜粋: ${page.text}`,
       );
+      if (wantVisuals && page.visuals && visualCandidates.length < 2) {
+        for (const v of page.visuals) {
+          if (visualCandidates.length < 2) {
+            visualCandidates.push({
+              ...v,
+              sourceUrl: urls[i],
+              sourceTitle: page.title,
+            });
+          }
+        }
+      }
     } else if (urls[i]) {
       urlFetchFailed = true;
       logger.warn(
@@ -1202,7 +1235,7 @@ export async function buildWebContext(
       .slice(0, FETCH_TOP_N)
       .filter((r) => !seenSourceUrls.has(r.url));
     const pages = await Promise.all(
-      top.map((r) => fetchPageText(r.url, signal)),
+      top.map((r) => fetchPageText(r.url, signal, wantVisuals)),
     );
     const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
     const fetchedPages = new Map(
@@ -1262,6 +1295,17 @@ export async function buildWebContext(
         const ref = urlToIndex.get(top[i].url);
         const label = ref ? `[${ref}]` : top[i].url;
         parts.push(`【ページ内容 ${label}: ${top[i].url}】\n${page.text}`);
+        if (wantVisuals && page.visuals && visualCandidates.length < 2) {
+          for (const v of page.visuals) {
+            if (visualCandidates.length < 2) {
+              visualCandidates.push({
+                ...v,
+                sourceUrl: top[i].url,
+                sourceTitle: page.title,
+              });
+            }
+          }
+        }
       }
     });
 
@@ -1360,6 +1404,34 @@ export async function buildWebContext(
     }
   }
 
+  let visualEvidences: WebVisualEvidence[] | undefined;
+  if (wantVisuals && visualCandidates.length > 0) {
+    onStatus({
+      status: "transcribing_visuals",
+      count: visualCandidates.length,
+    });
+    try {
+      visualEvidences = await transcribeVisualEvidence(
+        visualCandidates,
+        userMessage,
+        options?.transcribeVisuals,
+        signal,
+      );
+      if (visualEvidences && visualEvidences.length > 0) {
+        const visualContextBlock =
+          formatVisualEvidenceForContext(visualEvidences);
+        if (visualContextBlock) {
+          parts.push(visualContextBlock);
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { component: "web-search", err },
+        "Failed to transcribe visual evidence; continuing with text only",
+      );
+    }
+  }
+
   return {
     searched,
     query,
@@ -1367,5 +1439,6 @@ export async function buildWebContext(
     contextText: parts.join("\n\n"),
     searchWarning,
     newsQuality,
+    visualEvidences,
   };
 }

@@ -4,6 +4,7 @@ import type {
   Browser,
   BrowserContext,
   BrowserContextOptions,
+  Page,
   Route,
 } from "playwright";
 import {
@@ -12,6 +13,7 @@ import {
 } from "./browser-egress-proxy";
 import { logger, safeFailureFields } from "./logger";
 import { assertSafeUrl } from "./ssrf-guard";
+import type { VisualCandidate } from "./visual-evidence";
 
 /**
  * Last-resort page fetching with a real headless browser (Playwright).
@@ -462,12 +464,149 @@ export interface BrowserFetchDependencies {
   createContext?: (deadlineAtMs: number) => Promise<BrowserContext>;
 }
 
+export interface BrowserFetchOptions {
+  captureVisuals?: boolean;
+}
+
+export interface BrowserFetchResult {
+  title: string;
+  text: string;
+  visuals?: VisualCandidate[];
+}
+
+async function extractVisualCandidates(
+  page: Page,
+  deadlineAtMs: number,
+): Promise<VisualCandidate[]> {
+  const remaining = remainingBrowserDeadlineMs(deadlineAtMs);
+  if (remaining < 600 || typeof page.locator !== "function") return [];
+
+  try {
+    const candidatesMeta = await withBrowserDeadline(
+      page.evaluate(() => {
+        try {
+          const results: Array<{
+            selector: string;
+            elementType: "map" | "chart" | "figure" | "canvas" | "image";
+            caption?: string;
+            alt?: string;
+          }> = [];
+
+          const isVisible = (el: HTMLElement) => {
+            const rect = el.getBoundingClientRect();
+            return (
+              rect.width >= 200 &&
+              rect.height >= 120 &&
+              rect.top < 3000 &&
+              window.getComputedStyle(el).visibility !== "hidden" &&
+              window.getComputedStyle(el).display !== "none"
+            );
+          };
+
+          const isNoise = (el: HTMLElement) => {
+            const text = `${el.className || ""} ${el.id || ""}`.toLowerCase();
+            return /ad|banner|sponsor|logo|avatar|profile|icon|nav|footer|header|sidebar/.test(
+              text,
+            );
+          };
+
+          // 1. Map containers
+          const mapEl = document.querySelector<HTMLElement>(
+            'iframe[src*="maps"], iframe[src*="google.com/maps"], [class*="map" i], [id*="map" i]',
+          );
+          if (mapEl && isVisible(mapEl) && !isNoise(mapEl)) {
+            results.push({
+              selector:
+                'iframe[src*="maps"], iframe[src*="google.com/maps"], [class*="map" i], [id*="map" i]',
+              elementType: "map",
+              caption:
+                mapEl.getAttribute("title") ||
+                mapEl.getAttribute("aria-label") ||
+                undefined,
+            });
+          }
+
+          // 2. Figures or Canvases
+          const figEl = document.querySelector<HTMLElement>(
+            "figure, canvas, svg[aria-label]",
+          );
+          if (figEl && isVisible(figEl) && !isNoise(figEl)) {
+            const figcaption = figEl.querySelector("figcaption");
+            const type =
+              figEl.tagName.toLowerCase() === "canvas" ? "canvas" : "figure";
+            results.push({
+              selector: "figure, canvas, svg[aria-label]",
+              elementType: type,
+              caption:
+                figcaption?.innerText?.trim() ||
+                figEl.getAttribute("aria-label") ||
+                undefined,
+            });
+          }
+
+          // 3. Article images
+          if (results.length < 2) {
+            const imgEl = document.querySelector<HTMLImageElement>(
+              "article img, main img, .content img",
+            );
+            if (imgEl && isVisible(imgEl) && !isNoise(imgEl)) {
+              results.push({
+                selector: "article img, main img, .content img",
+                elementType: "image",
+                caption: imgEl.title || undefined,
+                alt: imgEl.getAttribute("alt")?.trim() || undefined,
+              });
+            }
+          }
+
+          return results.slice(0, 2);
+        } catch {
+          return [];
+        }
+      }),
+      deadlineAtMs,
+      "visual candidate evaluation",
+    );
+
+    if (!Array.isArray(candidatesMeta) || candidatesMeta.length === 0)
+      return [];
+
+    const candidates: VisualCandidate[] = [];
+    for (const meta of candidatesMeta) {
+      if (remainingBrowserDeadlineMs(deadlineAtMs) < 400) break;
+      try {
+        const locator = page.locator(meta.selector).first();
+        if (!locator || typeof locator.screenshot !== "function") continue;
+        const buffer = await withBrowserDeadline(
+          locator.screenshot({ type: "jpeg", quality: 75, timeout: 1500 }),
+          deadlineAtMs,
+          "element screenshot",
+        );
+        if (buffer && buffer.length > 0) {
+          candidates.push({
+            elementType: meta.elementType,
+            caption: meta.caption,
+            alt: meta.alt,
+            imageDataUrl: `data:image/jpeg;base64,${buffer.toString("base64")}`,
+          });
+        }
+      } catch {
+        // Individual element screenshot failure should never fail page fetch
+      }
+    }
+    return candidates;
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchWithBrowser(
   url: string,
   timeoutMs: number,
   signal?: AbortSignal,
   dependencies?: BrowserFetchDependencies,
-): Promise<{ title: string; text: string } | null> {
+  options?: BrowserFetchOptions,
+): Promise<BrowserFetchResult | null> {
   const startedAt = Date.now();
   const normalizedTimeoutMs =
     Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 1;
@@ -587,8 +726,18 @@ export async function fetchWithBrowser(
         browserMetrics.failures += 1;
         return null;
       }
+
+      let visuals: VisualCandidate[] | undefined;
+      if (options?.captureVisuals) {
+        visuals = await extractVisualCandidates(page, deadlineAtMs);
+      }
+
       browserMetrics.successes += 1;
-      return { title: title || url, text };
+      return {
+        title: title || url,
+        text,
+        ...(visuals && visuals.length > 0 ? { visuals } : {}),
+      };
     } catch (err) {
       browserMetrics.failures += 1;
       if (err instanceof BrowserDeadlineExceededError) {

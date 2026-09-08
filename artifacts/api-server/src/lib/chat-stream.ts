@@ -21,6 +21,7 @@ import {
 } from "./stream-delta";
 import { getClientForModel } from "./ai-clients";
 import { AUDIT_SYSTEM_PROMPT, buildAuditUserMessage } from "./audit";
+import { formatVisualEvidenceForAudit } from "./visual-evidence";
 import {
   TRANSLATION_AUDIT_SYSTEM_PROMPT,
   buildTranslationAuditUserMessage,
@@ -47,7 +48,10 @@ import {
   hasActionableFeedback,
   reviewLayout,
 } from "./file-review";
-import { describeImagesForTextModel } from "./vision-bridge";
+import {
+  describeImagesForTextModel,
+  isVisionBridgeAvailable,
+} from "./vision-bridge";
 import type { TranslationMode } from "./translation";
 import { elapsedMs, getFileGenerationErrorDetails } from "./file-diagnostics";
 import { applyValidatedAuditPatch } from "./audit-patch";
@@ -491,6 +495,9 @@ export async function streamChatReply(args: {
             ),
             signal: clientAbort.signal,
             newsSearchBudget,
+            transcribeVisuals: isVisionBridgeAvailable()
+              ? (vArgs) => describeImagesForTextModel(vArgs)
+              : undefined,
           },
         );
 
@@ -1143,6 +1150,9 @@ export async function streamChatReply(args: {
                 answer: fullResponse,
                 sourceText: webContext.contextText,
                 attachmentText: auditAttachmentText,
+                visualText: webContext.visualEvidences?.length
+                  ? formatVisualEvidenceForAudit(webContext.visualEvidences)
+                  : undefined,
               });
           const auditImageUrls = attachmentsForAudit?.imageDataUrls ?? [];
           // Forward attached images to the auditor only when it can actually
@@ -1327,6 +1337,9 @@ export async function streamChatReply(args: {
               ),
               signal: clientAbort.signal,
               newsSearchBudget,
+              transcribeVisuals: isVisionBridgeAvailable()
+                ? (vArgs) => describeImagesForTextModel(vArgs)
+                : undefined,
             },
           );
           if (
