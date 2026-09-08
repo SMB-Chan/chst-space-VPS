@@ -1,4 +1,4 @@
-import type { SearchResult } from "./search-parse";
+import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
 export {
   buildNewsFastPathQueries,
   buildNewsSearchCircuit,
@@ -10,6 +10,7 @@ export {
 
 export type NewsQuality = "good" | "partial" | "poor";
 export type TaskSuccess = "succeeded" | "failed" | "unknown";
+const NEWS_QUERY_REPORT_LIMIT = 4;
 
 export interface NewsQualityReport {
   kind: "news";
@@ -56,7 +57,7 @@ export function normalizeNewsQualityReport(
     ? raw.queries
         .filter((query): query is string => typeof query === "string")
         .map((query) => query.slice(0, 240))
-        .slice(0, 3)
+        .slice(0, NEWS_QUERY_REPORT_LIMIT)
     : [];
   return {
     kind: "news",
@@ -124,6 +125,18 @@ function evidenceHostOf(result: SearchResult): string | null {
   return hostOf(evidenceUrl(result));
 }
 
+function isGoogleNewsWrapperUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.toLowerCase() === "news.google.com" &&
+      /^\/rss\/articles\//i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function matchesKnownHost(
   host: string,
   knownHosts: ReadonlySet<string>,
@@ -162,7 +175,7 @@ function isSearchPage(result: SearchResult): boolean {
     if (
       host === "news.google.com" &&
       result.publisherUrl &&
-      /^\/rss\/articles\//i.test(new URL(result.url).pathname)
+      isGoogleNewsWrapperUrl(result.url)
     ) {
       return false;
     }
@@ -233,6 +246,32 @@ function isFresh(publishedAt: string, now: Date, maxAgeDays = 7): boolean {
   return ageMs >= -86_400_000 && ageMs <= maxAgeDays * 86_400_000;
 }
 
+function normalizedTitle(title: string): string {
+  return title
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function newsResultIdentities(result: SearchResult): string[] {
+  const identities: string[] = [];
+  const articleUrl = result.articleUrl
+    ? normalizeExternalHttpUrl(result.articleUrl)
+    : null;
+  if (articleUrl) identities.push(`url:${articleUrl}`);
+
+  const resultUrl = normalizeExternalHttpUrl(result.url);
+  if (resultUrl) identities.push(`url:${resultUrl}`);
+
+  const publisherHost = hostOf(result.publisherUrl ?? result.url);
+  const title = normalizedTitle(result.title);
+  if (publisherHost && title && !isSearchPage(result)) {
+    identities.push(`publisher-title:${baseDomain(publisherHost)}:${title}`);
+  }
+
+  return identities.length > 0 ? identities : [`raw:${result.url}`];
+}
+
 export function assessNewsRetrieval(args: {
   results: SearchResult[];
   queries?: string[];
@@ -244,9 +283,9 @@ export function assessNewsRetrieval(args: {
   const seenUrls = new Set<string>();
 
   for (const result of args.results) {
-    const identity = result.articleUrl || result.url;
-    if (seenUrls.has(identity)) continue;
-    seenUrls.add(identity);
+    const identities = newsResultIdentities(result);
+    if (identities.some((identity) => seenUrls.has(identity))) continue;
+    for (const identity of identities) seenUrls.add(identity);
     const reason = rejectionReason(result);
     if (reason) {
       rejected.push({ title: result.title, url: result.url, reason });

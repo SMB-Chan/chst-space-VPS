@@ -140,7 +140,7 @@ function normalizeNewsQuality(value: unknown): NewsQualityReport | undefined {
     ? value.queries
         .filter((query): query is string => typeof query === "string")
         .map((query) => query.slice(0, 240))
-        .slice(0, 3)
+        .slice(0, 4)
     : [];
   return {
     kind: "news",

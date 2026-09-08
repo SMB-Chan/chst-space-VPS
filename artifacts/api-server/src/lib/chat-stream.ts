@@ -470,6 +470,7 @@ export async function streamChatReply(args: {
 
     // Translation mode works from the conversation alone; web search would
     // only add latency and untrusted noise.
+    const newsSearchBudget = { alternateUsed: false };
     const webContext = translationMode
       ? { searched: false, sources: [], contextText: "" }
       : await buildWebContext(
@@ -487,6 +488,7 @@ export async function streamChatReply(args: {
               userText,
             ),
             signal: clientAbort.signal,
+            newsSearchBudget,
           },
         );
 
@@ -1266,6 +1268,7 @@ export async function streamChatReply(args: {
       // this server has a working web-search path. Recover once, only for
       // normal chat: translation must never turn into an answer/research turn.
       if (
+        !activeNewsQuality &&
         shouldRecoverWithWeb({
           question: userText,
           answer: fullResponse,
@@ -1306,6 +1309,7 @@ export async function streamChatReply(args: {
                 userText,
               ),
               signal: clientAbort.signal,
+              newsSearchBudget,
             },
           );
           if (

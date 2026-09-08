@@ -125,6 +125,44 @@ describe("news retrieval quality gate", () => {
     });
   });
 
+  it("deduplicates an unresolved Google News wrapper by publisher and title", () => {
+    const direct = {
+      ...result("https://www.reuters.com/world/article-a", "速報: World news"),
+    };
+    const wrapper = {
+      ...result("https://news.google.com/rss/articles/one", "速報: World news"),
+      articleUrl: null,
+      publisherName: "Reuters",
+      publisherUrl: "https://www.reuters.com/world",
+    };
+
+    expect(
+      assessNewsRetrieval({
+        results: [direct, wrapper],
+        now: new Date("2026-09-08T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      acceptedSourceCount: 1,
+      independentDomainCount: 1,
+    });
+  });
+
+  it("preserves the initial circuit queries and one alternate query", () => {
+    const report = assessNewsRetrieval({
+      results: [
+        result("https://www.reuters.com/world/article-a", "速報: World news"),
+        result(
+          "https://www.bbc.com/news/article-b",
+          "Breaking news: World update",
+        ),
+      ],
+      queries: ["q1", "q2", "q3", "q4"],
+      now: new Date("2026-09-08T04:00:00.000Z"),
+    });
+
+    expect(report.queries).toEqual(["q1", "q2", "q3", "q4"]);
+  });
+
   it("recognizes major publisher subdomains without trusting lookalikes", () => {
     const accepted = result(
       "https://jp.reuters.com/world/article-a",

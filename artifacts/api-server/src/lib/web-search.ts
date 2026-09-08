@@ -64,6 +64,9 @@ interface SearchDecisionOptions {
   forceQuery?: string;
   signal?: AbortSignal;
   recentConversation?: string;
+  newsSearchBudget?: {
+    alternateUsed: boolean;
+  };
 }
 
 export interface SearchDecision {
@@ -1086,11 +1089,17 @@ export async function buildWebContext(
 
   // Start URL fetching and search-decision in parallel — they are independent
   const signal = options?.signal;
+  const decisionPromise: Promise<SearchDecision> = newsCircuit
+    ? Promise.resolve<SearchDecision>({
+        search: true,
+        query: newsQueries[0] ?? "",
+      })
+    : decideSearch(client, model, provider, userMessage, options);
   const [urlPages, decision] = await Promise.all([
     urls.length > 0
       ? Promise.all(urls.map((u) => fetchPageText(u, signal)))
       : Promise.resolve([] as Awaited<ReturnType<typeof fetchPageText>>[]),
-    decideSearch(client, model, provider, userMessage, options),
+    decisionPromise,
   ]);
 
   // Process user-provided URL pages; notify when any fail
@@ -1276,11 +1285,19 @@ export async function buildWebContext(
         results: newsResults,
         queries: executedNewsQueries,
       });
-      if (newsQuality.quality !== "good" && !signal?.aborted) {
+      const alternateAvailable = !options?.newsSearchBudget?.alternateUsed;
+      if (
+        newsQuality.quality !== "good" &&
+        !signal?.aborted &&
+        alternateAvailable
+      ) {
         const escalationQuery =
           newsQueries[
             Math.min(MAX_SEARCH_ROUNDS - 1, newsQueries.length - 1)
           ] ?? query;
+        if (options?.newsSearchBudget) {
+          options.newsSearchBudget.alternateUsed = true;
+        }
         onStatus({
           status: "search_escalation",
           query: escalationQuery,
