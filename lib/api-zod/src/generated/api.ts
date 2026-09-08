@@ -329,7 +329,9 @@ export const GetOpenaiConversationResponse = zod.object({
   "title": zod.string(),
   "url": zod.string(),
   "publishedAt": zod.coerce.date().nullish(),
-  "fetchedAt": zod.coerce.date().nullish()
+  "fetchedAt": zod.coerce.date().nullish(),
+  "publisherName": zod.string().nullish(),
+  "publisherUrl": zod.string().url().nullish()
 })).nullish(),
   "artifacts": zod.array(zod.object({
   "id": zod.number().int(),
@@ -433,7 +435,9 @@ export const ListOpenaiMessagesResponseItem = zod.object({
   "title": zod.string(),
   "url": zod.string(),
   "publishedAt": zod.coerce.date().nullish(),
-  "fetchedAt": zod.coerce.date().nullish()
+  "fetchedAt": zod.coerce.date().nullish(),
+  "publisherName": zod.string().nullish(),
+  "publisherUrl": zod.string().url().nullish()
 })).nullish(),
   "artifacts": zod.array(zod.object({
   "id": zod.number().int(),

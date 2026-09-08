@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { FactualityCard, normalizeFactualityReport } from "./factuality-card";
+import {
+  FactualityCard,
+  normalizeFactualityReport,
+  shouldRenderAuditCard,
+} from "./factuality-card";
 
 describe("FactualityCard", () => {
   it("renders verdicts and claim-to-source links", () => {
@@ -85,5 +89,27 @@ describe("normalizeFactualityReport", () => {
         modelId: "model",
       }),
     ).toBeNull();
+  });
+});
+
+describe("shouldRenderAuditCard", () => {
+  it("uses the unified research-quality card instead of the legacy audit card", () => {
+    expect(
+      shouldRenderAuditCard({
+        hasResearchQuality: true,
+        auditContent: "旧点検メモ",
+        isStreaming: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the audit card for non-news factuality audits", () => {
+    expect(
+      shouldRenderAuditCard({
+        hasResearchQuality: false,
+        auditContent: "点検メモ",
+        isStreaming: false,
+      }),
+    ).toBe(true);
   });
 });

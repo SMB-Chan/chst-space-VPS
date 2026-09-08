@@ -517,6 +517,18 @@ export async function streamChatReply(args: {
         );
       }
     }
+    if (
+      !translationMode &&
+      webContext.newsQuality &&
+      webContext.newsQuality.quality !== "good"
+    ) {
+      workingMessages.push({
+        role: "system",
+        content:
+          "今回の依頼は最新ニュースの確認が必要です。外部ニュース取得の品質基準を満たす根拠が得られなかったため、現在のニュースを断定して補完しないでください。" +
+          "知識カットオフを主な理由にしたり、ユーザーへニュースサイトの手動確認・再試行を促したりせず、必要なら「外部ニュース取得の品質が不足しているため確認できませんでした」と簡潔に説明してください。",
+      });
+    }
 
     // Only inject the research/tool-use prompt when no web data was already
     // gathered. When web data IS present, the model should rely on it rather

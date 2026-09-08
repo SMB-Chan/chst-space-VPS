@@ -13,6 +13,8 @@ export interface ChatCompletionInput {
     url: string;
     publishedAt?: string | null;
     fetchedAt?: string | null;
+    publisherName?: string | null;
+    publisherUrl?: string | null;
   }[];
   audit?: { content: string; modelId: string };
   factuality?: FactualityReport;

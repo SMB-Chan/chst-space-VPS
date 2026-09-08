@@ -108,6 +108,14 @@ function hostOf(url: string): string | null {
   }
 }
 
+function evidenceUrl(result: SearchResult): string {
+  return result.articleUrl || result.publisherUrl || result.url;
+}
+
+function evidenceHostOf(result: SearchResult): string | null {
+  return hostOf(evidenceUrl(result));
+}
+
 function baseDomain(host: string): string {
   const parts = host.split(".");
   const suffix = parts.slice(-2).join(".");
@@ -128,7 +136,20 @@ function baseDomain(host: string): string {
 
 function isSearchPage(result: SearchResult): boolean {
   const host = hostOf(result.url);
-  if (!host || SEARCH_HOSTS.has(host)) return true;
+  if (!host) return true;
+  if (SEARCH_HOSTS.has(host)) {
+    // Google News RSS uses /rss/articles/* wrapper URLs. They are not useful
+    // as article URLs by themselves, but a normalized <source url> identifies
+    // the publisher and makes the RSS item usable evidence.
+    if (
+      host === "news.google.com" &&
+      result.publisherUrl &&
+      /^\/rss\/articles\//i.test(new URL(result.url).pathname)
+    ) {
+      return false;
+    }
+    return true;
+  }
   try {
     const url = new URL(result.url);
     return (
@@ -148,7 +169,7 @@ function isProductPage(result: SearchResult): boolean {
     return true;
   }
   try {
-    const path = new URL(result.url).pathname;
+    const path = new URL(result.articleUrl || result.url).pathname;
     return /\/(products?|items?|p|cart|checkout|buy)\b/i.test(path);
   } catch {
     return true;
@@ -172,7 +193,7 @@ function rejectionReason(
     return "error-page";
   }
   if (isProductPage(result)) return "product-page";
-  const host = hostOf(result.url);
+  const host = evidenceHostOf(result);
   const recognizedPublisher = host ? MAJOR_OR_OFFICIAL_HOSTS.has(host) : false;
   if (
     !NEWS_TERMS.test(`${result.title} ${result.snippet ?? ""}`) &&
@@ -218,12 +239,12 @@ export function assessNewsRetrieval(args: {
   );
   const domains = new Set(
     accepted
-      .map((result) => hostOf(result.url))
+      .map((result) => evidenceHostOf(result))
       .filter((host): host is string => Boolean(host))
       .map(baseDomain),
   );
   const officialOrMajorSourceCount = accepted.filter((result) => {
-    const host = hostOf(result.url);
+    const host = evidenceHostOf(result);
     return host ? MAJOR_OR_OFFICIAL_HOSTS.has(host) : false;
   }).length;
 
@@ -253,7 +274,13 @@ export function assessNewsRetrieval(args: {
  * inflate domain or freshness coverage.
  */
 export function filterNewsResults(results: SearchResult[]): SearchResult[] {
-  return results.filter((result) => !rejectionReason(result));
+  // A normal search result may not expose its publication date until its page
+  // is fetched. Keep that candidate for the bounded page-fetch stage; the
+  // final assessment still rejects it if no date can be recovered.
+  return results.filter((result) => {
+    const reason = rejectionReason(result);
+    return reason === null || reason === "missing-date";
+  });
 }
 
 export function buildNewsFastPathQueries(

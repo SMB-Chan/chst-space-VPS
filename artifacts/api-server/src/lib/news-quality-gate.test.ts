@@ -68,6 +68,41 @@ describe("news retrieval quality gate", () => {
     });
   });
 
+  it("accepts Google News RSS wrappers when publisher metadata is present", () => {
+    const results = [
+      {
+        ...result(
+          "https://news.google.com/rss/articles/one",
+          "速報: World news",
+        ),
+        articleUrl: null,
+        publisherName: "Reuters",
+        publisherUrl: "https://www.reuters.com/world",
+      },
+      {
+        ...result(
+          "https://news.google.com/rss/articles/two",
+          "Breaking news: World update",
+        ),
+        articleUrl: null,
+        publisherName: "BBC",
+        publisherUrl: "https://www.bbc.com/news",
+      },
+    ];
+
+    expect(filterNewsResults(results)).toHaveLength(2);
+    expect(
+      assessNewsRetrieval({
+        results,
+        now: new Date("2026-09-08T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      quality: "good",
+      independentDomainCount: 2,
+      freshSourceCount: 2,
+    });
+  });
+
   it("rewrites news queries with a concrete JST date and bounds fan-out", () => {
     expect(
       buildNewsFastPathQueries(

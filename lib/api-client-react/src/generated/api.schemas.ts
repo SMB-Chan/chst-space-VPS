@@ -183,6 +183,8 @@ export interface OpenaiSource {
   url: string;
   publishedAt?: string | null;
   fetchedAt?: string | null;
+  publisherName?: string | null;
+  publisherUrl?: string | null;
 }
 
 export interface OpenaiArtifact {

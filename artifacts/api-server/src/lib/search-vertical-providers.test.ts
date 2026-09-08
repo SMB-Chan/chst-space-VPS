@@ -26,6 +26,27 @@ describe("vertical search parsers", () => {
     ]);
   });
 
+  it("keeps Google News wrapper metadata and publisher URL", () => {
+    const results = parseGoogleNewsRssResults(`
+      <rss><channel><item>
+        <title>速報: Example event</title>
+        <link>https://news.google.com/rss/articles/CBMiExample</link>
+        <description>&lt;p&gt;Publisher report&lt;/p&gt;</description>
+        <pubDate>Tue, 08 Sep 2026 03:00:00 GMT</pubDate>
+        <source url="https://publisher.example/news">Publisher Example</source>
+      </item></channel></rss>
+    `);
+
+    expect(results[0]).toMatchObject({
+      title: "速報: Example event",
+      url: "https://news.google.com/rss/articles/CBMiExample",
+      articleUrl: null,
+      publisherName: "Publisher Example",
+      publisherUrl: "https://publisher.example/news",
+      publishedAt: "2026-09-08T03:00:00.000Z",
+    });
+  });
+
   it("parses Wikipedia results and strips markup", () => {
     const results = parseWikipediaResults(
       {
