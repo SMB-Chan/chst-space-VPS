@@ -82,7 +82,7 @@ if (openRouterApiKey) {
 export { openrouterClient };
 
 // Xiaomi MiMo — OpenAI-compatible endpoint
-const XIAOMI_BASE_URL = "https://api.xiaomi.com/v1";
+const XIAOMI_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1";
 
 let xiaomiClient: OpenAI | null = null;
 
