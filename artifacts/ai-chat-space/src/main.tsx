@@ -7,6 +7,7 @@ import { registerServiceWorker } from "./pwa";
 
 import "./index.css";
 import "./design-system/tokens.css";
+import "./design-system/translation-mode.css";
 
 const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, "");
 if (baseUrl) {

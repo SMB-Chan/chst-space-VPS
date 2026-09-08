@@ -1,0 +1,45 @@
+/* Translation mode is intentionally more visible than an ordinary tool chip.
+ * The composer placeholder is already switched only while translation mode is
+ * active, so this selector adds a state layer without coupling feature code to
+ * a one-off color implementation. */
+[data-testid="composer"]:has(
+    [data-testid="composer-textarea"][placeholder^="翻訳する"]
+  ) {
+  border-color: color-mix(
+    in oklab,
+    var(--app-status-accent) 72%,
+    var(--m3-outline-variant)
+  );
+  background: color-mix(
+    in oklab,
+    var(--app-status-accent-container) 52%,
+    var(--m3-surface-container-high)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--app-status-accent) 18%, transparent),
+    var(--m3-elevation-3);
+}
+
+[data-testid="composer"]:has(
+    [data-testid="composer-textarea"][placeholder^="翻訳する"]
+  ):focus-within {
+  border-color: var(--app-status-accent);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--app-status-accent) 17%, transparent),
+    var(--m3-elevation-3);
+}
+
+[data-testid="composer"]:has(
+    [data-testid="composer-textarea"][placeholder^="翻訳する"]
+  )
+  [data-testid="composer-textarea"] {
+  caret-color: var(--app-status-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-testid="composer"]:has(
+      [data-testid="composer-textarea"][placeholder^="翻訳する"]
+    ) {
+    transition: none;
+  }
+}

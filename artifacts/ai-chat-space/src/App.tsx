@@ -24,6 +24,8 @@ import { ChatLayout } from "@/components/layout/chat-layout";
 import { ChatPage } from "@/pages/chat";
 import { HomePage } from "@/pages/home";
 import { SettingsPage } from "@/pages/settings";
+import { loadSettings, saveSettings } from "@/lib/settings";
+import { shouldResetTranslationOnNavigation } from "@/lib/translation-route-policy";
 import {
   Redirect,
   Route,
@@ -181,6 +183,26 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
+function TranslationModeRouteResetter() {
+  const [location] = useLocation();
+  const previousLocationRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (
+      shouldResetTranslationOnNavigation(
+        previousLocationRef.current,
+        location,
+      ) &&
+      loadSettings().translationMode !== "off"
+    ) {
+      saveSettings({ translationMode: "off" });
+    }
+    previousLocationRef.current = location;
+  }, [location]);
+
+  return null;
+}
+
 function HomeRedirect() {
   const { isLoaded } = useAuth();
   if (!isLoaded) return <AuthLoading />;
@@ -301,6 +323,7 @@ function ClerkProviderWithRoutes() {
     >
       <QueryClientProvider client={queryClient}>
         <ClerkQueryClientCacheInvalidator />
+        <TranslationModeRouteResetter />
         <TooltipProvider>
           <Router />
           <Toaster />

@@ -86,12 +86,30 @@ export function shouldAttachSpecialistTools(args: {
   );
 }
 
-/** Detect a short tool-use promise that did not contain an actual answer. */
+/**
+ * Detect a draft that must not be accepted as the completed answer while the
+ * server has already attached research tools. This includes both a short
+ * "I will search" promise and a false claim that Web/search capabilities are
+ * unavailable. The caller gives the turn only one bounded recovery attempt.
+ */
 export function isResearchAnnouncementOnly(text: string): boolean {
   const normalized = splitThinkTags(text).content.replace(/\s+/g, " ").trim();
-  if (!normalized || normalized.length > 320 || /\[\d+\]/.test(normalized)) {
-    return false;
-  }
+  if (!normalized || /\[\d+\]/.test(normalized)) return false;
+
+  const capabilityDenial =
+    normalized.length <= 1_200 &&
+    (/(?:web|ウェブ|ブラウジング|検索).{0,48}(?:機能|環境|アクセス)?.{0,28}(?:ない|ありません|できない|できません|使えない|利用できない|対応していない)/i.test(
+      normalized,
+    ) ||
+      /(?:リアルタイム|最新(?:の)?情報|今日(?:の)?(?:ニュース|天気)?).{0,64}(?:取得|確認|検索|アクセス).{0,24}(?:できない|できません|行えない|不可)/i.test(
+        normalized,
+      ) ||
+      /(?:ニュースサイト|検索エンジン).{0,48}(?:確認|ご確認)(?:ください|いただく|をお願いします)/i.test(
+        normalized,
+      ));
+  if (capabilityDenial) return true;
+
+  if (normalized.length > 320) return false;
   const announcesResearch =
     /(?:検索|調査|調べ|確認|情報.{0,8}(?:集め|収集)|ウェブ|web\s*search|search|look\s*up|research).{0,100}(?:します|いたします|してみます|行います|使います|呼び出します|始めます|確認します|search|look\s*up|research|check)/i.test(
       normalized,

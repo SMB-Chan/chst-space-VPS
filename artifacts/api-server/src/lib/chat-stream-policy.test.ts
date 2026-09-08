@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isResearchAnnouncementOnly,
   prepareInitialChatMessages,
   specialistCallFromPlan,
 } from "./chat-stream-policy";
@@ -34,6 +35,32 @@ describe("prepareInitialChatMessages", () => {
     expect(result.messages).toHaveLength(2);
     expect(String(result.messages[1]?.content)).toContain("プロの翻訳者");
     expect(String(result.messages[1]?.content)).not.toContain("ファイルを生成");
+  });
+});
+
+describe("research recovery detection", () => {
+  it("recovers from a false Web capability denial for current news", () => {
+    expect(
+      isResearchAnnouncementOnly(
+        "今日のニュースについては、リアルタイムの情報を取得するWeb検索機能がこの環境にはないため、具体的なニュースをお伝えできません。最新ニュースはニュースサイトや検索エンジンでご確認ください。",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a normal answer out of the recovery path", () => {
+    expect(
+      isResearchAnnouncementOnly(
+        "一般にニュース記事では、公開日時と一次情報を確認すると情報の鮮度を判断しやすくなります。",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not reinterpret an already sourced answer as a capability denial", () => {
+    expect(
+      isResearchAnnouncementOnly(
+        "検索結果の一部は取得できませんでしたが、確認できた情報では新しい発表がありました[1]。",
+      ),
+    ).toBe(false);
   });
 });
 
