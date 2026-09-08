@@ -40,7 +40,7 @@
 - Web 検索は tool calling ではなく、応答前の独立ステップ（モデル非依存、キー不要）。初回検索のあと、資料が不足かをモデルに判定させて最大1回だけ追加検索する（bounded 反復検索）。
 - 検索バックエンドは `TAVILY_API_KEY` / `EXA_API_KEY` / `BRAVE_SEARCH_API_KEY` があれば API を優先（この順）、なければ DDG の HTML スクレイプにフォールバック。
 - 新規添付は本文と構造化JSONで分離し、DBでは互換形式に保存して、送信直前にmultimodal contentへ変換する。
-- 文書（PDF/ZIP/DOCX/XLSX/PPTX）と音声の添付は、サーバー側でマジックナンバー検証のうえ決定論的にテキスト抽出（音声は OpenAI互換の文字起こし、フォールバックは DashScope paraformer-v2）し、抽出結果だけを保存する。コード実行・サンドボックスは意図的に持たない（`src/lib/file-extraction.ts` / `binary-detection.ts` / `audio-transcription.ts`）。
+- 文書（PDF/ZIP/DOCX/XLSX/PPTX）と音声の添付は、サーバー側でマジックナンバー検証のうえ決定論的にテキスト抽出（音声は OpenAI互換の文字起こし、フォールバックは DashScope Qwen ASR／paraformer-v2、Xiaomi MiMo `mimo-v2.5-asr` の順）し、抽出結果だけを保存する。コード実行・サンドボックスは意図的に持たない（`src/lib/file-extraction.ts` / `binary-detection.ts` / `audio-transcription.ts`）。
 - 抽出結果はメッセージごとの乱数境界で「信頼できないデータ」としてモデルへ渡す（プロンプトインジェクション対策、`message-content.ts`）。ZIPは展開前・展開中の二重上限で防御。
 - OpenAI は `max_completion_tokens`、DashScope 互換は `max_tokens`。混在会話では切替必須。
 - DashScope Token Plan はリージョン共通 URL ではなく専用エンドポイントが必要。

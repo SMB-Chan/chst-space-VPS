@@ -84,6 +84,60 @@ describe("LLM JST time context", () => {
     ).toHaveLength(1);
   });
 
+  it("leaves a speech synthesis body untouched", () => {
+    const body = JSON.stringify({
+      model: "mimo-v2.5-tts",
+      messages: [{ role: "assistant", content: "こんにちは。" }],
+      stream: false,
+      audio: { format: "mp3", voice: "mimo_default" },
+    });
+
+    expect(injectLlmTimeContextIntoBody(body, fixedNow)).toBe(body);
+  });
+
+  it("leaves a speech recognition body untouched", () => {
+    const body = JSON.stringify({
+      model: "mimo-v2.5-asr",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_audio",
+              input_audio: { data: "AAAA", format: "mp3" },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(injectLlmTimeContextIntoBody(body, fixedNow)).toBe(body);
+  });
+
+  it("passes a speech request through /chat/completions unchanged", async () => {
+    const baseFetch = vi.fn(
+      async () => new Response("{}", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const wrapped = createLlmTimeContextFetch(baseFetch, () => fixedNow);
+    const body = JSON.stringify({
+      model: "mimo-v2.5-tts-voicedesign",
+      messages: [
+        { role: "user", content: "明るい女性の声。" },
+        { role: "assistant", content: "こんにちは。" },
+      ],
+      audio: { format: "mp3" },
+    });
+
+    await wrapped("https://api.example.com/v1/chat/completions", {
+      method: "POST",
+      body,
+    });
+
+    const init = (baseFetch as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[1] as RequestInit;
+    expect(init.body).toBe(body);
+  });
+
   it("wraps only chat-completions fetch requests", async () => {
     const baseFetch = vi.fn(
       async () => new Response("{}", { status: 200 }),

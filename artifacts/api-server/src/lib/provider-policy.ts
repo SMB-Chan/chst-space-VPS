@@ -8,6 +8,8 @@ export function isProviderFrozen(
       ? env.DISABLE_OPENAI_MODELS
       : provider === "dashscope"
         ? env.DISABLE_DASHSCOPE_MODELS
-        : undefined;
+        : provider === "xiaomi"
+          ? env.DISABLE_XIAOMI_MODELS
+          : undefined;
   return flag?.trim().toLowerCase() === "true";
 }

@@ -7,6 +7,16 @@ import {
   isAlibabaTokenPlanKey,
 } from "./alibaba-specialist-config";
 import { logger, safeFailureFields } from "./logger";
+import {
+  getAsrModel,
+  isSpeechProviderAvailable,
+  type SpeechProvider,
+} from "./speech-capabilities";
+import {
+  XiaomiAudioError,
+  isXiaomiAudioConfigured,
+  transcribeXiaomiAudio,
+} from "./xiaomi-audio";
 
 /**
  * Speech-to-text for audio attachments. Runs on the providers already
@@ -23,6 +33,11 @@ export class TranscriptionError extends Error {
     this.publicMessage = publicMessage;
   }
 }
+
+const ASR_PROVIDER_LABEL: Record<SpeechProvider, string> = {
+  alibaba: "Alibaba Model Studio",
+  xiaomi: "Xiaomi MiMo",
+};
 
 const OPENAI_FALLBACK_MODELS = ["gpt-4o-mini-transcribe", "whisper-1"];
 const QWEN_TRANSCRIBE_MODEL = "qwen-audio-3.0-asr-flash";
@@ -145,12 +160,18 @@ export async function transcribeDashScopeAudio(
   }
 }
 
-export async function transcribeAudio(args: {
+export interface AudioTranscriptionArgs {
   buffer: Buffer;
   filename: string;
   mime: string;
+  /** Honoured by the Alibaba transport; other providers infer the language. */
+  languageHints?: string[];
   signal?: AbortSignal;
-}): Promise<string> {
+}
+
+export async function transcribeAudio(
+  args: AudioTranscriptionArgs,
+): Promise<string> {
   const failures: string[] = [];
 
   for (const model of openaiClient && !isProviderFrozen("openai")
@@ -192,14 +213,75 @@ export async function transcribeAudio(args: {
     }
   }
 
+  if (isXiaomiAudioConfigured()) {
+    try {
+      return await transcribeXiaomiAudio(args);
+    } catch (err) {
+      if (args.signal?.aborted)
+        throw args.signal.reason ?? new Error("aborted");
+      if (err instanceof XiaomiAudioError && !err.retryable) {
+        throw new TranscriptionError(err.publicMessage);
+      }
+      failures.push(`xiaomi/mimo-v2.5-asr: ${errorMessage(err)}`);
+    }
+  }
+
   logger.warn(
     {
       component: "audio-transcription",
       errorCode: "AUDIO_TRANSCRIPTION_FAILED",
+      failures: failures.join("; ").slice(0, 2_000),
     },
     "Audio transcription failed on all providers",
   );
   throw new TranscriptionError(
     "音声の文字起こしに失敗しました。ファイルが破損しているか、文字起こし機能が一時的に利用できません。",
   );
+}
+
+/**
+ * Transcribe with a specific specialist model, the path the capability broker
+ * takes once it has already chosen one. Falls back to the provider chain when
+ * no model was named.
+ */
+export async function transcribeAudioWithModel(
+  args: AudioTranscriptionArgs,
+  modelId?: string,
+): Promise<string> {
+  const requested = modelId?.trim();
+  if (!requested) return transcribeAudio(args);
+
+  const spec = getAsrModel(requested);
+  if (!spec) {
+    throw new TranscriptionError(
+      "指定された音声認識モデルには対応していません。",
+    );
+  }
+  if (!isSpeechProviderAvailable(spec.provider)) {
+    throw new TranscriptionError(
+      `${ASR_PROVIDER_LABEL[spec.provider]}の音声認識は現在利用できません。`,
+    );
+  }
+  try {
+    return spec.provider === "xiaomi"
+      ? await transcribeXiaomiAudio(args)
+      : await transcribeDashScopeAudio(args, requested);
+  } catch (err) {
+    if (args.signal?.aborted) throw args.signal.reason ?? new Error("aborted");
+    if (err instanceof XiaomiAudioError) {
+      throw new TranscriptionError(err.publicMessage);
+    }
+    if (err instanceof TranscriptionError) throw err;
+    logger.warn(
+      safeFailureFields(
+        err,
+        "audio-transcription",
+        "AUDIO_TRANSCRIPTION_FAILED",
+      ),
+      "Model-directed audio transcription failed",
+    );
+    throw new TranscriptionError(
+      `${ASR_PROVIDER_LABEL[spec.provider]}で音声を文字起こしできませんでした。`,
+    );
+  }
 }

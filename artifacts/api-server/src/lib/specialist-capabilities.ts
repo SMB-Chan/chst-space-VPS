@@ -13,7 +13,12 @@ import {
   isOpenRouterOverBudget,
   openRouterConfigured,
 } from "./openrouter-budget";
-import { transcribeDashScopeAudio } from "./audio-transcription";
+import { transcribeAudioWithModel } from "./audio-transcription";
+import {
+  SpeechSynthesisError,
+  synthesizeSpeech,
+  type SynthesizedSpeech,
+} from "./audio-synthesis";
 import {
   getMemoryToolDefinitions,
   executeMemoryTool,
@@ -25,16 +30,23 @@ import {
   isFormTool,
 } from "./form-tools";
 import { generateAlibabaImage } from "./alibaba-image";
-import {
-  QWEN_AUDIO_TTS_PLUS_VOICES,
-  synthesizeAlibabaSpeech,
-} from "./alibaba-tts";
-import {
-  isAlibabaSpecialistConfigured,
-  isAlibabaTokenPlanKey,
-} from "./alibaba-specialist-config";
+import { isAlibabaSpecialistConfigured } from "./alibaba-specialist-config";
 import type { GeneratedAsset as StoredGeneratedAsset } from "./generated-assets";
 import { ALIBABA_MODEL_CATALOG } from "./alibaba-capabilities";
+import {
+  availableAsrModels,
+  availableTtsModels,
+  isRegularDashScopeTranscriptionConfigured,
+  isSpeechProviderAvailable,
+  type TtsModelSpec,
+} from "./speech-capabilities";
+import {
+  MIMO_ASR_MODEL_ID,
+  MIMO_TTS_DEFAULT_MODEL_ID,
+  MIMO_TTS_VOICE_DESIGN_MODEL_ID,
+  MIMO_TTS_VOICES,
+  isXiaomiAudioConfigured,
+} from "./xiaomi-audio";
 
 export const CAPABILITY_IDS = [
   "chat",
@@ -106,6 +118,33 @@ SPECIALIST_MODEL_BASE.push({
   capabilities: ["speech-to-text"],
   configured: false,
 });
+
+// MiMo audio rides the same Xiaomi endpoint already used for MiMo chat, so it
+// stays usable on installations where Alibaba specialist credentials are
+// absent or the provider is frozen.
+SPECIALIST_MODEL_BASE.push(
+  {
+    id: MIMO_TTS_DEFAULT_MODEL_ID,
+    label: "MiMo V2.5 TTS",
+    provider: "xiaomi",
+    capabilities: ["audio-synthesis"],
+    configured: false,
+  },
+  {
+    id: MIMO_TTS_VOICE_DESIGN_MODEL_ID,
+    label: "MiMo V2.5 TTS Voice Design",
+    provider: "xiaomi",
+    capabilities: ["audio-synthesis"],
+    configured: false,
+  },
+  {
+    id: MIMO_ASR_MODEL_ID,
+    label: "MiMo V2.5 ASR",
+    provider: "xiaomi",
+    capabilities: ["speech-to-text"],
+    configured: false,
+  },
+);
 
 const CAPABILITY_DETAILS: Record<
   CapabilityId,
@@ -228,19 +267,10 @@ function chatModelCapabilities(model: ChatModel): CapabilityId[] {
   ];
 }
 
-function regularDashScopeTranscriptionConfigured(): boolean {
-  const key = process.env.DASHSCOPE_API_KEY?.trim();
-  return Boolean(
-    !isProviderFrozen("dashscope") &&
-    dashscopeClient &&
-    key &&
-    !isAlibabaTokenPlanKey(key),
-  );
-}
-
 function specialistModelConfigured(model: CapabilityModel): boolean {
+  if (model.provider === "xiaomi") return isXiaomiAudioConfigured();
   if (model.id === "paraformer-v2")
-    return regularDashScopeTranscriptionConfigured();
+    return isRegularDashScopeTranscriptionConfigured();
   if (model.id === "qwen-audio-3.0-asr-flash")
     return isAlibabaSpecialistConfigured();
   if (
@@ -530,16 +560,18 @@ const imageEditArgs = z.object({
 
 const transcribeArgs = z.object({
   attachmentName: z.string().trim().min(1).max(255),
-  modelId: z.enum(["qwen-audio-3.0-asr-flash", "paraformer-v2"]).optional(),
+  // Resolved against the provider-neutral speech catalog at execution time, the
+  // same way image tools resolve theirs.
+  modelId: z.string().trim().max(100).optional(),
   languageHints: z.array(z.string().trim().min(2).max(16)).max(4).optional(),
 });
 
 const synthesizeSpeechArgs = z.object({
   text: z.string().trim().min(1).max(10_000),
-  modelId: z.literal("qwen-audio-3.0-tts-plus").optional(),
-  voice: z.enum(QWEN_AUDIO_TTS_PLUS_VOICES).optional(),
+  modelId: z.string().trim().max(100).optional(),
+  voice: z.string().trim().max(40).optional(),
   instruction: z.string().trim().max(1_000).optional(),
-  languageHint: z.enum(["zh", "en"]).optional(),
+  languageHint: z.enum(["zh", "en", "ja"]).optional(),
   rate: z.number().min(0.5).max(2).optional(),
   pitch: z.number().min(0.5).max(2).optional(),
   volume: z.number().min(0).max(100).optional(),
@@ -554,10 +586,72 @@ const fetchPageArgs = z.object({
   url: z.string().trim().min(1).max(2000),
 });
 
+/**
+ * Speech tool schemas follow the configured catalog: advertising a voice or a
+ * prosody knob that the reachable models ignore produces silent failures.
+ */
+function buildSynthesizeSpeechTool(
+  models: readonly TtsModelSpec[],
+): SpecialistToolDefinition {
+  const voices = [
+    ...new Set(models.flatMap((model) => model.voices as readonly string[])),
+  ];
+  const languages = [
+    ...new Set(models.flatMap((model) => model.languages as readonly string[])),
+  ];
+  const properties: Record<string, unknown> = {
+    text: { type: "string", minLength: 1, maxLength: 10_000 },
+    modelId: {
+      type: "string",
+      enum: models.map((model) => model.id),
+      description: models
+        .map((model) => `${model.id}（対応言語: ${model.languages.join("/")}）`)
+        .join("、"),
+    },
+    languageHint: {
+      type: "string",
+      enum: languages,
+      description:
+        "実際に読み上げる言語。対応していない言語は指定しないでください。",
+    },
+  };
+  if (voices.length > 0) {
+    properties.voice = { type: "string", enum: voices };
+  }
+  if (models.some((model) => model.supportsInstruction)) {
+    properties.instruction = {
+      type: "string",
+      maxLength: 1_000,
+      description: "声質・話し方の自由記述。指示を受け付けるモデルでのみ有効。",
+    };
+  }
+  if (models.some((model) => model.supportsProsody)) {
+    properties.rate = { type: "number", minimum: 0.5, maximum: 2 };
+    properties.pitch = { type: "number", minimum: 0.5, maximum: 2 };
+    properties.volume = { type: "number", minimum: 0, maximum: 100 };
+  }
+  return {
+    type: "function",
+    function: {
+      name: "synthesize_speech",
+      description:
+        "テキストを音声ファイルに合成します。実際の読み上げ・音声化を求められた場合だけ使ってください。modelIdを省略するとlanguageHintに対応するモデルが自動で選ばれます。rate・pitch・volumeはAlibaba Model Studioのモデルでのみ有効です。",
+      parameters: {
+        type: "object",
+        properties,
+        required: ["text"],
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
 export function getSpecialistTools(
   context: SpecialistToolContext,
 ): SpecialistToolDefinition[] {
   const specialistConfigured = isAlibabaSpecialistConfigured();
+  const ttsModels = availableTtsModels();
+  const asrModels = availableAsrModels();
   const tools: SpecialistToolDefinition[] = [];
 
   if (specialistConfigured) {
@@ -581,28 +675,10 @@ export function getSpecialistTools(
         },
       },
     });
-    tools.push({
-      type: "function",
-      function: {
-        name: "synthesize_speech",
-        description:
-          "Alibaba Model StudioのQwen Audio TTS Plusで中国語または英語のテキストをMP3音声にします。実際の読み上げ・音声化を求められた場合だけ使ってください。",
-        parameters: {
-          type: "object",
-          properties: {
-            text: { type: "string", minLength: 1, maxLength: 10_000 },
-            voice: { type: "string", enum: [...QWEN_AUDIO_TTS_PLUS_VOICES] },
-            instruction: { type: "string", maxLength: 1_000 },
-            languageHint: { type: "string", enum: ["zh", "en"] },
-            rate: { type: "number", minimum: 0.5, maximum: 2 },
-            pitch: { type: "number", minimum: 0.5, maximum: 2 },
-            volume: { type: "number", minimum: 0, maximum: 100 },
-          },
-          required: ["text"],
-          additionalProperties: false,
-        },
-      },
-    });
+  }
+
+  if (ttsModels.length > 0) {
+    tools.push(buildSynthesizeSpeechTool(ttsModels));
   }
 
   if (specialistConfigured && context.imageAttachments?.length) {
@@ -624,30 +700,32 @@ export function getSpecialistTools(
       },
     });
   }
-  if (
-    (specialistConfigured || regularDashScopeTranscriptionConfigured()) &&
-    context.audioAttachments?.length
-  ) {
+  if (asrModels.length > 0 && context.audioAttachments?.length) {
+    const asrProperties: Record<string, unknown> = {
+      attachmentName: { type: "string", minLength: 1, maxLength: 255 },
+      modelId: {
+        type: "string",
+        enum: asrModels.map((model) => model.id),
+      },
+    };
+    // MiMo's gateway injects its own prompt and refuses language hints, so only
+    // advertise them when a model that honours them is reachable.
+    if (asrModels.some((model) => model.provider === "alibaba")) {
+      asrProperties.languageHints = {
+        type: "array",
+        maxItems: 4,
+        items: { type: "string", minLength: 2, maxLength: 16 },
+      };
+    }
     tools.push({
       type: "function",
       function: {
         name: "transcribe_audio",
         description:
-          "添付音声を通常のAlibaba Model Studio資格情報で文字起こしします。音声の内容確認が必要な場合だけ使ってください。",
+          "添付音声を文字起こしします。音声の内容確認が必要な場合だけ使ってください。modelIdを省略すると利用可能なモデルが自動で選ばれます。",
         parameters: {
           type: "object",
-          properties: {
-            attachmentName: { type: "string", minLength: 1, maxLength: 255 },
-            modelId: {
-              type: "string",
-              enum: ["qwen-audio-3.0-asr-flash", "paraformer-v2"],
-            },
-            languageHints: {
-              type: "array",
-              maxItems: 4,
-              items: { type: "string", minLength: 2, maxLength: 16 },
-            },
-          },
+          properties: asrProperties,
           required: ["attachmentName"],
           additionalProperties: false,
         },
@@ -817,13 +895,13 @@ export async function executeSpecialistTool(
         (item) => item.name === args.attachmentName,
       );
       if (!audio) throw new Error("指定された音声添付が見つかりません");
-      const text = await transcribeDashScopeAudio(
+      const text = await transcribeAudioWithModel(
         {
           buffer: audio.buffer,
           filename: audio.name,
           mime: audio.mime,
-          signal: context.signal,
-          languageHints: args.languageHints,
+          ...(context.signal ? { signal: context.signal } : {}),
+          ...(args.languageHints ? { languageHints: args.languageHints } : {}),
         },
         args.modelId,
       );
@@ -836,17 +914,26 @@ export async function executeSpecialistTool(
     }
     if (call.name === "synthesize_speech") {
       const args = parseToolArgs(synthesizeSpeechArgs, call.arguments);
-      const speech = await synthesizeAlibabaSpeech({
-        text: args.text,
-        modelId: args.modelId,
-        voice: args.voice,
-        instruction: args.instruction,
-        languageHint: args.languageHint,
-        rate: args.rate,
-        pitch: args.pitch,
-        volume: args.volume,
-        signal: context.signal,
-      });
+      let speech: SynthesizedSpeech;
+      try {
+        speech = await synthesizeSpeech({
+          text: args.text,
+          ...(args.modelId ? { modelId: args.modelId } : {}),
+          ...(args.voice ? { voice: args.voice } : {}),
+          ...(args.instruction ? { instruction: args.instruction } : {}),
+          ...(args.languageHint ? { languageHint: args.languageHint } : {}),
+          ...(args.rate !== undefined ? { rate: args.rate } : {}),
+          ...(args.pitch !== undefined ? { pitch: args.pitch } : {}),
+          ...(args.volume !== undefined ? { volume: args.volume } : {}),
+          ...(context.signal ? { signal: context.signal } : {}),
+        });
+      } catch (error) {
+        // The tool summary is user-visible, so report the vetted message.
+        if (error instanceof SpeechSynthesisError) {
+          throw new Error(error.publicMessage);
+        }
+        throw error;
+      }
       const asset: GeneratedAsset = {
         ...speech,
         capability: "audio-synthesis",
@@ -854,7 +941,10 @@ export async function executeSpecialistTool(
       return {
         ok: true,
         capability: "audio-synthesis",
-        summary: "MP3音声を生成しました。",
+        summary:
+          speech.mimeType === "audio/wav"
+            ? "WAV音声を生成しました。"
+            : "MP3音声を生成しました。",
         asset,
       };
     }

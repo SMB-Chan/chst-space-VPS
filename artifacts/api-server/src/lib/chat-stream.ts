@@ -72,7 +72,10 @@ import {
   formatMemoriesForPrompt,
   runMemoryMaintenance,
 } from "./llm-memory-tools";
-import { planCapabilityTool } from "./capability-broker";
+import {
+  couldNeedSpeechCapabilityTool,
+  planCapabilityTool,
+} from "./capability-broker";
 import {
   isResearchAnnouncementOnly,
   prepareInitialChatMessages,
@@ -131,12 +134,15 @@ const RESEARCH_RECOVERY_SYSTEM_PROMPT = `直前の応答は、検索すると宣
 const MEMORY_MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
 const memoryMaintenanceTimes = new Map<string, number>();
 
-/** Media tools run on the admin's Alibaba credentials: general users never see them. */
+/**
+ * Image generation and editing run on the admin's Alibaba credentials, so
+ * general users never see them. The speech tools are not restricted: they
+ * resolve across every configured vendor and are bounded by the same
+ * per-user rate and concurrency guards as chat.
+ */
 const RESTRICTED_SPECIALIST_TOOL_NAMES = new Set([
   "generate_image",
-  "synthesize_speech",
   "edit_image",
-  "transcribe_audio",
 ]);
 
 export function withTimeout<T>(
@@ -612,24 +618,37 @@ export async function streamChatReply(args: {
 
     let brokerToolCall: SpecialistToolCall | undefined;
     let researchRecoveryUsed = false;
-    // General users run on OpenRouter text models only: image/audio media
-    // generation consumes the admin's Alibaba credentials and is skipped.
-    if (!translationMode && !restrictSpecialist) {
+    // General users may ask for speech but not for image or video generation,
+    // which consumes the admin's Alibaba credentials. The narrower intent gate
+    // keeps a restricted user's image wording from buying a router call whose
+    // plan would be discarded.
+    if (
+      !translationMode &&
+      (!restrictSpecialist || couldNeedSpeechCapabilityTool(userText))
+    ) {
       const plan = await planCapabilityTool({
         client,
         provider,
         modelId,
         userText,
-        hasReferenceImages: (imageAttachmentsForTools?.length ?? 0) > 0,
-        referenceImageNames: imageAttachmentsForTools?.map(
-          (image) => image.name,
-        ),
+        hasReferenceImages: restrictSpecialist
+          ? false
+          : (imageAttachmentsForTools?.length ?? 0) > 0,
+        referenceImageNames: restrictSpecialist
+          ? []
+          : imageAttachmentsForTools?.map((image) => image.name),
         audioAttachmentNames: audioAttachmentsForTools?.map(
           (audio) => audio.name,
         ),
         signal: clientAbort.signal,
       });
-      brokerToolCall = specialistCallFromPlan(plan);
+      const planned = specialistCallFromPlan(plan);
+      brokerToolCall =
+        planned &&
+        (!restrictSpecialist ||
+          !RESTRICTED_SPECIALIST_TOOL_NAMES.has(planned.name))
+          ? planned
+          : undefined;
       if (brokerToolCall && !clientGone()) {
         res.write(
           `data: ${JSON.stringify({
@@ -652,7 +671,7 @@ export async function streamChatReply(args: {
     })
       ? getSpecialistTools({
           imageAttachments: restrictSpecialist ? [] : imageAttachmentsForTools,
-          audioAttachments: restrictSpecialist ? [] : audioAttachmentsForTools,
+          audioAttachments: audioAttachmentsForTools,
           userId: memory.enabled ? memory.userId : undefined,
           memoryEnabled: memory.enabled,
         }).filter(
