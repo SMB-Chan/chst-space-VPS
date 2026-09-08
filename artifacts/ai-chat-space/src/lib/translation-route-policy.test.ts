@@ -18,6 +18,15 @@ describe("translation route policy", () => {
     ).toBe(false);
   });
 
+  it("resets when a blank thread replaces a conversation on the same route", () => {
+    expect(shouldResetTranslationOnNavigation("/chat", "/chat", 42, null)).toBe(
+      true,
+    );
+    expect(
+      shouldResetTranslationOnNavigation("/chat", "/chat", null, null),
+    ).toBe(false);
+  });
+
   it("also resets when entering a fresh private thread", () => {
     expect(
       shouldResetTranslationOnNavigation("/conversations/42", "/private"),

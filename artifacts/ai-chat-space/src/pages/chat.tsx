@@ -35,6 +35,7 @@ import {
   subscribeSettings,
   type TranslationModeSetting,
 } from "@/lib/settings";
+import { shouldResetTranslationOnNavigation } from "@/lib/translation-route-policy";
 import { cn } from "@/lib/utils";
 import { applyClientPatch } from "@/lib/audit-patch";
 import { createCoalescedTextScheduler } from "@/lib/coalesced-text-scheduler";
@@ -456,6 +457,8 @@ export function ChatPage() {
   );
   const [translationMode, setTranslationMode] =
     useState<TranslationModeSetting>(initialSettings.translationMode);
+  const previousConversationIdRef = useRef<number | null>(conversationId);
+  const previousTranslationRouteRef = useRef(isPrivate ? "/private" : "/chat");
   const [auditModelId, setAuditModelId] = useState(
     initialSettings.auditModelId,
   );
@@ -587,6 +590,26 @@ export function ChatPage() {
     artifactBlobUrlCache.current.forEach((url) => URL.revokeObjectURL(url));
     artifactBlobUrlCache.current.clear();
   }, [conversationId]);
+
+  useEffect(() => {
+    const route = isPrivate ? "/private" : "/chat";
+    const previousConversationId = previousConversationIdRef.current;
+    const previousRoute = previousTranslationRouteRef.current;
+    if (
+      previousRoute === route &&
+      shouldResetTranslationOnNavigation(
+        route,
+        route,
+        previousConversationId,
+        conversationId,
+      )
+    ) {
+      setTranslationMode("off");
+      saveSettings({ translationMode: "off" });
+    }
+    previousConversationIdRef.current = conversationId;
+    previousTranslationRouteRef.current = route;
+  }, [conversationId, isPrivate]);
 
   const {
     data: conversation,

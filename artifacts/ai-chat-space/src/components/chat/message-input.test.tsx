@@ -99,6 +99,19 @@ describe("MessageInput (composer)", () => {
     expect(html).toContain("翻訳するテキストをそのまま入力...");
   });
 
+  it("visually distinguishes the active translation composer and shows direction", () => {
+    const html = renderToStaticMarkup(
+      <MessageInput
+        onSend={() => {}}
+        translationMode="ja-ko"
+        onTranslationModeChange={() => {}}
+      />,
+    );
+    expect(html).toContain('data-testid="composer-translation-direction"');
+    expect(html).toContain("方向: 日本語 → 韓国語");
+    expect(html).toContain('aria-label="翻訳モード: 日本語 → 韓国語"');
+  });
+
   it("applies file format placeholder when format is selected", () => {
     const html = renderToStaticMarkup(
       <MessageInput onSend={() => {}} fileGenerationEnabled />,

@@ -31,7 +31,10 @@ import {
   type ModelInfo,
 } from "./model-selector";
 import { ReasoningSelector } from "./reasoning-selector";
-import { TranslationModeSelector } from "./translation-selector";
+import {
+  TranslationModeSelector,
+  translationModeLabel,
+} from "./translation-selector";
 import type { ReasoningLevel } from "@/lib/reasoning";
 import type { TranslationModeSetting } from "@/lib/settings";
 
@@ -482,20 +485,26 @@ export function MessageInput({
     fileGenerationEnabled ||
     videoGenerationEnabled;
   const activeModes = [
-    translationMode !== "off" ? "翻訳" : null,
     auditEnabled ? "監査 ON" : null,
     fileFormat ? `${fileFormat.toUpperCase()} 出力` : null,
     videoMode ? `${videoMode.toUpperCase()} 動画` : null,
   ].filter((label): label is string => label !== null);
-  const hasComposerStatus = hasActiveSkills || activeModes.length > 0;
+  const translationActive = translationMode !== "off";
+  const hasComposerStatus =
+    hasActiveSkills || activeModes.length > 0 || translationActive;
 
   return (
     <div
       className={cn(
-        "relative flex flex-col transition-[border-color,box-shadow,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-emphasized)]",
+        "relative flex flex-col rounded-[var(--m3-shape-xl)] border border-transparent transition-[border-color,box-shadow,background-color,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-emphasized)] focus-within:ring-2 focus-within:ring-primary/30",
         toolsOpen && "ring-1 ring-primary/15",
       )}
       data-testid="composer"
+      aria-label={
+        translationActive
+          ? `翻訳モード: ${translationModeLabel(translationMode)}`
+          : "通常チャット入力"
+      }
     >
       <input
         type="file"
@@ -538,6 +547,16 @@ export function MessageInput({
               <span>{mode}</span>
             </Chip>
           ))}
+          {translationActive && (
+            <Chip
+              asChild
+              selected
+              className="min-h-6 border-[var(--m3-tertiary)] bg-[var(--m3-tertiary-container)] px-2 text-[10px] text-[var(--m3-on-tertiary-container)]"
+              data-testid="composer-translation-direction"
+            >
+              <span>方向: {translationModeLabel(translationMode)}</span>
+            </Chip>
+          )}
         </div>
       )}
 

@@ -87,6 +87,10 @@ import {
   verifySearchBackedAnswer,
 } from "./chat-stream-factuality";
 import {
+  shouldRecoverWithWeb,
+  WEB_RECOVERY_SYSTEM_PROMPT,
+} from "./chat-stream-recovery";
+import {
   getAiRetryDelayMs,
   getAiStreamRetryConfig,
   safeAiFailureFields,
@@ -579,6 +583,7 @@ export async function streamChatReply(args: {
     }
 
     let brokerToolCall: SpecialistToolCall | undefined;
+    let researchRecoveryUsed = false;
     // General users run on OpenRouter text models only: image/audio media
     // generation consumes the admin's Alibaba credentials and is skipped.
     if (!translationMode && !restrictSpecialist) {
@@ -667,6 +672,7 @@ export async function streamChatReply(args: {
       isResearchAnnouncementOnly(fullResponse) &&
       !clientAbort.signal.aborted
     ) {
+      researchRecoveryUsed = true;
       workingMessages.push({ role: "assistant", content: fullResponse });
       workingMessages.push({
         role: "system",
@@ -1029,6 +1035,7 @@ export async function streamChatReply(args: {
       const factualitySourceText =
         webContext.contextText || researchEvidenceParts.join("\n\n");
       let audit: { content: string; modelId: string } | undefined;
+      let auditRaw = "";
       let factuality: FactualityReport | undefined;
       const shouldVerifyFactuality = shouldVerifySearchBackedAnswer({
         translationMode: Boolean(translationMode),
@@ -1187,6 +1194,7 @@ export async function streamChatReply(args: {
             clientAbort.signal,
           );
           if (auditText.trim()) {
+            auditRaw = auditText;
             const patched = applyValidatedAuditPatch(fullResponse, auditText);
             if (patched.note) {
               audit = { content: patched.note, modelId: auditModel.id };
@@ -1231,6 +1239,204 @@ export async function streamChatReply(args: {
                 status: "search_warning",
                 message:
                   "監査モデルの実行に失敗しました。本文の回答のみ表示します。",
+              })}\n\n`,
+            );
+          }
+        }
+      }
+
+      // A model can incorrectly claim that search is unavailable even though
+      // this server has a working web-search path. Recover once, only for
+      // normal chat: translation must never turn into an answer/research turn.
+      if (
+        shouldRecoverWithWeb({
+          question: userText,
+          answer: fullResponse,
+          audit: auditRaw,
+          translationMode: Boolean(translationMode),
+        }) &&
+        !researchRecoveryUsed &&
+        !clientAbort.signal.aborted
+      ) {
+        const originalResponse = fullResponse;
+        researchRecoveryUsed = true;
+        try {
+          if (!clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({
+                status: "searching",
+                recovery: true,
+                query: userText,
+              })}\n\n`,
+            );
+          }
+          const recoveredWebContext = await buildWebContext(
+            client,
+            modelId,
+            provider,
+            userText,
+            (event) => {
+              if (!clientGone()) {
+                res.write(
+                  `data: ${JSON.stringify({ ...event, recovery: true })}\n\n`,
+                );
+              }
+            },
+            {
+              forceQuery: userText,
+              recentConversation: buildRecentSearchConversation(
+                chatMessages,
+                userText,
+              ),
+              signal: clientAbort.signal,
+            },
+          );
+          if (
+            !recoveredWebContext.contextText ||
+            recoveredWebContext.sources.length === 0
+          ) {
+            throw new Error("Web recovery returned no usable evidence");
+          }
+
+          const today = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Tokyo",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date());
+          const recoveryMessages = [
+            ...workingMessages,
+            { role: "assistant" as const, content: originalResponse },
+            {
+              role: "system" as const,
+              content:
+                WEB_RECOVERY_SYSTEM_PROMPT +
+                `\n\n今日の日付: ${today}\n<web_data>\n${recoveredWebContext.contextText}\n</web_data>`,
+            },
+            {
+              role: "user" as const,
+              content:
+                "検索で得た根拠を使って、初稿をユーザー向けの最終回答へ書き直してください。",
+            },
+          ];
+
+          streamedResponse = "";
+          if (!clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({
+                status: "revising",
+                resetContent: true,
+                recovery: true,
+              })}\n\n`,
+            );
+          }
+          const recoveredResponse = await withTimeout(
+            (signal) =>
+              streamModelText({
+                client,
+                provider,
+                modelId,
+                reasoningLevel,
+                messages: recoveryMessages,
+                onDelta: (added, kind) => {
+                  if (clientGone()) return;
+                  if (kind === "reasoning") {
+                    if (!clientAbort.signal.aborted) {
+                      res.write(
+                        `data: ${JSON.stringify({ status: "thinking", recovery: true })}\n\n`,
+                      );
+                    }
+                  } else {
+                    streamedResponse += added;
+                    res.write(
+                      `data: ${JSON.stringify({
+                        content: added,
+                        status: "generating",
+                        recovery: true,
+                      })}\n\n`,
+                    );
+                  }
+                },
+                onUsage,
+                shouldStop: () => clientGone() || clientAbort.signal.aborted,
+                signal,
+              }),
+            AUDIT_TIMEOUT_MS,
+            "Web recovery answer",
+            clientAbort.signal,
+          );
+          if (!recoveredResponse.trim()) {
+            throw new Error("Web recovery generated an empty answer");
+          }
+
+          fullResponse = recoveredResponse;
+          failureSources = recoveredWebContext.sources;
+          const recoverySourceText = recoveredWebContext.contextText;
+          if (
+            shouldVerifySearchBackedAnswer({
+              translationMode: false,
+              sourceCount: recoveredWebContext.sources.length,
+              sourceText: recoverySourceText,
+              generatesFile:
+                wantsGeneratedFile(userText) || Boolean(requestedFileFormat),
+            })
+          ) {
+            const verified = await verifySearchBackedAnswer({
+              client,
+              provider,
+              modelId,
+              auditModel,
+              question: userText,
+              answer: fullResponse,
+              sourceText: recoverySourceText,
+              sourceCount: recoveredWebContext.sources.length,
+              signal: clientAbort.signal,
+              clientGone,
+              emit: (event) => {
+                if (!clientGone()) {
+                  if (typeof event.content === "string") {
+                    streamedResponse += event.content;
+                  }
+                  res.write(
+                    `data: ${JSON.stringify({ ...event, recovery: true })}\n\n`,
+                  );
+                }
+              },
+              streamText: streamModelText,
+              withTimeout,
+            });
+            fullResponse = verified.content;
+            factuality = verified.factuality;
+          }
+        } catch (error) {
+          if (clientAbort.signal.aborted) throw error;
+          fullResponse = originalResponse;
+          streamedResponse = originalResponse;
+          logger.warn(
+            safeFailureFields(error, "chat-stream", "WEB_RECOVERY_FAILED"),
+            "Web recovery failed; preserving the original answer",
+          );
+          if (!clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({
+                status: "revising",
+                resetContent: true,
+                recovery: true,
+              })}\n\n`,
+            );
+            res.write(
+              `data: ${JSON.stringify({
+                content: originalResponse,
+                status: "generating",
+                recovery: true,
+              })}\n\n`,
+            );
+            res.write(
+              `data: ${JSON.stringify({
+                status: "search_warning",
+                recovery: true,
+                message:
+                  "検索による再回答に失敗したため、元の回答を保持しました。",
               })}\n\n`,
             );
           }

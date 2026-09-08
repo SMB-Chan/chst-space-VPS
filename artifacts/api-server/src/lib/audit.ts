@@ -15,7 +15,7 @@ export const AUDIT_SYSTEM_PROMPT = `あなたは会話の記憶を持たない�
 - 売買指示や断定が混じっていないか
 
 出力はJSONのみ。Markdownや前置きは禁止:
-{"note":"判定と短い点検メモ（最大800文字）","operations":[{"find":"初稿内に一度だけ現れる短い原文","replacement":"置換後の短い本文"}]}
+{"note":"判定と短い点検メモ（最大800文字）","recover_with_web_search":false,"operations":[{"find":"初稿内に一度だけ現れる短い原文","replacement":"置換後の短い本文"}]}
 operationsは重大な誤りを直す場合だけ使い、問題がなければ空配列にする。最大4件。初稿内に完全一致で一度だけ現れる短いfindを指定し、初稿全体を再掲・削除しない。find不存在・複数一致・操作範囲重複・操作数・個別文字数・置換総量・最終回答長の上限超過、JSON不正、または回答が実質的に空になる操作は全件棄却する。`;
 
 export const AUDIT_INPUT_LIMITS = {

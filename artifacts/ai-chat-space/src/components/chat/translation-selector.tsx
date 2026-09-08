@@ -37,6 +37,13 @@ const TRANSLATION_MODES: {
   { id: "zh-ja", label: "中国語 → 日本語", hint: "常に日本語へ翻訳" },
 ];
 
+export function translationModeLabel(mode: TranslationModeSetting): string {
+  return (
+    TRANSLATION_MODES.find((candidate) => candidate.id === mode)?.label ??
+    "翻訳"
+  );
+}
+
 interface TranslationModeSelectorProps {
   value: TranslationModeSetting;
   onSelect: (mode: TranslationModeSetting) => void;

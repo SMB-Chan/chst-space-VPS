@@ -8,8 +8,14 @@ const BLANK_THREAD_ROUTES = new Set(["/chat", "/private"]);
 export function shouldResetTranslationOnNavigation(
   previousLocation: string | null,
   nextLocation: string,
+  previousConversationId: number | null = null,
+  nextConversationId: number | null = null,
 ): boolean {
-  return (
-    BLANK_THREAD_ROUTES.has(nextLocation) && previousLocation !== nextLocation
-  );
+  const enteredBlankRoute =
+    BLANK_THREAD_ROUTES.has(nextLocation) && previousLocation !== nextLocation;
+  const enteredBlankConversation =
+    BLANK_THREAD_ROUTES.has(nextLocation) &&
+    previousConversationId !== null &&
+    nextConversationId === null;
+  return enteredBlankRoute || enteredBlankConversation;
 }
