@@ -46,11 +46,10 @@ import {
 import type { ModelProvider } from "./ai-clients";
 import {
   assessNewsRetrieval,
-  buildNewsFastPathQueries,
-  isNewsFastPathQuestion,
   filterNewsResults,
   type NewsQualityReport,
 } from "./news-quality-gate";
+import { buildNewsSearchCircuit } from "./news-search-circuit";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
@@ -1075,9 +1074,9 @@ export async function buildWebContext(
   let searchWarning: string | undefined;
   let newsQuality: NewsQualityReport | undefined;
   const newsResults: SearchResult[] = [];
-  const newsQueries = isNewsFastPathQuestion(userMessage)
-    ? buildNewsFastPathQueries(userMessage)
-    : [];
+  const newsCircuit = buildNewsSearchCircuit(userMessage);
+  const newsQueries = newsCircuit?.queries ?? [];
+  const executedNewsQueries: string[] = [];
 
   const urls = extractUrls(userMessage);
 
@@ -1131,7 +1130,7 @@ export async function buildWebContext(
     searchWarning = warning;
     onStatus({ status: "search_warning", message: warning });
   } else if (decision.skippedDueToError) {
-    const warning = isNewsFastPathQuestion(userMessage)
+    const warning = newsCircuit
       ? "ニュース検索の判定に失敗しました。外部ニュース取得を試行します。"
       : "検索判定に失敗したため、Web検索をスキップしました。手元の知識でお答えします。";
     searchWarning = warning;
@@ -1153,15 +1152,27 @@ export async function buildWebContext(
     onStatus({
       status: "searching",
       query: roundQuery,
+      ...(newsCircuit
+        ? {
+            circuit: newsCircuit.kind,
+            circuitMode: newsCircuit.mode,
+          }
+        : {}),
       ...(route === "alternate" ? { route: "alternate" } : {}),
     });
     if (signal?.aborted) return;
+    if (
+      newsCircuit &&
+      !executedNewsQueries.some(
+        (attempted) => normalizeQuery(attempted) === normalizeQuery(roundQuery),
+      )
+    ) {
+      executedNewsQueries.push(roundQuery);
+    }
     const rawResults = await searchWeb(roundQuery, signal, roundPlan, route);
-    const results = isNewsFastPathQuestion(userMessage)
-      ? filterNewsResults(rawResults)
-      : rawResults;
+    const results = newsCircuit ? filterNewsResults(rawResults) : rawResults;
     if (results.length === 0) {
-      const warning = isNewsFastPathQuestion(userMessage)
+      const warning = newsCircuit
         ? "外部ニュース取得で利用できる記事根拠を確認できませんでした。"
         : "Web検索で結果が取得できませんでした。手元の知識でお答えします。";
       searchWarning = warning;
@@ -1201,11 +1212,11 @@ export async function buildWebContext(
     }
     if (newResults.length === 0) return; // follow-up round found only duplicates
 
-    if (isNewsFastPathQuestion(userMessage)) {
+    if (newsCircuit) {
       newsResults.push(...enrichedResults);
       newsQuality = assessNewsRetrieval({
         results: newsResults,
-        queries: newsQueries,
+        queries: executedNewsQueries,
       });
     }
 
@@ -1252,9 +1263,9 @@ export async function buildWebContext(
     }
   };
 
-  if (decision.search || newsQueries.length > 0) {
+  if (decision.search || newsCircuit) {
     searched = true;
-    if (newsQueries.length > 0) {
+    if (newsCircuit) {
       query = newsQueries[0];
       for (const fastQuery of newsQueries.slice(0, MAX_SEARCH_ROUNDS)) {
         if (signal?.aborted) break;
@@ -1263,7 +1274,7 @@ export async function buildWebContext(
       }
       newsQuality = assessNewsRetrieval({
         results: newsResults,
-        queries: newsQueries.slice(0, MAX_SEARCH_ROUNDS),
+        queries: executedNewsQueries,
       });
       if (newsQuality.quality !== "good" && !signal?.aborted) {
         const escalationQuery =
@@ -1273,6 +1284,8 @@ export async function buildWebContext(
         onStatus({
           status: "search_escalation",
           query: escalationQuery,
+          circuit: newsCircuit.kind,
+          circuitMode: newsCircuit.mode,
           route: "alternate",
         });
         // One explicit alternate route is the final server-side recovery
@@ -1281,7 +1294,7 @@ export async function buildWebContext(
         await runSearchRound(escalationQuery, undefined, "alternate");
         newsQuality = assessNewsRetrieval({
           results: newsResults,
-          queries: newsQueries.slice(0, MAX_SEARCH_ROUNDS),
+          queries: executedNewsQueries,
         });
       }
       if (newsQuality.quality !== "good") {

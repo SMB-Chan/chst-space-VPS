@@ -1,4 +1,12 @@
 import type { SearchResult } from "./search-parse";
+export {
+  buildNewsFastPathQueries,
+  buildNewsSearchCircuit,
+  isNewsFastPathQuestion,
+  type NewsSearchCircuit,
+  type NewsSearchCircuitMode,
+  type NewsSearchTemporalScope,
+} from "./news-search-circuit";
 
 export type NewsQuality = "good" | "partial" | "poor";
 export type TaskSuccess = "succeeded" | "failed" | "unknown";
@@ -116,6 +124,16 @@ function evidenceHostOf(result: SearchResult): string | null {
   return hostOf(evidenceUrl(result));
 }
 
+function matchesKnownHost(
+  host: string,
+  knownHosts: ReadonlySet<string>,
+): boolean {
+  for (const known of knownHosts) {
+    if (host === known || host.endsWith(`.${known}`)) return true;
+  }
+  return false;
+}
+
 function baseDomain(host: string): string {
   const parts = host.split(".");
   const suffix = parts.slice(-2).join(".");
@@ -194,7 +212,9 @@ function rejectionReason(
   }
   if (isProductPage(result)) return "product-page";
   const host = evidenceHostOf(result);
-  const recognizedPublisher = host ? MAJOR_OR_OFFICIAL_HOSTS.has(host) : false;
+  const recognizedPublisher = host
+    ? matchesKnownHost(host, MAJOR_OR_OFFICIAL_HOSTS)
+    : false;
   if (
     !NEWS_TERMS.test(`${result.title} ${result.snippet ?? ""}`) &&
     !recognizedPublisher &&
@@ -224,8 +244,9 @@ export function assessNewsRetrieval(args: {
   const seenUrls = new Set<string>();
 
   for (const result of args.results) {
-    if (seenUrls.has(result.url)) continue;
-    seenUrls.add(result.url);
+    const identity = result.articleUrl || result.url;
+    if (seenUrls.has(identity)) continue;
+    seenUrls.add(identity);
     const reason = rejectionReason(result);
     if (reason) {
       rejected.push({ title: result.title, url: result.url, reason });
@@ -245,7 +266,7 @@ export function assessNewsRetrieval(args: {
   );
   const officialOrMajorSourceCount = accepted.filter((result) => {
     const host = evidenceHostOf(result);
-    return host ? MAJOR_OR_OFFICIAL_HOSTS.has(host) : false;
+    return host ? matchesKnownHost(host, MAJOR_OR_OFFICIAL_HOSTS) : false;
   }).length;
 
   const quality: NewsQuality =
@@ -281,42 +302,4 @@ export function filterNewsResults(results: SearchResult[]): SearchResult[] {
     const reason = rejectionReason(result);
     return reason === null || reason === "missing-date";
   });
-}
-
-export function buildNewsFastPathQueries(
-  question: string,
-  now = new Date(),
-): string[] {
-  const date = new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  })
-    .format(now)
-    .replace(/\//g, "-");
-  const normalized = question.replace(/\s+/g, " ").trim();
-  const broadNewsQuestion =
-    /今日|本日|最新|最近|ニュース|news|what.?s happening|current/i.test(
-      normalized,
-    );
-  if (broadNewsQuestion && normalized.length < 80) {
-    return [
-      `${date} 日本 国内 主要ニュース 公式 報道`,
-      `${date} 国際 主要ニュース 公式 報道`,
-      `${date} 最新ニュース 主要報道`,
-    ];
-  }
-  const topic = normalized.slice(0, 120);
-  return [
-    `${date} ${topic} ニュース`,
-    `${date} ${topic} 公式 発表`,
-    `${date} ${topic} 最新 報道`,
-  ];
-}
-
-export function isNewsFastPathQuestion(question: string): boolean {
-  return /ニュース|速報|最新の報道|今日の出来事|what.?s happening|latest news|breaking news/i.test(
-    question,
-  );
 }

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assessNewsRetrieval,
-  buildNewsFastPathQueries,
-  filterNewsResults,
-} from "./news-quality-gate";
+import { assessNewsRetrieval, filterNewsResults } from "./news-quality-gate";
 import type { SearchResult } from "./search-parse";
 
 function result(
@@ -103,16 +99,46 @@ describe("news retrieval quality gate", () => {
     });
   });
 
-  it("rewrites news queries with a concrete JST date and bounds fan-out", () => {
-    expect(
-      buildNewsFastPathQueries(
-        "今日のニュースについて分かるか？",
-        new Date("2026-09-07T16:30:00.000Z"),
+  it("deduplicates a resolved article seen through multiple result shapes", () => {
+    const direct = result(
+      "https://www.reuters.com/world/article-a",
+      "速報: World news",
+    );
+    const wrapper = {
+      ...result(
+        "https://news.google.com/rss/articles/one",
+        "速報: World news mirror",
       ),
-    ).toEqual([
-      "2026-09-08 日本 国内 主要ニュース 公式 報道",
-      "2026-09-08 国際 主要ニュース 公式 報道",
-      "2026-09-08 最新ニュース 主要報道",
-    ]);
+      articleUrl: direct.url,
+      publisherName: "Reuters",
+      publisherUrl: "https://www.reuters.com/world",
+    };
+
+    expect(
+      assessNewsRetrieval({
+        results: [direct, wrapper],
+        now: new Date("2026-09-08T04:00:00.000Z"),
+      }),
+    ).toMatchObject({
+      acceptedSourceCount: 1,
+      independentDomainCount: 1,
+    });
+  });
+
+  it("recognizes major publisher subdomains without trusting lookalikes", () => {
+    const accepted = result(
+      "https://jp.reuters.com/world/article-a",
+      "World update",
+    );
+    const lookalike = result(
+      "https://reuters.com.example.net/world/article-b",
+      "World update",
+    );
+
+    const report = assessNewsRetrieval({
+      results: [accepted, lookalike],
+      now: new Date("2026-09-08T04:00:00.000Z"),
+    });
+    expect(report.officialOrMajorSourceCount).toBe(1);
   });
 });
