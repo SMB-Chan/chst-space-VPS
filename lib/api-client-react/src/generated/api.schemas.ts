@@ -84,6 +84,8 @@ export type OpenaiModelProvider = typeof OpenaiModelProvider[keyof typeof Openai
 export const OpenaiModelProvider = {
   openai: 'openai',
   dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
 } as const;
 
 export type OpenaiModelReasoning = typeof OpenaiModelReasoning[keyof typeof OpenaiModelReasoning];
@@ -93,6 +95,8 @@ export const OpenaiModelReasoning = {
   none: 'none',
   openai: 'openai',
   dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
 } as const;
 
 export interface OpenaiModel {
@@ -142,6 +146,8 @@ export type CapabilityModelProvider = typeof CapabilityModelProvider[keyof typeo
 export const CapabilityModelProvider = {
   openai: 'openai',
   dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
 } as const;
 
 export type CapabilityModelCapabilitiesItem = typeof CapabilityModelCapabilitiesItem[keyof typeof CapabilityModelCapabilitiesItem];

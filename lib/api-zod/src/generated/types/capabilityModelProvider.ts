@@ -12,4 +12,6 @@ export type CapabilityModelProvider = typeof CapabilityModelProvider[keyof typeo
 export const CapabilityModelProvider = {
   openai: 'openai',
   dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
 } as const;

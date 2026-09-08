@@ -23,11 +23,11 @@ export const HealthCheckResponse = zod.object({
 export const ListOpenaiModelsResponseItem = zod.object({
   "id": zod.string(),
   "label": zod.string(),
-  "provider": zod.enum(['openai', 'dashscope']),
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi']),
   "description": zod.string(),
   "supportsVision": zod.boolean(),
   "supportsReasoning": zod.boolean(),
-  "reasoning": zod.enum(['none', 'openai', 'dashscope'])
+  "reasoning": zod.enum(['none', 'openai', 'dashscope', 'openrouter', 'xiaomi'])
 })
 export const ListOpenaiModelsResponse = zod.array(ListOpenaiModelsResponseItem)
 
@@ -56,7 +56,7 @@ export const ListOpenaiCapabilitiesResponse = zod.object({
   "models": zod.array(zod.object({
   "id": zod.string(),
   "label": zod.string(),
-  "provider": zod.enum(['openai', 'dashscope']),
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi']),
   "capabilities": zod.array(zod.enum(['chat', 'reasoning', 'vision', 'image-generate', 'image-edit', 'speech-to-text', 'audio-synthesis', 'realtime', 'video'])),
   "configured": zod.boolean()
 }))

@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveOpenRouterApiKey } from "./openrouter-config";
 import {
   AVAILABLE_MODELS,
   applyGenerationParams,
   applySafeGenerationParams,
+  applyNonReasoningGenerationParams,
+  resolveConfiguredVisionModel,
   getClientForModel,
   isUnsupportedGenerationParam,
   VISION_MODEL_IDS,
@@ -139,5 +141,57 @@ describe("openrouter generation params", () => {
     expect(() => getClientForModel("deepseek/deepseek-chat")).toThrow(
       /OPEN_ROUTER|OPENROUTER_API_KEY/,
     );
+  });
+});
+
+describe("MiMo generation and provider freeze", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(["off", "low", "medium", "high"] as const)(
+    "maps MiMo thinking %s without Alibaba parameters",
+    (level) => {
+      for (const id of ["mimo-v2.5", "mimo-v2.5-pro"]) {
+        const options = {};
+        applyGenerationParams(options, id, "xiaomi", level);
+        expect(options).toEqual({
+          max_completion_tokens: 8192,
+          thinking: { type: level === "off" ? "disabled" : "enabled" },
+        });
+      }
+    },
+  );
+
+  it("removes thinking on a parameter retry, then disables it for empty-response recovery", () => {
+    const options: Record<string, unknown> = {
+      thinking: { type: "enabled" },
+      max_tokens: 999,
+      incremental_output: true,
+    };
+    applySafeGenerationParams(options, "xiaomi");
+    expect(options).toEqual({ max_completion_tokens: 8192 });
+    applyNonReasoningGenerationParams(options, "xiaomi");
+    expect(options).toEqual({
+      max_completion_tokens: 8192,
+      thinking: { type: "disabled" },
+    });
+    expect(
+      isUnsupportedGenerationParam(new Error("400 thinking is not supported")),
+    ).toBe(true);
+  });
+
+  it("blocks frozen models even when callers supply a provider explicitly", () => {
+    vi.stubEnv("DISABLE_OPENAI_MODELS", "true");
+    vi.stubEnv("DISABLE_DASHSCOPE_MODELS", "TRUE");
+    expect(() => getClientForModel("gpt-5.6-terra")).toThrow(/凍結/);
+    expect(() => getClientForModel("qwen3.8-max", "dashscope")).toThrow(/凍結/);
+    const vision = resolveConfiguredVisionModel([
+      "gpt-5.6-terra",
+      "qwen3.8-max",
+    ]);
+    expect(
+      vision === null ||
+        AVAILABLE_MODELS.find((model) => model.id === vision)?.provider ===
+          "openrouter",
+    ).toBe(true);
   });
 });

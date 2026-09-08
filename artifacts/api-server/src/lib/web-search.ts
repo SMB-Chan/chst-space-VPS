@@ -124,7 +124,10 @@ function applyDecisionTokenCap(
   opts: Record<string, unknown>,
   provider: ModelProvider,
 ): void {
-  if (provider === "openai") {
+  if (provider === "xiaomi") {
+    opts.thinking = { type: "disabled" };
+  }
+  if (provider === "openai" || provider === "xiaomi") {
     opts.max_completion_tokens = DECISION_MAX_TOKENS;
     return;
   }

@@ -58,3 +58,12 @@ data/llm-memory/
 
 # generated test bundles
 .ssrf-test-bundle.mjs
+
+# agent session scratch (never commit)
+.qwen/
+.audit-remote/
+.empty-response-fix/
+.factuality/
+
+# Replit workspace connection details
+replit connect.txt
