@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   couldNeedCapabilityTool,
+  couldNeedSpeechCapabilityTool,
   planCapabilityTool,
 } from "./capability-broker";
 
@@ -126,7 +127,7 @@ describe("capability broker", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects unsupported language hints for the built-in English/Chinese voices", async () => {
+  it("plans Japanese speech synthesis now that a MiMo model covers it", async () => {
     const { client, create } = fakeClient(
       '{"tool":"audio.synthesize","text":"こんにちは、Chat Spaceです。","languageHint":"ja"}',
     );
@@ -135,6 +136,81 @@ describe("capability broker", () => {
       provider: "openai",
       modelId: "gpt-5.6-terra",
       userText: "この文章を日本語で読み上げて",
+      hasReferenceImages: false,
+    });
+    expect(result).toEqual({
+      tool: "audio.synthesize",
+      text: "こんにちは、Chat Spaceです。",
+      languageHint: "ja",
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a language hint the named model cannot speak", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"audio.synthesize","text":"こんにちは、Chat Spaceです。","modelId":"qwen-audio-3.0-tts-plus","languageHint":"ja"}',
+    );
+    const result = await planCapabilityTool({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      userText: "この文章を日本語で読み上げて",
+      hasReferenceImages: false,
+    });
+    expect(result).toEqual({ tool: "none" });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves a MiMo voice to its own model and drops Alibaba-only prosody", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"audio.synthesize","text":"Welcome to Chat Space.","voice":"Mia","rate":1.5,"volume":80}',
+    );
+    const result = await planCapabilityTool({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      userText: "Read this aloud as an English voice: Welcome to Chat Space.",
+      hasReferenceImages: false,
+    });
+    expect(result).toEqual({
+      tool: "audio.synthesize",
+      text: "Welcome to Chat Space.",
+      modelId: "mimo-v2.5-tts",
+      voice: "Mia",
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes a designed voice to the MiMo voice design model", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"audio.synthesize","text":"本日のニュースです。","modelId":"mimo-v2.5-tts-voicedesign","instruction":"落ち着いた低音の男性の声","languageHint":"ja"}',
+    );
+    const result = await planCapabilityTool({
+      client,
+      provider: "xiaomi",
+      modelId: "mimo-v2.5",
+      userText: "落ち着いた声でこの文章を日本語で読み上げて",
+      hasReferenceImages: false,
+    });
+    expect(result).toEqual({
+      tool: "audio.synthesize",
+      text: "本日のニュースです。",
+      modelId: "mimo-v2.5-tts-voicedesign",
+      instruction: "落ち着いた低音の男性の声",
+      languageHint: "ja",
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a voice that belongs to no configured speech model", async () => {
+    const { client, create } = fakeClient(
+      '{"tool":"audio.synthesize","text":"Hello.","voice":"not-a-voice"}',
+    );
+    const result = await planCapabilityTool({
+      client,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      userText: "Read this aloud: Hello.",
       hasReferenceImages: false,
     });
     expect(result).toEqual({ tool: "none" });
@@ -155,6 +231,20 @@ describe("capability broker", () => {
     expect(couldNeedCapabilityTool("この街の夜景を動画として生成して")).toBe(
       true,
     );
+  });
+
+  it("gates speech intent separately so restricted users skip image routing", () => {
+    expect(couldNeedSpeechCapabilityTool("この文章を日本語で読み上げて")).toBe(
+      true,
+    );
+    expect(couldNeedSpeechCapabilityTool("transcribe this audio")).toBe(true);
+    expect(couldNeedSpeechCapabilityTool("画像を生成して")).toBe(false);
+    expect(
+      couldNeedSpeechCapabilityTool("この街の夜景を動画として生成して"),
+    ).toBe(false);
+    expect(
+      couldNeedSpeechCapabilityTool("量子コンピュータの仕組みを説明して"),
+    ).toBe(false);
   });
 
   it("plans explicit HappyHorse video generation without treating it as image generation", async () => {

@@ -9,8 +9,18 @@ import {
   ALIBABA_CAPABILITY_DEFAULTS,
   modelHasAlibabaCapability,
 } from "./alibaba-capabilities";
-import { QWEN_AUDIO_TTS_PLUS_VOICES } from "./alibaba-tts";
 import { logger, safeFailureFields } from "./logger";
+import {
+  describeAvailableAsrModels,
+  describeAvailableTtsModels,
+  getTtsModel,
+  isAsrModelId,
+  isSpeechLanguage,
+  isTtsModelId,
+  isTtsVoice,
+  modelIdForVoice,
+  type SpeechLanguage,
+} from "./speech-capabilities";
 
 export type CapabilityToolPlan =
   | { tool: "none" }
@@ -32,9 +42,9 @@ export type CapabilityToolPlan =
       tool: "audio.synthesize";
       text: string;
       modelId?: string;
-      voice?: (typeof QWEN_AUDIO_TTS_PLUS_VOICES)[number];
+      voice?: string;
       instruction?: string;
-      languageHint?: "zh" | "en";
+      languageHint?: SpeechLanguage;
       rate?: number;
       pitch?: number;
       volume?: number;
@@ -63,7 +73,21 @@ const VIDEO_INTENT =
 const VIDEO_NON_EXECUTION =
   /(?:動画|ビデオ|video).{0,30}(?:作り方|作る方法|やり方|方法|教えて|how\s+to|tutorial|explain)/i;
 
-const ROUTER_SYSTEM_PROMPT = `You are Chat Space's capability router. Decide whether the user's CURRENT request explicitly asks the application to use a specialist capability now.
+const ROUTER_TRAILING_RULES = `- image.edit requires a reference image attached to the current user turn. audio.transcribe requires an attached audio file.
+- Preserve the user's requested subject, style, text, composition, and constraints. Do not invent sensitive personal details.
+- video.generate is only for an explicit request to actually generate a video now. Use none for video explanations, tutorials, brainstorming, prompts, or hypothetical discussion.
+- Use t2v for text-only video, i2v for exactly one first-frame image, and r2v for one or more reference images. A video plan is only a broker classification; the authenticated video-job API performs the billable operation after user confirmation.
+- modelId may only be a model that implements the requested capability. Omit it unless the user asks for a specific specialist model.
+- n must be 1-6. Omit size unless the user asks for a size/aspect resolution.
+- Never route to realtime audio tools in this version.`;
+
+/**
+ * Built per request because the speech catalog depends on which providers are
+ * configured and unfrozen; a static prompt would keep advertising models this
+ * installation cannot call.
+ */
+function buildRouterSystemPrompt(env: NodeJS.ProcessEnv = process.env): string {
+  return `You are Chat Space's capability router. Decide whether the user's CURRENT request explicitly asks the application to use a specialist capability now.
 Return exactly one JSON object and nothing else.
 
 Allowed forms:
@@ -71,20 +95,18 @@ Allowed forms:
 {"tool":"image.generate","prompt":"...","modelId":"optional","size":"optional WIDTH*HEIGHT","n":1}
 {"tool":"image.edit","imageName":"attached filename","prompt":"...","modelId":"optional","size":"optional WIDTH*HEIGHT","n":1}
 {"tool":"audio.transcribe","attachmentName":"attached filename","modelId":"optional","languageHints":["zh","en"]}
-{"tool":"audio.synthesize","text":"text to speak","modelId":"qwen-audio-3.0-tts-plus","voice":"optional","instruction":"optional","languageHint":"zh or en","rate":1,"pitch":1,"volume":50}
+{"tool":"audio.synthesize","text":"text to speak","modelId":"optional","voice":"optional","instruction":"optional","languageHint":"zh, en or ja","rate":1,"pitch":1,"volume":50}
 {"tool":"video.generate","mode":"t2v or i2v or r2v","prompt":"...","modelId":"optional","referenceImageNames":["attached.png"],"resolution":"720P","ratio":"16:9","duration":5,"watermark":false}
 
 Rules:
 - Use none for image analysis, explanations, brainstorming, prompts/tutorials, or hypothetical discussion where the user did not ask Chat Space to actually generate/edit an image.
-- audio.transcribe is only for turning an attached recording into text.
-- audio.synthesize is only for an explicit request to create actual speech/audio from text. The currently implemented qwen-audio-3.0-tts-plus built-in voices support Chinese (Mandarin) and English; use none rather than silently promising unsupported Japanese built-in-voice synthesis.
-- image.edit requires a reference image attached to the current user turn. audio.transcribe requires an attached audio file.
-- Preserve the user's requested subject, style, text, composition, and constraints. Do not invent sensitive personal details.
-- video.generate is only for an explicit request to actually generate a video now. Use none for video explanations, tutorials, brainstorming, prompts, or hypothetical discussion.
-- Use t2v for text-only video, i2v for exactly one first-frame image, and r2v for one or more reference images. A video plan is only a broker classification; the authenticated video-job API performs the billable operation after user confirmation.
-- modelId may only be a model that implements the requested capability. Omit it unless the user asks for a specific specialist model.
-- n must be 1-6. Omit size unless the user asks for a size/aspect resolution.
-- Never route to realtime audio tools in this version.`;
+- audio.transcribe is only for turning an attached recording into text. Speech-to-text models available now:
+${describeAvailableAsrModels(env)}
+- audio.synthesize is only for an explicit request to create actual speech/audio from text. Speech synthesis models available now:
+${describeAvailableTtsModels(env)}
+  Set languageHint to the language actually being spoken. Only plan synthesis when a listed model supports that language; otherwise return none rather than silently promising speech that cannot be produced. voice must be one of that model's voices, and instruction (a free-form description of the wanted voice) is only allowed on models marked instruction=yes. rate, pitch and volume are only allowed on models marked rate/pitch/volume=yes.
+${ROUTER_TRAILING_RULES}`;
+}
 
 export function couldNeedCapabilityTool(userText: string): boolean {
   const text = userText.slice(0, 12_000);
@@ -94,6 +116,16 @@ export function couldNeedCapabilityTool(userText: string): boolean {
     TTS_INTENT.test(text) ||
     (VIDEO_INTENT.test(text) && !VIDEO_NON_EXECUTION.test(text))
   );
+}
+
+/**
+ * Narrower gate for callers that may only use the speech capabilities, so a
+ * restricted user's image or video wording does not buy a router call whose
+ * plan would be discarded anyway.
+ */
+export function couldNeedSpeechCapabilityTool(userText: string): boolean {
+  const text = userText.slice(0, 12_000);
+  return TRANSCRIBE_INTENT.test(text) || TTS_INTENT.test(text);
 }
 
 function optionalBoundedNumber(
@@ -134,11 +166,7 @@ function parseToolPlan(
     if (!attachmentName || !audioAttachmentNames.includes(attachmentName)) {
       return { tool: "none" };
     }
-    const modelId =
-      typeof obj.modelId === "string" &&
-      modelHasAlibabaCapability(obj.modelId, "audio.asr")
-        ? obj.modelId
-        : undefined;
+    const modelId = isAsrModelId(obj.modelId) ? obj.modelId : undefined;
     let languageHints: string[] | undefined;
     if (obj.languageHints !== undefined) {
       if (!Array.isArray(obj.languageHints) || obj.languageHints.length > 4) {
@@ -167,31 +195,45 @@ function parseToolPlan(
     const text =
       typeof obj.text === "string" ? obj.text.trim().slice(0, 10_000) : "";
     if (!text) return { tool: "none" };
-    if (
-      obj.languageHint !== undefined &&
-      obj.languageHint !== "zh" &&
-      obj.languageHint !== "en"
-    ) {
+    if (obj.languageHint !== undefined && !isSpeechLanguage(obj.languageHint)) {
       return { tool: "none" };
     }
-    const modelId =
-      typeof obj.modelId === "string" &&
-      modelHasAlibabaCapability(obj.modelId, "audio.tts")
-        ? obj.modelId
-        : undefined;
-    const voice =
-      typeof obj.voice === "string" &&
-      (QWEN_AUDIO_TTS_PLUS_VOICES as readonly string[]).includes(obj.voice)
-        ? (obj.voice as (typeof QWEN_AUDIO_TTS_PLUS_VOICES)[number])
-        : undefined;
+    const languageHint = isSpeechLanguage(obj.languageHint)
+      ? obj.languageHint
+      : undefined;
+
+    let modelId = isTtsModelId(obj.modelId) ? obj.modelId : undefined;
+    const requestedVoice =
+      typeof obj.voice === "string" ? obj.voice.trim() : "";
+    let voice: string | undefined;
+    if (requestedVoice) {
+      // A built-in voice belongs to exactly one model, so a voice named without
+      // a model still determines the transport.
+      const owner = modelId ?? modelIdForVoice(requestedVoice);
+      if (!owner || !isTtsVoice(owner, requestedVoice)) return { tool: "none" };
+      modelId = owner;
+      voice = requestedVoice;
+    }
+    const spec = modelId ? getTtsModel(modelId) : undefined;
+    if (spec && languageHint && !spec.languages.includes(languageHint)) {
+      return { tool: "none" };
+    }
     const instruction =
       typeof obj.instruction === "string"
         ? obj.instruction.trim().slice(0, 1_000)
         : undefined;
-    const languageHint =
-      obj.languageHint === "zh" || obj.languageHint === "en"
-        ? obj.languageHint
-        : undefined;
+    // Prosody is an Alibaba transport feature; drop it rather than let a model
+    // that ignores it silently mislead the caller.
+    const supportsProsody = spec ? spec.supportsProsody : true;
+    const rate = supportsProsody
+      ? optionalBoundedNumber(obj.rate, 0.5, 2)
+      : undefined;
+    const pitch = supportsProsody
+      ? optionalBoundedNumber(obj.pitch, 0.5, 2)
+      : undefined;
+    const volume = supportsProsody
+      ? optionalBoundedNumber(obj.volume, 0, 100)
+      : undefined;
     return {
       tool: "audio.synthesize",
       text,
@@ -199,15 +241,9 @@ function parseToolPlan(
       ...(voice ? { voice } : {}),
       ...(instruction ? { instruction } : {}),
       ...(languageHint ? { languageHint } : {}),
-      ...(optionalBoundedNumber(obj.rate, 0.5, 2) !== undefined
-        ? { rate: optionalBoundedNumber(obj.rate, 0.5, 2) }
-        : {}),
-      ...(optionalBoundedNumber(obj.pitch, 0.5, 2) !== undefined
-        ? { pitch: optionalBoundedNumber(obj.pitch, 0.5, 2) }
-        : {}),
-      ...(optionalBoundedNumber(obj.volume, 0, 100) !== undefined
-        ? { volume: optionalBoundedNumber(obj.volume, 0, 100) }
-        : {}),
+      ...(rate !== undefined ? { rate } : {}),
+      ...(pitch !== undefined ? { pitch } : {}),
+      ...(volume !== undefined ? { volume } : {}),
     };
   }
 
@@ -327,7 +363,7 @@ async function runRouterCall(args: {
   const options: Parameters<typeof args.client.chat.completions.create>[0] = {
     model: args.modelId,
     messages: [
-      { role: "system", content: ROUTER_SYSTEM_PROMPT },
+      { role: "system", content: buildRouterSystemPrompt() },
       {
         role: "user",
         content: [
@@ -348,7 +384,7 @@ async function runRouterCall(args: {
     args.provider,
     "off",
   );
-  if (args.provider === "openai") {
+  if (args.provider === "openai" || args.provider === "xiaomi") {
     (options as unknown as Record<string, unknown>).max_completion_tokens = 800;
   } else {
     (options as unknown as Record<string, unknown>).max_tokens = 800;
@@ -371,7 +407,7 @@ async function runRouterCall(args: {
       options as unknown as Record<string, unknown>,
       args.provider,
     );
-    if (args.provider === "openai") {
+    if (args.provider === "openai" || args.provider === "xiaomi") {
       (options as unknown as Record<string, unknown>).max_completion_tokens =
         800;
     } else {

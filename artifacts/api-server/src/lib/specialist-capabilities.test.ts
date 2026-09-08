@@ -5,9 +5,11 @@ const searchWebMock = vi.fn();
 
 const {
   generateAlibabaImageMock,
-  transcribeDashScopeAudioMock,
+  transcribeAudioWithModelMock,
+  synthesizeSpeechMock,
   dashscopeClientMock,
   openaiClientMock,
+  xiaomiClientMock,
 } = vi.hoisted(() => {
   const dashscopeClientMock = {
     models: { list: vi.fn().mockResolvedValue({ data: [] }) },
@@ -15,11 +17,18 @@ const {
   const openaiClientMock = {
     models: { list: vi.fn().mockResolvedValue({ data: [] }) },
   };
+  // Discovery is offline here so no test reaches the real Xiaomi endpoint.
+  const xiaomiClientMock = {
+    models: { list: vi.fn().mockRejectedValue(new Error("offline")) },
+    chat: { completions: { create: vi.fn() } },
+  };
   return {
     generateAlibabaImageMock: vi.fn(),
-    transcribeDashScopeAudioMock: vi.fn(),
+    transcribeAudioWithModelMock: vi.fn(),
+    synthesizeSpeechMock: vi.fn(),
     dashscopeClientMock,
     openaiClientMock,
+    xiaomiClientMock,
   };
 });
 
@@ -29,6 +38,7 @@ vi.mock("./ai-clients", async (importOriginal) => {
     ...actual,
     dashscopeClient: dashscopeClientMock as never,
     openaiClient: openaiClientMock as never,
+    xiaomiClient: xiaomiClientMock as never,
   };
 });
 
@@ -37,14 +47,23 @@ vi.mock("./alibaba-image", () => ({
 }));
 
 vi.mock("./audio-transcription", () => ({
-  transcribeDashScopeAudio: transcribeDashScopeAudioMock,
+  transcribeAudioWithModel: transcribeAudioWithModelMock,
 }));
+
+vi.mock("./audio-synthesis", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./audio-synthesis")>();
+  return {
+    ...actual,
+    synthesizeSpeech: synthesizeSpeechMock,
+  };
+});
 
 vi.mock("./web-search", () => ({
   searchWeb: (...args: unknown[]) => searchWebMock(...args),
   fetchPageText: (...args: unknown[]) => fetchPageTextMock(...args),
 }));
 
+import { SpeechSynthesisError } from "./audio-synthesis";
 import {
   executeSpecialistTool,
   getAvailableChatModels,
@@ -62,7 +81,8 @@ describe("specialist capability registry", () => {
     vi.stubEnv("ALIBABA_SPECIALIST_API_KEY", "test-credential");
     vi.stubEnv("DASHSCOPE_API_KEY", "test-regular-chat-credential");
     generateAlibabaImageMock.mockReset();
-    transcribeDashScopeAudioMock.mockReset();
+    transcribeAudioWithModelMock.mockReset();
+    synthesizeSpeechMock.mockReset();
     fetchPageTextMock.mockReset();
     searchWebMock.mockReset();
     generateAlibabaImageMock.mockResolvedValue([
@@ -74,7 +94,16 @@ describe("specialist capability registry", () => {
         modelId: "qwen-image-3.0-pro",
       },
     ]);
-    transcribeDashScopeAudioMock.mockResolvedValue("hello from audio");
+    transcribeAudioWithModelMock.mockResolvedValue("hello from audio");
+    synthesizeSpeechMock.mockResolvedValue({
+      buffer: Buffer.from("mp3"),
+      filename: "speech.mp3",
+      mimeType: "audio/mpeg",
+      size: 3,
+      provider: "xiaomi",
+      modelId: "mimo-v2.5-tts",
+      voice: "Mia",
+    });
   });
 
   afterEach(() => {
@@ -224,7 +253,62 @@ describe("specialist capability registry", () => {
     );
     expect(result.ok).toBe(true);
     expect(result.text).toBe("hello from audio");
-    expect(transcribeDashScopeAudioMock).toHaveBeenCalledTimes(1);
+    expect(transcribeAudioWithModelMock).toHaveBeenCalledTimes(1);
+    expect(transcribeAudioWithModelMock.mock.calls[0]?.[0]).toMatchObject({
+      filename: "memo.mp3",
+      mime: "audio/mpeg",
+    });
+  });
+
+  it("synthesizes speech through the provider-neutral dispatcher", async () => {
+    const result = await executeSpecialistTool(
+      {
+        id: "call-tts",
+        name: "synthesize_speech",
+        arguments: JSON.stringify({
+          text: "こんにちは、Chat Spaceです。",
+          modelId: "mimo-v2.5-tts",
+          voice: "Mia",
+          languageHint: "ja",
+        }),
+      },
+      {},
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.capability).toBe("audio-synthesis");
+    expect(result.summary).toBe("MP3音声を生成しました。");
+    expect(result.asset?.mimeType).toBe("audio/mpeg");
+    expect(synthesizeSpeechMock).toHaveBeenCalledTimes(1);
+    expect(synthesizeSpeechMock.mock.calls[0]?.[0]).toMatchObject({
+      text: "こんにちは、Chat Spaceです。",
+      modelId: "mimo-v2.5-tts",
+      voice: "Mia",
+      languageHint: "ja",
+    });
+  });
+
+  it("reports the vetted public message when speech synthesis is refused", async () => {
+    synthesizeSpeechMock.mockRejectedValueOnce(
+      new SpeechSynthesisError(
+        "Speech provider xiaomi is not available",
+        "Xiaomi MiMoの音声合成は現在利用できません。",
+        false,
+      ),
+    );
+
+    const result = await executeSpecialistTool(
+      {
+        id: "call-tts-unavailable",
+        name: "synthesize_speech",
+        arguments: JSON.stringify({ text: "読み上げて" }),
+      },
+      {},
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.capability).toBe("audio-synthesis");
+    expect(result.summary).toBe("Xiaomi MiMoの音声合成は現在利用できません。");
   });
 
   it("includes web_search and fetch_page in tool definitions", () => {

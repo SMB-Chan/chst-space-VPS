@@ -98,6 +98,27 @@ function normalizeMessages(messages: unknown[], date: Date): unknown[] {
 }
 
 /**
+ * MiMo speech synthesis and recognition ride /chat/completions but reject a
+ * system turn outright ("system role is not allowed for TTS model", "ASR
+ * request must not include text parts"), so date context must not be injected
+ * into a body that is asking for audio rather than an answer.
+ */
+function isSpeechRequestBody(parsed: Record<string, unknown>): boolean {
+  if (parsed.audio !== undefined) return true;
+  const messages = parsed.messages;
+  if (!Array.isArray(messages)) return false;
+  return messages.some((message) => {
+    const content = (message as ChatMessageLike | null)?.content;
+    return (
+      Array.isArray(content) &&
+      content.some(
+        (part) => (part as { type?: unknown } | null)?.type === "input_audio",
+      )
+    );
+  });
+}
+
+/**
  * Inject JST context into an OpenAI-compatible chat-completions JSON body.
  * Non-JSON/non-chat-shaped bodies are returned unchanged.
  */
@@ -111,6 +132,7 @@ export function injectLlmTimeContextIntoBody(
       unknown
     >;
     if (!Array.isArray(parsed.messages)) return body;
+    if (isSpeechRequestBody(parsed)) return body;
     parsed.messages = normalizeMessages(parsed.messages, date);
     return JSON.stringify(parsed);
   } catch {

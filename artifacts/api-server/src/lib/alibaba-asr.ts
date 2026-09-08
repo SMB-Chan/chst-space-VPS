@@ -1,8 +1,16 @@
-import { spawn } from "node:child_process";
 import {
   getAlibabaSpecialistConfig,
   resolveAlibabaSpecialistHttpUrl,
 } from "./alibaba-specialist-config";
+import {
+  CONTAINER_MIME,
+  containerFromFilename,
+  containerFromMime,
+  detectAudioContainer,
+  probeAudioDurationSeconds,
+  wavSampleRate,
+  type AudioContainer,
+} from "./audio-format";
 import { logger } from "./logger";
 
 const MAX_ENCODED_AUDIO_BYTES = 10 * 1024 * 1024;
@@ -12,8 +20,7 @@ const REQUEST_TIMEOUT_MS = 90_000;
 const MAX_LANGUAGE_HINTS = 4;
 const MAX_LANGUAGE_HINT_LENGTH = 16;
 
-export type QwenAudioFormat =
-  "mp3" | "wav" | "m4a" | "ogg" | "flac" | "webm" | "aac" | "amr";
+export type QwenAudioFormat = AudioContainer;
 
 export class AlibabaAsrError extends Error {
   readonly publicMessage: string;
@@ -31,95 +38,14 @@ export class AlibabaAsrError extends Error {
   }
 }
 
-const FORMAT_MIME: Record<QwenAudioFormat, string> = {
-  mp3: "audio/mpeg",
-  wav: "audio/wav",
-  m4a: "audio/mp4",
-  ogg: "audio/ogg",
-  flac: "audio/flac",
-  webm: "audio/webm",
-  aac: "audio/aac",
-  amr: "audio/amr",
-};
-
-const MIME_FORMAT: Record<string, QwenAudioFormat> = {
-  "audio/mpeg": "mp3",
-  "audio/mp3": "mp3",
-  "audio/wav": "wav",
-  "audio/x-wav": "wav",
-  "audio/wave": "wav",
-  "audio/mp4": "m4a",
-  "audio/x-m4a": "m4a",
-  "audio/ogg": "ogg",
-  "application/ogg": "ogg",
-  "audio/flac": "flac",
-  "audio/webm": "webm",
-  "audio/aac": "aac",
-  "audio/amr": "amr",
-};
-
-const EXTENSION_FORMAT: Record<string, QwenAudioFormat> = {
-  mp3: "mp3",
-  wav: "wav",
-  wave: "wav",
-  m4a: "m4a",
-  m4b: "m4a",
-  mp4: "m4a",
-  ogg: "ogg",
-  oga: "ogg",
-  opus: "ogg",
-  flac: "flac",
-  webm: "webm",
-  aac: "aac",
-  amr: "amr",
-};
-
-function extensionFormat(filename: string): QwenAudioFormat | undefined {
-  const extension = filename.trim().toLowerCase().split(".").pop() ?? "";
-  return EXTENSION_FORMAT[extension];
-}
-
-function detectedFormat(buffer: Buffer): QwenAudioFormat | undefined {
-  if (
-    buffer.length >= 12 &&
-    buffer.toString("ascii", 0, 4) === "RIFF" &&
-    buffer.toString("ascii", 8, 12) === "WAVE"
-  ) {
-    return "wav";
-  }
-  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "fLaC")
-    return "flac";
-  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "OggS")
-    return "ogg";
-  if (buffer.length >= 4 && buffer.readUInt32BE(0) === 0x1a45dfa3)
-    return "webm";
-  if (buffer.length >= 12 && buffer.toString("ascii", 4, 8) === "ftyp")
-    return "m4a";
-  if (buffer.length >= 6 && buffer.toString("ascii", 0, 6) === "#!AMR\n")
-    return "amr";
-  if (
-    (buffer.length >= 3 && buffer.toString("ascii", 0, 3) === "ID3") ||
-    (buffer.length >= 2 &&
-      buffer[0] === 0xff &&
-      (buffer[1] & 0xe0) === 0xe0 &&
-      (buffer[1] & 0x18) !== 0 &&
-      (buffer[1] & 0x06) !== 0)
-  ) {
-    return "mp3";
-  }
-  if (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0)
-    return "aac";
-  return undefined;
-}
-
 function resolveAudioFormat(
   filename: string,
   mime: string,
   buffer: Buffer,
-): QwenAudioFormat {
-  const byMime = MIME_FORMAT[mime.trim().toLowerCase().split(";")[0]];
-  const byExtension = extensionFormat(filename);
-  const byContent = detectedFormat(buffer);
+): AudioContainer {
+  const byMime = containerFromMime(mime);
+  const byExtension = containerFromFilename(filename);
+  const byContent = detectAudioContainer(buffer);
   const format = byContent ?? byMime ?? byExtension;
   if (!format) {
     throw new AlibabaAsrError(
@@ -143,60 +69,6 @@ function resolveAudioFormat(
     );
   }
   return format;
-}
-
-function wavSampleRate(buffer: Buffer): number | undefined {
-  if (detectedFormat(buffer) !== "wav" || buffer.length < 28) return undefined;
-  let offset = 12;
-  while (offset + 8 <= buffer.length) {
-    const chunkId = buffer.toString("ascii", offset, offset + 4);
-    const chunkSize = buffer.readUInt32LE(offset + 4);
-    if (chunkId === "fmt " && offset + 16 <= buffer.length) {
-      const sampleRate = buffer.readUInt32LE(offset + 12);
-      return sampleRate >= 8_000 && sampleRate <= 192_000
-        ? sampleRate
-        : undefined;
-    }
-    offset += 8 + chunkSize + (chunkSize % 2);
-  }
-  return undefined;
-}
-
-async function probeDuration(buffer: Buffer): Promise<number | undefined> {
-  return new Promise((resolve) => {
-    let output = "";
-    let settled = false;
-    const child = spawn(
-      "ffprobe",
-      [
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        "-",
-      ],
-      { stdio: ["pipe", "pipe", "ignore"] },
-    );
-    const finish = (value: number | undefined) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    child.stdout.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-      if (output.length > 128) child.kill();
-    });
-    child.on("error", () => finish(undefined));
-    child.on("close", (code) => {
-      if (code !== 0) return finish(undefined);
-      const duration = Number.parseFloat(output.trim());
-      finish(Number.isFinite(duration) && duration >= 0 ? duration : undefined);
-    });
-    child.stdin.on("error", () => finish(undefined));
-    child.stdin.end(buffer);
-  });
 }
 
 async function readBoundedResponse(response: Response): Promise<Buffer> {
@@ -313,7 +185,7 @@ export async function transcribeQwenAudio(
     );
   }
   const encodedAudio = args.buffer.toString("base64");
-  const dataUrl = `data:${FORMAT_MIME[format]};base64,${encodedAudio}`;
+  const dataUrl = `data:${CONTAINER_MIME[format]};base64,${encodedAudio}`;
   if (Buffer.byteLength(dataUrl, "utf8") > MAX_ENCODED_AUDIO_BYTES) {
     throw new AlibabaAsrError(
       "Base64 audio data URL exceeds 10 MB",
@@ -322,7 +194,8 @@ export async function transcribeQwenAudio(
     );
   }
 
-  const duration = args.durationSeconds ?? (await probeDuration(args.buffer));
+  const duration =
+    args.durationSeconds ?? (await probeAudioDurationSeconds(args.buffer));
   if (duration !== undefined && duration > MAX_AUDIO_DURATION_SECONDS) {
     throw new AlibabaAsrError(
       `Audio duration ${duration}s exceeds five-minute limit`,
