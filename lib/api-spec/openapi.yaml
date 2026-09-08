@@ -749,6 +749,13 @@ components:
           type: string
           format: date-time
           nullable: true
+        publisherName:
+          type: string
+          nullable: true
+        publisherUrl:
+          type: string
+          format: uri
+          nullable: true
       required:
         - title
         - url

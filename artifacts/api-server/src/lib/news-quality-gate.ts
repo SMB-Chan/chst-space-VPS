@@ -1,7 +1,16 @@
-import type { SearchResult } from "./search-parse";
+import { normalizeExternalHttpUrl, type SearchResult } from "./search-parse";
+export {
+  buildNewsFastPathQueries,
+  buildNewsSearchCircuit,
+  isNewsFastPathQuestion,
+  type NewsSearchCircuit,
+  type NewsSearchCircuitMode,
+  type NewsSearchTemporalScope,
+} from "./news-search-circuit";
 
 export type NewsQuality = "good" | "partial" | "poor";
 export type TaskSuccess = "succeeded" | "failed" | "unknown";
+const NEWS_QUERY_REPORT_LIMIT = 4;
 
 export interface NewsQualityReport {
   kind: "news";
@@ -48,7 +57,7 @@ export function normalizeNewsQualityReport(
     ? raw.queries
         .filter((query): query is string => typeof query === "string")
         .map((query) => query.slice(0, 240))
-        .slice(0, 3)
+        .slice(0, NEWS_QUERY_REPORT_LIMIT)
     : [];
   return {
     kind: "news",
@@ -108,6 +117,36 @@ function hostOf(url: string): string | null {
   }
 }
 
+function evidenceUrl(result: SearchResult): string {
+  return result.articleUrl || result.publisherUrl || result.url;
+}
+
+function evidenceHostOf(result: SearchResult): string | null {
+  return hostOf(evidenceUrl(result));
+}
+
+function isGoogleNewsWrapperUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.toLowerCase() === "news.google.com" &&
+      /^\/rss\/articles\//i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function matchesKnownHost(
+  host: string,
+  knownHosts: ReadonlySet<string>,
+): boolean {
+  for (const known of knownHosts) {
+    if (host === known || host.endsWith(`.${known}`)) return true;
+  }
+  return false;
+}
+
 function baseDomain(host: string): string {
   const parts = host.split(".");
   const suffix = parts.slice(-2).join(".");
@@ -128,7 +167,20 @@ function baseDomain(host: string): string {
 
 function isSearchPage(result: SearchResult): boolean {
   const host = hostOf(result.url);
-  if (!host || SEARCH_HOSTS.has(host)) return true;
+  if (!host) return true;
+  if (SEARCH_HOSTS.has(host)) {
+    // Google News RSS uses /rss/articles/* wrapper URLs. They are not useful
+    // as article URLs by themselves, but a normalized <source url> identifies
+    // the publisher and makes the RSS item usable evidence.
+    if (
+      host === "news.google.com" &&
+      result.publisherUrl &&
+      isGoogleNewsWrapperUrl(result.url)
+    ) {
+      return false;
+    }
+    return true;
+  }
   try {
     const url = new URL(result.url);
     return (
@@ -148,7 +200,7 @@ function isProductPage(result: SearchResult): boolean {
     return true;
   }
   try {
-    const path = new URL(result.url).pathname;
+    const path = new URL(result.articleUrl || result.url).pathname;
     return /\/(products?|items?|p|cart|checkout|buy)\b/i.test(path);
   } catch {
     return true;
@@ -172,8 +224,10 @@ function rejectionReason(
     return "error-page";
   }
   if (isProductPage(result)) return "product-page";
-  const host = hostOf(result.url);
-  const recognizedPublisher = host ? MAJOR_OR_OFFICIAL_HOSTS.has(host) : false;
+  const host = evidenceHostOf(result);
+  const recognizedPublisher = host
+    ? matchesKnownHost(host, MAJOR_OR_OFFICIAL_HOSTS)
+    : false;
   if (
     !NEWS_TERMS.test(`${result.title} ${result.snippet ?? ""}`) &&
     !recognizedPublisher &&
@@ -192,6 +246,32 @@ function isFresh(publishedAt: string, now: Date, maxAgeDays = 7): boolean {
   return ageMs >= -86_400_000 && ageMs <= maxAgeDays * 86_400_000;
 }
 
+function normalizedTitle(title: string): string {
+  return title
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function newsResultIdentities(result: SearchResult): string[] {
+  const identities: string[] = [];
+  const articleUrl = result.articleUrl
+    ? normalizeExternalHttpUrl(result.articleUrl)
+    : null;
+  if (articleUrl) identities.push(`url:${articleUrl}`);
+
+  const resultUrl = normalizeExternalHttpUrl(result.url);
+  if (resultUrl) identities.push(`url:${resultUrl}`);
+
+  const publisherHost = hostOf(result.publisherUrl ?? result.url);
+  const title = normalizedTitle(result.title);
+  if (publisherHost && title && !isSearchPage(result)) {
+    identities.push(`publisher-title:${baseDomain(publisherHost)}:${title}`);
+  }
+
+  return identities.length > 0 ? identities : [`raw:${result.url}`];
+}
+
 export function assessNewsRetrieval(args: {
   results: SearchResult[];
   queries?: string[];
@@ -203,8 +283,9 @@ export function assessNewsRetrieval(args: {
   const seenUrls = new Set<string>();
 
   for (const result of args.results) {
-    if (seenUrls.has(result.url)) continue;
-    seenUrls.add(result.url);
+    const identities = newsResultIdentities(result);
+    if (identities.some((identity) => seenUrls.has(identity))) continue;
+    for (const identity of identities) seenUrls.add(identity);
     const reason = rejectionReason(result);
     if (reason) {
       rejected.push({ title: result.title, url: result.url, reason });
@@ -218,13 +299,13 @@ export function assessNewsRetrieval(args: {
   );
   const domains = new Set(
     accepted
-      .map((result) => hostOf(result.url))
+      .map((result) => evidenceHostOf(result))
       .filter((host): host is string => Boolean(host))
       .map(baseDomain),
   );
   const officialOrMajorSourceCount = accepted.filter((result) => {
-    const host = hostOf(result.url);
-    return host ? MAJOR_OR_OFFICIAL_HOSTS.has(host) : false;
+    const host = evidenceHostOf(result);
+    return host ? matchesKnownHost(host, MAJOR_OR_OFFICIAL_HOSTS) : false;
   }).length;
 
   const quality: NewsQuality =
@@ -253,43 +334,11 @@ export function assessNewsRetrieval(args: {
  * inflate domain or freshness coverage.
  */
 export function filterNewsResults(results: SearchResult[]): SearchResult[] {
-  return results.filter((result) => !rejectionReason(result));
-}
-
-export function buildNewsFastPathQueries(
-  question: string,
-  now = new Date(),
-): string[] {
-  const date = new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  })
-    .format(now)
-    .replace(/\//g, "-");
-  const normalized = question.replace(/\s+/g, " ").trim();
-  const broadNewsQuestion =
-    /今日|本日|最新|最近|ニュース|news|what.?s happening|current/i.test(
-      normalized,
-    );
-  if (broadNewsQuestion && normalized.length < 80) {
-    return [
-      `${date} 日本 国内 主要ニュース 公式 報道`,
-      `${date} 国際 主要ニュース 公式 報道`,
-      `${date} 最新ニュース 主要報道`,
-    ];
-  }
-  const topic = normalized.slice(0, 120);
-  return [
-    `${date} ${topic} ニュース`,
-    `${date} ${topic} 公式 発表`,
-    `${date} ${topic} 最新 報道`,
-  ];
-}
-
-export function isNewsFastPathQuestion(question: string): boolean {
-  return /ニュース|速報|最新の報道|今日の出来事|what.?s happening|latest news|breaking news/i.test(
-    question,
-  );
+  // A normal search result may not expose its publication date until its page
+  // is fetched. Keep that candidate for the bounded page-fetch stage; the
+  // final assessment still rejects it if no date can be recovered.
+  return results.filter((result) => {
+    const reason = rejectionReason(result);
+    return reason === null || reason === "missing-date";
+  });
 }

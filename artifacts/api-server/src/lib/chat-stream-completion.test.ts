@@ -43,6 +43,27 @@ describe("buildArtifactSsePayload", () => {
 });
 
 describe("persistAndEmitChatCompletion", () => {
+  it("turns an empty completion into a non-empty SSE fallback", async () => {
+    const write = vi.fn();
+    const onComplete = vi.fn(async (input: { content: string }) => {
+      expect(input.content).toContain("信頼できる最新情報");
+      return undefined;
+    });
+
+    const completed = await persistAndEmitChatCompletion({
+      res: { write } as unknown as Response,
+      clientGone: () => false,
+      onComplete,
+      input: { content: "", sources: [] },
+      includeArtifactContent: false,
+    });
+
+    expect(completed).toBe(true);
+    const output = write.mock.calls.join("");
+    expect(output).toContain('"content":"信頼できる最新情報');
+    expect(output).toContain('"done":true');
+  });
+
   it("reports persistence failure and does not emit done", async () => {
     const write = vi.fn();
     const completed = await persistAndEmitChatCompletion({

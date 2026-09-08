@@ -240,32 +240,47 @@ export async function isSafeBrowserRequestUrl(
 export async function installRequestGuard(
   context: BrowserContext,
 ): Promise<void> {
-  await context.route("**/*", async (route: Route) => {
-    const request = route.request();
-    if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
+  await context.route("**/*", (route: Route) =>
+    (async () => {
+      const request = route.request();
+      if (BLOCKED_RESOURCE_TYPES.has(request.resourceType())) {
+        await route.abort("blockedbyclient");
+        return;
+      }
+      if (await isSafeBrowserRequestUrl(request.url())) {
+        await route.continue();
+        return;
+      }
+      logger.warn(
+        { component: "render-fetch", errorCode: "BROWSER_REQUEST_BLOCKED" },
+        "Blocked browser request (SSRF guard)",
+      );
       await route.abort("blockedbyclient");
-      return;
-    }
-    if (await isSafeBrowserRequestUrl(request.url())) {
-      await route.continue();
-      return;
-    }
-    logger.warn(
-      { component: "render-fetch", errorCode: "BROWSER_REQUEST_BLOCKED" },
-      "Blocked browser request (SSRF guard)",
-    );
-    await route.abort("blockedbyclient");
-  });
+    })().catch((error) => {
+      logger.warn(
+        safeFailureFields(error, "render-fetch", "BROWSER_ROUTE_FAILED"),
+        "Browser request guard failed; aborting the request",
+      );
+      return route.abort("failed").catch(() => undefined);
+    }),
+  );
 
   // Page extraction never needs a persistent socket. Blocking all WebSockets
   // prevents ws:// / wss:// from becoming a second, unvalidated network path.
-  await context.routeWebSocket("**/*", async (socket) => {
-    logger.debug(
-      { component: "render-fetch", eventCode: "BROWSER_WEBSOCKET_BLOCKED" },
-      "Blocked browser WebSocket",
-    );
-    await socket.close({ code: 1008, reason: "Network policy" });
-  });
+  await context.routeWebSocket("**/*", (socket) =>
+    (async () => {
+      logger.debug(
+        { component: "render-fetch", eventCode: "BROWSER_WEBSOCKET_BLOCKED" },
+        "Blocked browser WebSocket",
+      );
+      await socket.close({ code: 1008, reason: "Network policy" });
+    })().catch((error) => {
+      logger.warn(
+        safeFailureFields(error, "render-fetch", "BROWSER_WEBSOCKET_FAILED"),
+        "Browser WebSocket guard failed",
+      );
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -410,21 +425,29 @@ async function createContext(deadlineAtMs: number): Promise<BrowserContext> {
 }
 
 async function closeContextBounded(context: BrowserContext): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const closed = await Promise.race([
-    context.close().then(
-      () => true,
-      () => true,
-    ),
-    new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), BROWSER_CLEANUP_TOLERANCE_MS);
-      timer.unref?.();
-    }),
-  ]);
-  if (timer) clearTimeout(timer);
-  if (!closed) {
+  try {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const closed = await Promise.race([
+      context.close().then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), BROWSER_CLEANUP_TOLERANCE_MS);
+        timer.unref?.();
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!closed) {
+      logger.warn(
+        "Browser context cleanup exceeded tolerance; resetting browser",
+      );
+      discardBrowser();
+    }
+  } catch (error) {
     logger.warn(
-      "Browser context cleanup exceeded tolerance; resetting browser",
+      safeFailureFields(error, "render-fetch", "BROWSER_CLEANUP_FAILED"),
+      "Browser context cleanup failed; resetting browser",
     );
     discardBrowser();
   }
@@ -434,9 +457,16 @@ async function closeContextBounded(context: BrowserContext): Promise<void> {
 // Public API
 // ---------------------------------------------------------------------------
 
+export interface BrowserFetchDependencies {
+  /** Internal fault-injection seam for browser lifecycle regression tests. */
+  createContext?: (deadlineAtMs: number) => Promise<BrowserContext>;
+}
+
 export async function fetchWithBrowser(
   url: string,
   timeoutMs: number,
+  signal?: AbortSignal,
+  dependencies?: BrowserFetchDependencies,
 ): Promise<{ title: string; text: string } | null> {
   const startedAt = Date.now();
   const normalizedTimeoutMs =
@@ -447,6 +477,7 @@ export async function fetchWithBrowser(
   let slotAcquired = false;
   let context: BrowserContext | undefined;
   try {
+    if (signal?.aborted) return null;
     slotAcquired = await acquireBrowserSlot(deadlineAtMs);
     if (!slotAcquired) {
       browserMetrics.failures += 1;
@@ -484,6 +515,7 @@ export async function fetchWithBrowser(
     }
 
     try {
+      if (signal?.aborted) return null;
       await withBrowserDeadline(
         installRequestGuard(context),
         deadlineAtMs,
@@ -494,14 +526,19 @@ export async function fetchWithBrowser(
         deadlineAtMs,
         "page creation",
       );
+      if (signal?.aborted) return null;
       const navigationTimeoutMs = remainingBrowserDeadlineMs(deadlineAtMs);
       if (navigationTimeoutMs <= 0) {
         throw new BrowserDeadlineExceededError("navigation");
       }
-      const response = await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: navigationTimeoutMs,
-      });
+      const response = await withBrowserDeadline(
+        page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: navigationTimeoutMs,
+        }),
+        deadlineAtMs,
+        "page navigation",
+      );
       if (!response || !response.ok()) {
         browserMetrics.failures += 1;
         logger.warn(

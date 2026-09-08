@@ -11,3 +11,4 @@
 - [動的検索schedulerのテスト分離](search-scheduler-test-isolation.md) — 順位学習状態を持つschedulerは各テスト後にruntimeとhealthをリセットし、順序依存を防ぐ。
 - [Incremental Markdownの安全境界](streaming-markdown-incremental.md) — 空行で確定したブロックだけ固定し、参照定義・参照リンク・HTMLは全文描画へ戻す。
 - [Web回復の安全境界](web-recovery-guardrails.md) — 通常回答限定・1ターン1回・失敗時は初稿保持で、翻訳監査と検索回復を分離する。
+- [Gitバックアップ履歴](git-backup-history.md) — 自動バックアップcommitが作業ブランチの親に現れることがあるため、履歴だけでなくtreeとstatusで成果物を確認する。
