@@ -63,6 +63,8 @@ import {
   type NewsRelevanceContext,
 } from "./news-quality-gate";
 import { buildNewsSearchCircuit } from "./news-search-circuit";
+import { selectEvidenceAwareFetchCandidates } from "./search-evidence-selection";
+import { assessSearchRetrievalEvidence } from "./search-evidence-vector";
 
 export type { SearchResult, ScoredSearchResult };
 export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
@@ -1260,14 +1262,36 @@ export async function buildWebContext(
     }
 
     // Skip pages already fetched in an earlier round so the follow-up round
-    // neither re-fetches nor miscounts them as failures.
-    const top = results
-      .slice(0, FETCH_TOP_N)
-      .filter((r) => !seenSourceUrls.has(r.url));
+    // neither re-fetches nor miscounts them as failures. Source-card ordering
+    // remains the relevance ranking; only the bounded full-page fetch budget is
+    // evidence-aware so required retrieval lanes are not accidentally hydrated
+    // only as snippets.
+    const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
+    const fetchPlan =
+      !newsCircuit && route === "default"
+        ? (roundPlan ?? planSearchQueries(roundQuery))
+        : undefined;
+    const top = fetchPlan
+      ? selectEvidenceAwareFetchCandidates(newResults, fetchPlan, FETCH_TOP_N)
+      : newResults.slice(0, FETCH_TOP_N);
+    if (fetchPlan && top.length > 0) {
+      const fetchCoverage = assessSearchRetrievalEvidence(fetchPlan, top);
+      logger.debug(
+        {
+          component: "web-search",
+          eventCode: "SEARCH_FETCH_EVIDENCE_SELECTION",
+          task: fetchPlan.taskProfile.task,
+          fetchCandidateCount: top.length,
+          coveredDimensions: fetchCoverage.coveredDimensions,
+          missingRequiredDimensions: fetchCoverage.missingRequiredDimensions,
+          distinctDomains: fetchCoverage.distinctDomains,
+        },
+        "Allocated page-fetch budget across retrieval evidence dimensions",
+      );
+    }
     const pages = await Promise.all(
       top.map((r) => fetchPageText(r.url, signal, wantVisuals)),
     );
-    const newResults = results.filter((r) => !seenSourceUrls.has(r.url));
     const fetchedPages = new Map(
       top.map((result, index) => [result.url, pages[index]]),
     );
