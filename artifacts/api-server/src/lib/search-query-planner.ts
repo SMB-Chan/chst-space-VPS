@@ -1,13 +1,16 @@
+import { normalizeQuery, sanitizeSearchQuery } from "./search-enhance";
 import {
-  classifySearchIntent,
-  normalizeQuery,
-  sanitizeSearchQuery,
-} from "./search-enhance";
+  buildSearchTaskProfile,
+  type SearchRetrievalLane,
+  type SearchTaskProfile,
+} from "./search-task-profile";
 
 export type SearchSubqueryRole =
   | "primary"
   | "official"
   | "freshness"
+  | "counterevidence"
+  | "comparison"
   | "research"
   | "technical"
   | "cross_language";
@@ -22,6 +25,7 @@ export interface SearchQueryPlan {
   originalQuery: string;
   queries: SearchSubquery[];
   maxQueries: number;
+  taskProfile: SearchTaskProfile;
 }
 
 export interface SearchQueryPlannerOptions {
@@ -33,26 +37,23 @@ export interface SearchQueryPlannerOptions {
   maxQueries?: number;
 }
 
-const DEFAULT_MAX_PLAN_QUERIES = 3;
 const HARD_MAX_PLAN_QUERIES = 4;
 
 const JAPANESE_RE = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
-const FRESHNESS_RE =
-  /最新|現在|今日|今週|今月|速報|直近|recent|latest|current|today|this week|breaking/i;
-const HISTORICAL_RE =
-  /過去|以前|当時|歴史|昨年|去年|先月|先週|\d+年前|historical|history|previous|last year|ago/i;
-const RESEARCH_RE =
-  /論文|研究|査読|学術|プレプリント|arxiv|paper|papers|study|studies|research|preprint|benchmark/i;
-const TECHNICAL_RE =
-  /github|リポジトリ|repository|repo\b|oss\b|open source|ソースコード|source code|api\b|sdk\b|library|ライブラリ|framework|フレームワーク/i;
-const OFFICIAL_RE =
-  /公式|一次資料|一次情報|原文|官公庁|省庁|規則|規制|法令|法律|仕様書|standard|official|primary source|government|regulation|law\b/i;
+const OFFICIAL_QUERY_CONSTRAINT_RE =
+  /(?:\bsite:[^\s]+|気象庁|官報|e-Gov|(?:公式|official)\s*(?:一次資料|一次情報|原文|発表|声明|文書|documentation|docs?)|primary\s+source|official\s+(?:government|documentation|docs?)|government\s+site)/i;
+const FRESHNESS_QUERY_CONSTRAINT_RE =
+  /最新|速報|現在|今日|本日|明日|今週|今月|今年|latest|breaking|current|today|tomorrow|tonight|this\s+(?:week|month|year)/i;
 
-function boundedMaxQueries(requested?: number): number {
-  if (requested === undefined || !Number.isFinite(requested)) {
-    return DEFAULT_MAX_PLAN_QUERIES;
-  }
-  return Math.min(HARD_MAX_PLAN_QUERIES, Math.max(1, Math.floor(requested)));
+function boundedMaxQueries(
+  requested: number | undefined,
+  fallback: number,
+): number {
+  const value =
+    requested === undefined || !Number.isFinite(requested)
+      ? fallback
+      : Math.floor(requested);
+  return Math.min(HARD_MAX_PLAN_QUERIES, Math.max(1, value));
 }
 
 function compactComparable(query: string): string {
@@ -79,6 +80,8 @@ function weightedRole(role: SearchSubqueryRole): number {
       return 1.2;
     case "official":
       return 1.1;
+    case "counterevidence":
+    case "comparison":
     case "research":
     case "technical":
       return 1.05;
@@ -112,75 +115,114 @@ function addCandidate(
 }
 
 function officialVariant(base: string, isJapanese: boolean): string | null {
-  if (OFFICIAL_RE.test(base)) return null;
+  // A user asking for "official sources" is not the same as an already
+  // constrained official-source query. Suppress the lane only when the query
+  // itself already targets a concrete official surface (site:, JMA, e-Gov,
+  // "official docs", etc.). This keeps fact-check and research tasks from
+  // falsely satisfying their primary-source requirement with a generic query.
+  if (OFFICIAL_QUERY_CONSTRAINT_RE.test(base)) return null;
   if (/天気|天候|気象|weather|forecast/i.test(base)) {
     return isJapanese ? `${base} 気象庁` : `${base} official weather service`;
   }
   if (/法律|法令|規制|規則|制度|law\b|regulation/i.test(base)) {
     return isJapanese ? `${base} site:go.jp` : `${base} official government`;
   }
-  return null;
+  return isJapanese
+    ? `${base} 公式 一次資料`
+    : `${base} official primary source`;
+}
+
+function laneVariant(
+  lane: SearchRetrievalLane,
+  base: string,
+  isJapanese: boolean,
+): { query: string; role: SearchSubqueryRole } | null {
+  switch (lane.kind) {
+    case "primary_source": {
+      const query = officialVariant(base, isJapanese);
+      return query ? { query, role: "official" } : null;
+    }
+    case "freshness":
+      // Do not spend a bounded query slot merely to append "latest" when the
+      // base query already carries a concrete current-time constraint such as
+      // today/tomorrow/this week. The temporal signal is already available to
+      // providers; a separate freshness query should represent new evidence,
+      // not lexical duplication.
+      if (FRESHNESS_QUERY_CONSTRAINT_RE.test(base)) return null;
+      return {
+        query: isJapanese ? `${base} 最新` : `${base} latest`,
+        role: "freshness",
+      };
+    case "counterevidence":
+      return {
+        query: isJapanese
+          ? `${base} 反証 例外 限界`
+          : `${base} counterevidence exceptions limitations`,
+        role: "counterevidence",
+      };
+    case "comparison":
+      return {
+        query: isJapanese
+          ? `${base} 比較 benchmark`
+          : `${base} comparison benchmark`,
+        role: "comparison",
+      };
+    case "academic":
+      return { query: `${base} arXiv paper`, role: "research" };
+    case "technical":
+      return {
+        query: `${base} GitHub documentation`,
+        role: "technical",
+      };
+    case "independent":
+      // Independence is enforced by provider/result diversity rather than by
+      // inventing a weaker query. Gap-directed recovery can later request a
+      // different domain without perturbing the first-pass query semantics.
+      return null;
+  }
 }
 
 /**
  * Deterministic, bounded query planning used after the conversation-aware LLM
- * has selected the base search query. The original sanitized query is always
- * first. Supplemental angles are added only when the query itself indicates a
- * useful distinct retrieval path. Optional LLM-provided variants are treated
- * as untrusted input and pass through the same sanitizer and hard cap.
+ * has selected the base search query. A multi-dimensional task profile keeps
+ * freshness, primary-source, counterevidence, academic and technical needs
+ * separate, then spends the bounded query budget on the highest-priority
+ * retrieval lanes. Optional LLM-provided variants remain untrusted input and
+ * pass through the same sanitizer and hard cap.
  */
 export function planSearchQueries(
   rawQuery: string,
   options: SearchQueryPlannerOptions = {},
 ): SearchQueryPlan {
   const originalQuery = sanitizeSearchQuery(rawQuery);
-  const maxQueries = boundedMaxQueries(options.maxQueries);
+  const taskProfile = buildSearchTaskProfile(originalQuery);
+  const maxQueries = boundedMaxQueries(
+    options.maxQueries,
+    taskProfile.recommendedMaxQueries,
+  );
   if (!originalQuery) {
-    return { originalQuery: "", queries: [], maxQueries };
+    return { originalQuery: "", queries: [], maxQueries, taskProfile };
   }
 
   const queries: SearchSubquery[] = [];
   addCandidate(queries, originalQuery, "primary", maxQueries);
 
   const isJapanese = JAPANESE_RE.test(originalQuery);
-  const intent = classifySearchIntent(originalQuery);
-  const historical = HISTORICAL_RE.test(originalQuery);
-
-  const official = officialVariant(originalQuery, isJapanese);
-  if (official) addCandidate(queries, official, "official", maxQueries);
-
-  if (
-    queries.length < maxQueries &&
-    !historical &&
-    (intent === "news" ||
-      intent === "finance" ||
-      FRESHNESS_RE.test(originalQuery)) &&
-    !/最新|latest|速報|breaking/i.test(originalQuery)
-  ) {
-    addCandidate(
-      queries,
-      isJapanese ? `${originalQuery} 最新` : `${originalQuery} latest`,
-      "freshness",
-      maxQueries,
-    );
-  }
-
-  if (queries.length < maxQueries && RESEARCH_RE.test(originalQuery)) {
-    addCandidate(
-      queries,
-      `${originalQuery} arXiv paper`,
-      "research",
-      maxQueries,
-    );
-  }
-
-  if (queries.length < maxQueries && TECHNICAL_RE.test(originalQuery)) {
-    addCandidate(
-      queries,
-      `${originalQuery} GitHub documentation`,
-      "technical",
-      maxQueries,
-    );
+  if (taskProfile.temporalNeed !== "historical") {
+    for (const lane of taskProfile.lanes) {
+      if (queries.length >= maxQueries) break;
+      const variant = laneVariant(lane, originalQuery, isJapanese);
+      if (!variant) continue;
+      addCandidate(queries, variant.query, variant.role, maxQueries);
+    }
+  } else {
+    for (const lane of taskProfile.lanes) {
+      if (queries.length >= maxQueries) break;
+      if (lane.kind === "freshness") continue;
+      const variant = laneVariant(lane, originalQuery, isJapanese);
+      if (!variant) continue;
+      addCandidate(queries, variant.query, variant.role, maxQueries);
+    }
   }
 
   for (const suggested of options.suggestedQueries ?? []) {
@@ -193,5 +235,5 @@ export function planSearchQueries(
     );
   }
 
-  return { originalQuery, queries, maxQueries };
+  return { originalQuery, queries, maxQueries, taskProfile };
 }

@@ -582,11 +582,53 @@ export async function searchWithProviders(
   return run.results;
 }
 
+function requiredSupplementalRoles(
+  plan: SearchQueryPlan,
+): Set<SearchSubqueryRole> {
+  const required = new Set<SearchSubqueryRole>();
+  for (const lane of plan.taskProfile.lanes) {
+    if (!lane.required) continue;
+    switch (lane.kind) {
+      case "primary_source":
+        required.add("official");
+        break;
+      case "freshness":
+        required.add("freshness");
+        break;
+      case "counterevidence":
+        required.add("counterevidence");
+        break;
+      case "comparison":
+        required.add("comparison");
+        break;
+      case "academic":
+        required.add("research");
+        break;
+      case "technical":
+        required.add("technical");
+        break;
+      case "independent":
+        // Independence is measured over result provenance/domain diversity;
+        // it does not justify a synthetic query by itself.
+        break;
+    }
+  }
+  return required;
+}
+
+function needsRequiredSupplementalCoverage(plan: SearchQueryPlan): boolean {
+  const required = requiredSupplementalRoles(plan);
+  if (required.size === 0) return false;
+  return plan.queries.slice(1).some((item) => required.has(item.role));
+}
+
 /**
  * Execute the bounded query plan without multiplying routine search cost.
- * The sanitized primary query always runs first. Supplemental angles only run
- * when primary coverage is insufficient, and their already-fused result lists
- * are combined again with weighted RRF so cross-query agreement is rewarded.
+ * The sanitized primary query always runs first. Supplemental angles run when
+ * ordinary primary coverage is insufficient, or when the task profile marks a
+ * specific evidence lane as required. This preserves cheap early-stop behavior
+ * for routine lookup while allowing fact-check, comparison, research, weather,
+ * and other evidence-sensitive tasks to collect their required dimensions.
  */
 export async function searchWithPlannedProviders(
   query: string,
@@ -615,9 +657,10 @@ export async function searchWithPlannedProviders(
     signal,
     primary.role,
   );
+  const requiresSupplemental = needsRequiredSupplementalCoverage(plan);
   if (
     plan.queries.length === 1 ||
-    hasSufficientPrimaryCoverage(primaryRun.results)
+    (hasSufficientPrimaryCoverage(primaryRun.results) && !requiresSupplemental)
   ) {
     logSearchExecutionMetadata(
       primaryRun.executions.map((execution) => ({

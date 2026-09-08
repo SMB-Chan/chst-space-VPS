@@ -113,13 +113,11 @@ describe("MiMo request flow", () => {
   });
 
   it("keeps search and capability decisions short with thinking disabled", async () => {
-    const create = vi
-      .fn()
-      .mockResolvedValue({
-        choices: [
-          { message: { content: '{"tool":"none","needsSearch":false}' } },
-        ],
-      });
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        { message: { content: '{"tool":"none","needsSearch":false}' } },
+      ],
+    });
     const client = { chat: { completions: { create } } } as unknown as OpenAI;
     await planCapabilityTool({
       client,

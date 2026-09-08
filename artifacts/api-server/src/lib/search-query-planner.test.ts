@@ -8,6 +8,7 @@ describe("planSearchQueries", () => {
       query: "LLM ハルシネーション 研究",
       role: "primary",
     });
+    expect(plan.taskProfile.task).toBe("research");
   });
 
   it("uses a strict hard cap", () => {
@@ -23,10 +24,24 @@ describe("planSearchQueries", () => {
     expect(plan.queries.length).toBeLessThanOrEqual(4);
   });
 
-  it("adds a weather official-source angle without generic noise", () => {
+  it("adds a weather official-source angle without redundant freshness noise", () => {
     const plan = planSearchQueries("倉敷市 明日 天気");
     expect(plan.queries.some((item) => item.role === "official")).toBe(true);
     expect(plan.queries.some((item) => /気象庁/.test(item.query))).toBe(true);
+    expect(plan.queries.some((item) => item.role === "freshness")).toBe(false);
+    expect(plan.taskProfile.dimensions).toContain("primary_source");
+  });
+
+  it("does not append latest when the query already names a current time window", () => {
+    const japanese = planSearchQueries("AIニュース 今週");
+    const english = planSearchQueries("AI news this week");
+
+    expect(japanese.queries.some((item) => item.role === "freshness")).toBe(
+      false,
+    );
+    expect(english.queries.some((item) => item.role === "freshness")).toBe(
+      false,
+    );
   });
 
   it("adds research and technical angles only when relevant", () => {
@@ -50,7 +65,38 @@ describe("planSearchQueries", () => {
 
   it("does not inject freshness into historical queries", () => {
     const plan = planSearchQueries("2024年 当時のAIニュース");
+    expect(plan.taskProfile.temporalNeed).toBe("historical");
     expect(plan.queries.some((item) => item.role === "freshness")).toBe(false);
+  });
+
+  it("uses the extra query budget for fact-check dimensions", () => {
+    const plan = planSearchQueries(
+      "この主張は本当か？ 公式資料と反証も含めて検証して",
+    );
+
+    expect(plan.maxQueries).toBe(4);
+    expect(plan.taskProfile.task).toBe("fact_check");
+    expect(plan.queries.some((item) => item.role === "official")).toBe(true);
+    expect(
+      plan.queries.some(
+        (item) =>
+          item.role === "counterevidence" &&
+          /反証|counterevidence/i.test(item.query),
+      ),
+    ).toBe(true);
+  });
+
+  it("adds a comparison lane while keeping the original query first", () => {
+    const plan = planSearchQueries("ReactとVueのSDK設計を比較して");
+
+    expect(plan.queries[0]?.query).toBe("ReactとVueのSDK設計を比較して");
+    expect(plan.taskProfile.dimensions).toContain("comparison");
+    expect(
+      plan.queries.some(
+        (item) =>
+          item.role === "comparison" && /benchmark|比較/.test(item.query),
+      ),
+    ).toBe(true);
   });
 
   it("sanitizes optional planner suggestions and rejects secret-like variants", () => {

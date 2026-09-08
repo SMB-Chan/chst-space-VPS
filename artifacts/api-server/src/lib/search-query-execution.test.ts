@@ -37,9 +37,9 @@ afterEach(() => {
 });
 
 describe("searchWithPlannedProviders", () => {
-  it("early-stops after the primary query when coverage is already sufficient", async () => {
+  it("early-stops routine lookup when primary coverage is already sufficient", async () => {
     const searchProvider = provider(async (query) => {
-      expect(query).toBe("倉敷市 明日 天気");
+      expect(query).toBe("倉敷市 観光 おすすめ");
       return [
         result("a.example", "1"),
         result("a.example", "2"),
@@ -49,7 +49,7 @@ describe("searchWithPlannedProviders", () => {
       ];
     });
 
-    const results = await searchWithPlannedProviders("倉敷市 明日 天気", [
+    const results = await searchWithPlannedProviders("倉敷市 観光 おすすめ", [
       searchProvider,
     ]);
 
@@ -57,7 +57,31 @@ describe("searchWithPlannedProviders", () => {
     expect(searchProvider.search).toHaveBeenCalledOnce();
   });
 
-  it("runs supplemental query angles only when primary coverage is insufficient", async () => {
+  it("runs required weather evidence lanes even when primary quantity is sufficient", async () => {
+    const searchProvider = provider(async (query) => {
+      if (query === "倉敷市 明日 天気") {
+        return [
+          result("a.example", "1"),
+          result("a.example", "2"),
+          result("b.example", "3"),
+          result("c.example", "4"),
+          result("c.example", "5"),
+        ];
+      }
+      expect(query).toContain("気象庁");
+      return [result("jma.example", "forecast")];
+    });
+
+    await searchWithPlannedProviders("倉敷市 明日 天気", [searchProvider]);
+
+    expect(searchProvider.search).toHaveBeenCalledTimes(2);
+    expect(searchProvider.search.mock.calls.map(([query]) => query)).toEqual([
+      "倉敷市 明日 天気",
+      expect.stringContaining("気象庁"),
+    ]);
+  });
+
+  it("runs supplemental query angles when primary coverage is insufficient", async () => {
     const searchProvider = provider(async (query) => {
       if (query === "倉敷市 明日 天気") {
         return [
@@ -81,6 +105,32 @@ describe("searchWithPlannedProviders", () => {
     expect(
       new Set(results.map((item) => new URL(item.url).hostname)).size,
     ).toBeGreaterThanOrEqual(4);
+  });
+
+  it("runs official and counterevidence lanes for fact checks despite broad coverage", async () => {
+    const question = "この主張は本当か？ 公式資料と反証も含めて検証して";
+    const searchProvider = provider(async (query) => {
+      if (query === question) {
+        return [
+          result("a.example", "1"),
+          result("a.example", "2"),
+          result("b.example", "3"),
+          result("c.example", "4"),
+          result("c.example", "5"),
+        ];
+      }
+      return [result("evidence.example", encodeURIComponent(query))];
+    });
+
+    await searchWithPlannedProviders(question, [searchProvider]);
+
+    const queries = searchProvider.search.mock.calls.map(([query]) => query);
+    expect(queries).toHaveLength(3);
+    expect(queries[0]).toBe(question);
+    expect(queries.some((query) => /公式|official/i.test(query))).toBe(true);
+    expect(queries.some((query) => /反証|counterevidence/i.test(query))).toBe(
+      true,
+    );
   });
 
   it("executes supplied structured suggestions only after primary coverage is insufficient", async () => {
