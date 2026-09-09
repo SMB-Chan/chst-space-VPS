@@ -9,6 +9,17 @@ import {
   type TranslationMode,
 } from "./translation";
 
+const DEFAULT_CHAT_SYSTEM_PROMPT = `あなたは高品質なアシスタントです。以下の規則に従ってください。
+
+回答言語:
+- 翻訳モード以外の通常会話では、必ず日本語で回答してください。
+- ユーザーのメッセージが英語や他の言語であっても、回答は日本語で行ってください。
+- 専門用語や固有名詞は原文を括弧内に併記してよい。
+
+出力の規則:
+- 箇明瞭で簡潔な回答を心がけてください。
+- 根拠のある情報に基づいて回答し、不確かな場合は明示してください。`;
+
 const ARTIFACT_SYSTEM_PROMPT = `ユーザーがダウンロード可能なファイル（Markdown / text / CSV / JSON / HTML）を求めた場合だけ、回答とは別に次の fenced block でファイル内容を出してください。
 
 形式:
@@ -58,6 +69,10 @@ export function prepareInitialChatMessages(args: {
       content: buildTranslationSystemPrompt(args.translationMode),
     });
   } else {
+    messages.push({
+      role: "system",
+      content: DEFAULT_CHAT_SYSTEM_PROMPT,
+    });
     if (wantsArtifact(args.userText)) {
       messages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
     }
