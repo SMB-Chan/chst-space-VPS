@@ -64,6 +64,17 @@ data/llm-memory/
 .audit-remote/
 .empty-response-fix/
 .factuality/
+.agents/
+.cursor/
+.kiro/
+.mimocode/
+.grok/
+
+# agent instructions & personal LLM notes (local only)
+/AGENTS.md
+/CLAUDE.md
+/LLM_HANDOFF.md
+/AUDIT_AND_FIXES.md
 
 # Replit workspace connection details
 replit connect.txt

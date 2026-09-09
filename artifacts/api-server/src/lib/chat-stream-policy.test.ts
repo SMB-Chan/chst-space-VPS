@@ -17,8 +17,9 @@ describe("prepareInitialChatMessages", () => {
 
     expect(result.messages).not.toBe(history);
     expect(history).toHaveLength(1);
-    expect(result.messages).toHaveLength(2);
-    expect(String(result.messages[1]?.content)).toContain(
+    expect(result.messages).toHaveLength(3);
+    expect(String(result.messages[1]?.content)).toContain("日本語で回答");
+    expect(String(result.messages[2]?.content)).toContain(
       "システムが自動的にファイルを生成",
     );
   });
