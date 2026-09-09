@@ -248,7 +248,7 @@ export const AVAILABLE_MODELS = [
   //   hy3 $0.0825/$0.33
   //   gemini-2.5-flash-lite $0.10/$0.40 · qwen3.8-flash $0.15/$0.47
   //   gpt-4o-mini $0.15/$0.60 · deepseek-chat $0.32/$0.89
-  //   qwen3-235b-thinking $0.23/$2.30
+  //   qwen3-235b-thinking $0.23/$2.30 · mercury-2.5 $0.04/$0.15
   {
     id: "qwen/qwen3.7-flash",
     label: "Qwen3.7 Flash (OR)",
@@ -320,6 +320,15 @@ export const AVAILABLE_MODELS = [
     supportsVision: false,
     supportsReasoning: true,
     reasoning: "none" as ReasoningKind,
+  },
+  {
+    id: "inception/mercury-2.5",
+    label: "Mercury 2.5 (OR)",
+    provider: "openrouter" as ModelProvider,
+    description: "超高速・260K文脈・テキスト推論",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "openrouter" as ReasoningKind,
   },
   // Xiaomi MiMo models (V2.5 family, Token Plan Singapore)
   {

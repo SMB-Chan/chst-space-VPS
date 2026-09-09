@@ -22,6 +22,7 @@ const MODEL_PRICING_USD_PER_1M: Record<
   "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
   "deepseek/deepseek-chat": { input: 0.32, output: 0.89 },
   "qwen/qwen3-235b-a22b-thinking-2507": { input: 0.23, output: 2.3 },
+  "inception/mercury-2.5": { input: 0.04, output: 0.15 },
 };
 /** Conservative default for models without a recorded price. */
 const FALLBACK_PRICING_USD_PER_1M = { input: 0.3, output: 1.0 };

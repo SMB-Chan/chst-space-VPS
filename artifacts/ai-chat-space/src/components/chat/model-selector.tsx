@@ -146,6 +146,15 @@ const MODELS: ModelInfo[] = [
     supportsReasoning: true,
     reasoning: "openrouter",
   },
+  {
+    id: "inception/mercury-2.5",
+    label: "Mercury 2.5 (OR)",
+    provider: "openrouter",
+    description: "超高速・260K文脈・テキスト推論",
+    supportsVision: false,
+    supportsReasoning: true,
+    reasoning: "openrouter",
+  },
   // Xiaomi MiMo models (V2.5 family, Token Plan Singapore)
   {
     id: "mimo-v2.5",
