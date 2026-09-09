@@ -951,6 +951,9 @@ export async function executeSpecialistTool(
     if (call.name === "web_search") {
       const args = parseToolArgs(webSearchArgs, call.arguments);
       const { searchWeb, fetchPageText } = await import("./web-search");
+      const { selectEvidenceAwareFetchCandidates } =
+        await import("./search-evidence-selection");
+      const { planSearchQueries } = await import("./search-query-planner");
       const results = await searchWeb(args.query, context.signal);
       if (results.length === 0) {
         return {
@@ -960,7 +963,15 @@ export async function executeSpecialistTool(
           text: "",
         };
       }
-      const top = results.slice(0, 5);
+      // Keep the specialist/Deep Research path aligned with the main web
+      // context path: full-page hydration is bounded to five results, but the
+      // budget must retain required evidence lanes instead of blindly taking
+      // the first five relevance-ranked items.
+      const top = selectEvidenceAwareFetchCandidates(
+        results,
+        planSearchQueries(args.query),
+        5,
+      );
       const sources = top.map((r) => ({
         title: r.title,
         url: r.url,

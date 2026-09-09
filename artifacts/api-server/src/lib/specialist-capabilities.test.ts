@@ -339,6 +339,58 @@ describe("specialist capability registry", () => {
     expect(fetchPageTextMock).not.toHaveBeenCalled();
   });
 
+  it("web_search preserves required evidence lanes inside the five-page hydration budget", async () => {
+    searchWebMock.mockResolvedValue([
+      { title: "Rank 1", url: "https://same.example/1", snippet: "general" },
+      { title: "Rank 2", url: "https://same.example/2", snippet: "general" },
+      { title: "Rank 3", url: "https://same.example/3", snippet: "general" },
+      { title: "Rank 4", url: "https://same.example/4", snippet: "general" },
+      {
+        title: "Official",
+        url: "https://official.example/source",
+        snippet: "official",
+        evidence: {
+          dimensions: { primary_source: 1 },
+          queryRoles: ["official"],
+          providerNames: ["test"],
+        },
+      },
+      {
+        title: "Counter",
+        url: "https://critique.example/counter",
+        snippet: "counter",
+        evidence: {
+          dimensions: { counterevidence: 1 },
+          queryRoles: ["counterevidence"],
+          providerNames: ["test"],
+        },
+      },
+    ]);
+    fetchPageTextMock.mockImplementation(async (url: string) => ({
+      title: url,
+      text: `body for ${url}`,
+      publishedAt: null,
+    }));
+
+    const result = await executeSpecialistTool(
+      {
+        id: "call-evidence-aware-search",
+        name: "web_search",
+        arguments: JSON.stringify({
+          query: "この主張は本当か？ 公式資料と反証も含めて検証して",
+          fetchContent: true,
+        }),
+      },
+      {},
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.sources).toHaveLength(5);
+    expect(result.sources?.map((source) => source.title)).toContain("Official");
+    expect(result.sources?.map((source) => source.title)).toContain("Counter");
+    expect(fetchPageTextMock).toHaveBeenCalledTimes(5);
+  });
+
   it("web_search with fetchContent=true also fetches page bodies", async () => {
     searchWebMock.mockResolvedValue([
       { title: "Test Page", url: "https://example.com", snippet: "A test" },
