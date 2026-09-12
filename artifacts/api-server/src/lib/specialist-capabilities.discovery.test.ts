@@ -158,6 +158,7 @@ describe("dynamic chat model discovery", () => {
       "openai/gpt-4o-mini",
       "deepseek/deepseek-chat",
       "qwen/qwen3-235b-a22b-thinking-2507",
+      "inception/mercury-2.5",
     ]);
     expect(
       models.every(
@@ -200,6 +201,7 @@ describe("dynamic chat model discovery", () => {
         "openai/gpt-4o-mini",
         "deepseek/deepseek-chat",
         "qwen/qwen3-235b-a22b-thinking-2507",
+        "inception/mercury-2.5",
       ]),
     );
   });
@@ -225,7 +227,7 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(20);
+    expect(models).toHaveLength(21);
     expect(models.some((model) => model.id === "gpt-5.6-terra")).toBe(true);
     expect(models.some((model) => model.id === "qwen3.8-max")).toBe(true);
     expect(
