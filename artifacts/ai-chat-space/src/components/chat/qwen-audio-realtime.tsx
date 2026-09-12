@@ -117,14 +117,14 @@ function decodePcm16(
 }
 
 function stateLabel(state: QwenRealtimeState, hasSession: boolean): string {
-  if (state === "connecting") return "Connecting to voice";
-  if (state === "reconnecting") return "Connection lost — retrying";
-  if (state === "listening") return "Listening";
-  if (state === "generating") return "Preparing a reply";
-  if (state === "playing") return "Playing reply";
-  if (state === "stopping") return "Stopping";
-  if (state === "error") return "Voice unavailable";
-  return hasSession ? "Ready — hold to talk" : "Voice mode";
+  if (state === "connecting") return "音声に接続中";
+  if (state === "reconnecting") return "音声を再接続中";
+  if (state === "listening") return "聞き取り中";
+  if (state === "generating") return "音声の回答を準備中";
+  if (state === "playing") return "回答を再生中";
+  if (state === "stopping") return "停止中";
+  if (state === "error") return "音声に接続できません";
+  return hasSession ? "押している間だけ話せます" : "音声入力";
 }
 
 /**
@@ -621,11 +621,14 @@ export function QwenAudioRealtime({
 
   return (
     <div
-      className="flex items-center gap-1.5 shrink-0"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5"
       aria-label="Qwen Audio Realtime"
     >
       <span
-        className="max-w-[9rem] truncate text-[11px] text-muted-foreground"
+        className={cn(
+          "max-w-[9rem] truncate text-[11px] text-muted-foreground",
+          state === "idle" && !hasSession && "sr-only sm:not-sr-only",
+        )}
         role="status"
         aria-live="polite"
       >
@@ -633,7 +636,7 @@ export function QwenAudioRealtime({
       </span>
       {error ? (
         <div
-          className="flex max-w-[15rem] items-center gap-1.5 text-[11px] text-destructive"
+          className="flex min-w-0 max-w-full items-center gap-1.5 text-[11px] text-destructive"
           role="alert"
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -654,7 +657,7 @@ export function QwenAudioRealtime({
             state === "reconnecting"
           }
           className={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
+            "m3-focus-ring inline-flex min-h-11 items-center gap-1.5 rounded-[var(--m3-shape-full)] border px-3 text-xs font-medium transition-colors",
             "[border-color:color-mix(in_oklab,var(--app-status-info)_30%,transparent)] [background:color-mix(in_oklab,var(--app-status-info)_8%,transparent)] [color:var(--app-status-info)] hover:[background:color-mix(in_oklab,var(--app-status-info)_14%,transparent)]",
             "disabled:pointer-events-none disabled:opacity-50",
           )}
@@ -684,7 +687,7 @@ export function QwenAudioRealtime({
             }}
             disabled={disabled || state !== "idle"}
             className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors select-none touch-none",
+              "m3-focus-ring inline-flex min-h-11 items-center gap-1.5 rounded-[var(--m3-shape-full)] border px-3 text-xs font-medium transition-colors select-none touch-none",
               state === "listening"
                 ? "border-destructive/40 bg-destructive/10 text-destructive"
                 : "[border-color:color-mix(in_oklab,var(--app-status-info)_30%,transparent)] [background:color-mix(in_oklab,var(--app-status-info)_8%,transparent)] [color:var(--app-status-info)] hover:[background:color-mix(in_oklab,var(--app-status-info)_14%,transparent)]",
@@ -705,7 +708,7 @@ export function QwenAudioRealtime({
             type="button"
             onClick={cancel}
             disabled={state === "stopping"}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+            className="m3-focus-ring inline-flex h-11 w-11 items-center justify-center rounded-[var(--m3-shape-full)] border border-border text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
             aria-label="音声入力を停止"
             title={label}
           >

@@ -7,6 +7,7 @@ import {
   DrawerHeader,
   DrawerTitle,
   DrawerTrigger,
+  DrawerClose,
 } from "@/components/ui/drawer";
 import {
   DropdownMenu,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { X } from "lucide-react";
 
 interface ResponsiveSelectionProps {
   trigger: ReactNode;
@@ -58,8 +60,14 @@ export function ResponsiveSelection({
           data-testid={contentTestId}
           className="responsive-selection-sheet mt-0 overflow-hidden border-[var(--m3-outline-variant)] bg-[var(--m3-surface-container-low)]"
         >
-          <DrawerHeader className="shrink-0 px-5 pb-3 pt-2 text-left">
+          <DrawerHeader className="relative shrink-0 px-5 pb-3 pt-2 pr-16 text-left">
             <DrawerTitle className="text-lg font-semibold">{title}</DrawerTitle>
+            <DrawerClose
+              className="m3-focus-ring absolute right-3 top-0 flex h-11 w-11 items-center justify-center rounded-[var(--m3-shape-full)] hover:bg-foreground/10"
+              aria-label="選択画面を閉じる"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </DrawerClose>
             {description ? (
               <DrawerDescription className="mt-1 text-left text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
                 {description}

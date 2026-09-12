@@ -20,6 +20,8 @@ import {
   Settings2,
   Scale,
   ChevronDown,
+  Loader2,
+  Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compressImageFile, formatBytes } from "@/lib/compress-image";
@@ -65,6 +67,10 @@ interface MessageInputProps {
     fileFormat?: FileFormat,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  /** Separates private/new conversation lifetimes as well as saved chats. */
+  draftScope?: string;
+  isStreaming?: boolean;
+  onStop?: () => void;
   fileGenerationEnabled?: boolean;
   placeholder?: string;
   conversationId?: number | null;
@@ -125,7 +131,7 @@ const MAX_TOTAL_TEXT_SIZE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024;
 const MAX_FILES = 5;
 
-type StagedFile = { file: File; note: string | null };
+type StagedFile = { file: File; note: string | null; error?: string };
 
 const FORMAT_BUTTONS: {
   format: FileFormat;
@@ -229,9 +235,20 @@ function readOne(file: File): Promise<OutgoingAttachment> {
   });
 }
 
-export function MessageInput({
+export function MessageInput(props: MessageInputProps) {
+  return (
+    <Composer
+      key={props.draftScope ?? props.conversationId ?? "new"}
+      {...props}
+    />
+  );
+}
+
+function Composer({
   onSend,
   disabled,
+  isStreaming = false,
+  onStop,
   fileGenerationEnabled = true,
   placeholder,
   conversationId = null,
@@ -254,6 +271,7 @@ export function MessageInput({
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileFormat, setFileFormat] = useState<FileFormat | null>(null);
   const [compressing, setCompressing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [videoMode, setVideoMode] = useState<VideoMode | null>(null);
   const [videoResolution, setVideoResolution] = useState<"720P" | "1080P">(
     "720P",
@@ -265,6 +283,17 @@ export function MessageInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isSendingRef = useRef(false);
+  const preparingRef = useRef(false);
+  const composingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const controlsDisabled = disabled || isStreaming || compressing || submitting;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!fileGenerationEnabled) setFileFormat(null);
@@ -278,7 +307,9 @@ export function MessageInput({
     if (
       event.key === "Enter" &&
       !event.shiftKey &&
-      !event.nativeEvent.isComposing
+      !event.nativeEvent.isComposing &&
+      !composingRef.current &&
+      event.nativeEvent.keyCode !== 229
     ) {
       event.preventDefault();
       handleSubmit();
@@ -291,13 +322,17 @@ export function MessageInput({
     const selected = Array.from(event.target.files ?? []);
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (selected.length === 0) return;
+    if (controlsDisabled || preparingRef.current || isSendingRef.current)
+      return;
 
+    preparingRef.current = true;
     setFileError(null);
     setCompressing(true);
     try {
       const next = [...files];
       const errors: string[] = [];
       for (const item of selected) {
+        if (!mountedRef.current) return;
         if (next.length >= MAX_FILES) {
           errors.push(`添付は最大${MAX_FILES}件までです。`);
           break;
@@ -318,6 +353,7 @@ export function MessageInput({
         }
         try {
           const { file: compressed, reduced } = await compressImageFile(item);
+          if (!mountedRef.current) return;
           const candidate = {
             file: compressed,
             note: reduced
@@ -354,19 +390,63 @@ export function MessageInput({
           next.push(candidate);
         }
       }
+      if (!mountedRef.current) return;
       setFiles(next);
       if (errors.length > 0) setFileError(errors.join("\n"));
     } finally {
-      setCompressing(false);
-      setTimeout(() => textareaRef.current?.focus(), 10);
+      preparingRef.current = false;
+      if (mountedRef.current) {
+        setCompressing(false);
+        textareaRef.current?.focus();
+      }
     }
   };
 
   const handleSubmit = async () => {
-    if ((!content.trim() && files.length === 0) || disabled || compressing)
+    if (
+      (!content.trim() && files.length === 0) ||
+      controlsDisabled ||
+      preparingRef.current
+    )
       return;
     if (isSendingRef.current) return;
     isSendingRef.current = true;
+    setSubmitting(true);
+    setFileError(null);
+    setToolsOpen(false);
+
+    const readAttachments = async (items: StagedFile[]) => {
+      const results = await Promise.all(
+        items.map(async (item) => {
+          try {
+            return {
+              item,
+              attachment: await readOne(item.file),
+              error: undefined,
+            };
+          } catch {
+            return {
+              item,
+              attachment: undefined,
+              error: "読み込みに失敗しました",
+            };
+          }
+        }),
+      );
+      if (!mountedRef.current) return null;
+      setFiles((previous) =>
+        previous.map((item) => {
+          const result = results.find((result) => result.item === item);
+          return result ? { ...item, error: result.error } : item;
+        }),
+      );
+      if (results.some((result) => result.error)) {
+        throw new Error(
+          "読み込めない添付があります。該当ファイルを外すか選び直して、もう一度送信してください。本文と添付は保持しています。",
+        );
+      }
+      return results.map((result) => result.attachment!);
+    };
 
     try {
       if (videoMode && onGenerateVideo) {
@@ -404,8 +484,9 @@ export function MessageInput({
         );
         if (!confirmed) return;
         const references = imageFiles.length
-          ? await Promise.all(imageFiles.map((item) => readOne(item.file)))
+          ? await readAttachments(imageFiles)
           : undefined;
+        if (!mountedRef.current || references === null) return;
         const result = await onGenerateVideo({
           prompt: content.trim(),
           mode: videoMode,
@@ -414,7 +495,7 @@ export function MessageInput({
           ratio: videoRatio,
           duration: videoDuration,
         });
-        if (result === false) return;
+        if (!mountedRef.current || result === false) return;
         setContent("");
         setFiles([]);
         setFileError(null);
@@ -428,16 +509,15 @@ export function MessageInput({
         return;
       }
       const attachments =
-        files.length > 0
-          ? await Promise.all(files.map((item) => readOne(item.file)))
-          : undefined;
+        files.length > 0 ? await readAttachments(files) : undefined;
+      if (!mountedRef.current || attachments === null) return;
 
       const result = await onSend(
         content.trim() || "添付ファイルの内容を説明してください。",
         attachments,
         fileFormat ?? undefined,
       );
-      if (result === false) return;
+      if (!mountedRef.current || result === false) return;
 
       setContent("");
       setFiles([]);
@@ -448,11 +528,13 @@ export function MessageInput({
         textareaRef.current.style.height = "auto";
       }
     } catch (error) {
+      if (!mountedRef.current) return;
       setFileError(
         error instanceof Error ? error.message : "送信に失敗しました。",
       );
     } finally {
       isSendingRef.current = false;
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 
@@ -468,8 +550,7 @@ export function MessageInput({
 
   const hasFiles = files.length > 0;
   const hasActiveSkills = activeSkills.length > 0;
-  const canSend =
-    (content.trim().length > 0 || hasFiles) && !disabled && !compressing;
+  const canSend = (content.trim().length > 0 || hasFiles) && !controlsDisabled;
   const showModelSelector = onSelectModel != null;
   const showReasoning =
     onReasoningChange != null &&
@@ -562,12 +643,15 @@ export function MessageInput({
 
       {fileError && (
         <div className="flex items-start gap-2 px-4 pb-0 pt-3">
-          <div className="flex w-full animate-in items-start gap-2 rounded-[var(--m3-shape-md)] border [border-color:var(--m3-error)] [background:var(--m3-error-container)] px-3 py-2 text-xs [color:var(--m3-on-error-container)] fade-in slide-in-from-bottom-2 whitespace-pre-wrap">
+          <div
+            role="alert"
+            className="flex min-w-0 w-full animate-in items-start gap-2 rounded-[var(--m3-shape-md)] border [border-color:var(--m3-error)] [background:var(--m3-error-container)] px-3 py-2 text-xs [color:var(--m3-on-error-container)] fade-in slide-in-from-bottom-2 whitespace-pre-wrap"
+          >
             <AlertTriangle
               className="mt-0.5 h-3.5 w-3.5 shrink-0"
               aria-hidden="true"
             />
-            <span className="flex-1">{fileError}</span>
+            <span className="min-w-0 flex-1 break-words">{fileError}</span>
             <button
               type="button"
               onClick={() => setFileError(null)}
@@ -581,8 +665,11 @@ export function MessageInput({
       )}
 
       {compressing && (
-        <div className="px-4 pb-0 pt-3 text-xs text-muted-foreground animate-pulse">
-          画像を軽量化しています...
+        <div
+          role="status"
+          className="px-4 pb-0 pt-3 text-xs text-muted-foreground"
+        >
+          添付を準備しています…
         </div>
       )}
 
@@ -611,9 +698,17 @@ export function MessageInput({
                     aria-hidden="true"
                   />
                 )}
-                <span className="max-w-[8rem] truncate font-medium sm:max-w-[12rem]">
+                <span
+                  title={item.file.name}
+                  className="min-w-0 max-w-[8rem] truncate font-medium sm:max-w-[12rem]"
+                >
                   {item.file.name}
                 </span>
+                {item.error && (
+                  <span className="text-xs text-destructive" role="status">
+                    読込失敗
+                  </span>
+                )}
                 {item.note && (
                   <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
                     {item.note}
@@ -621,12 +716,13 @@ export function MessageInput({
                 )}
                 <button
                   type="button"
+                  disabled={controlsDisabled}
                   onClick={() =>
                     setFiles((previous) =>
                       previous.filter((_, itemIndex) => itemIndex !== index),
                     )
                   }
-                  className="m3-focus-ring shrink-0 rounded-[var(--m3-shape-full)] p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                  className="m3-focus-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--m3-shape-full)] disabled:opacity-50 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
                   aria-label={`${item.file.name} を外す`}
                 >
                   <X className="h-3 w-3" />
@@ -643,6 +739,12 @@ export function MessageInput({
         value={content}
         onChange={adjustHeight}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
         placeholder={
           placeholder ??
           (fileFormat
@@ -651,18 +753,18 @@ export function MessageInput({
         }
         className="max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-3 font-sans text-base leading-relaxed outline-none placeholder:text-muted-foreground/55 scrollbar-none"
         rows={1}
-        disabled={disabled || compressing}
+        disabled={controlsDisabled}
         data-testid="composer-textarea"
       />
 
-      <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
         <Button
           type="button"
           variant="ghost"
           size="icon"
           onClick={() => fileInputRef.current?.click()}
-          className="h-9 w-9 shrink-0 rounded-[var(--m3-shape-full)] text-muted-foreground hover:[background:var(--m3-primary-container)] hover:[color:var(--m3-on-primary-container)]"
-          disabled={disabled || compressing}
+          className="h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] text-muted-foreground hover:[background:var(--m3-primary-container)] hover:[color:var(--m3-on-primary-container)]"
+          disabled={controlsDisabled}
           aria-label="ファイルを添付"
           data-testid="composer-attach"
         >
@@ -672,7 +774,7 @@ export function MessageInput({
         <QwenAudioRealtime
           conversationId={conversationId}
           selectedModel={selectedModel}
-          disabled={disabled || compressing}
+          disabled={controlsDisabled}
           onTranscript={(transcript) => {
             void onSend(transcript);
           }}
@@ -689,7 +791,7 @@ export function MessageInput({
             <ModelSelector
               selectedModel={selectedModel}
               onSelect={onSelectModel!}
-              disabled={disabled || compressing}
+              disabled={controlsDisabled}
             />
           </div>
         )}
@@ -698,9 +800,9 @@ export function MessageInput({
           <Popover open={toolsOpen} onOpenChange={setToolsOpen}>
             <PopoverTrigger asChild>
               <Chip
-                disabled={disabled || compressing}
+                disabled={controlsDisabled}
                 selected={toolsOpen}
-                className="h-8 gap-1.5 px-3"
+                className="h-11 min-w-11 gap-1.5 px-3"
                 aria-label="追加ツール"
                 aria-expanded={toolsOpen}
                 data-testid="composer-tools-toggle"
@@ -720,10 +822,12 @@ export function MessageInput({
               side="top"
               align="end"
               sideOffset={10}
-              className="w-72 overflow-hidden p-0 sm:w-80"
+              collisionPadding={12}
+              className="flex w-72 max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden p-0 sm:w-80 max-h-[min(60dvh,var(--radix-popover-content-available-height))]"
+              aria-label="追加ツール"
               data-testid="composer-tools-panel"
             >
-              <div className="max-h-[60vh] space-y-4 overflow-y-auto p-3 scrollbar-none">
+              <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain p-3">
                 {showModelSelector && (
                   <div className="sm:hidden">
                     <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -732,7 +836,7 @@ export function MessageInput({
                     <ModelSelector
                       selectedModel={selectedModel}
                       onSelect={onSelectModel!}
-                      disabled={disabled || compressing}
+                      disabled={controlsDisabled}
                     />
                   </div>
                 )}
@@ -745,7 +849,7 @@ export function MessageInput({
                     <ReasoningSelector
                       value={reasoningLevel}
                       onSelect={onReasoningChange!}
-                      disabled={disabled || compressing}
+                      disabled={controlsDisabled}
                     />
                   </div>
                 )}
@@ -758,7 +862,7 @@ export function MessageInput({
                     <TranslationModeSelector
                       value={translationMode}
                       onSelect={onTranslationModeChange!}
-                      disabled={disabled || compressing}
+                      disabled={controlsDisabled}
                     />
                   </div>
                 )}
@@ -769,7 +873,7 @@ export function MessageInput({
                       監査
                     </label>
                     <Chip
-                      disabled={disabled || compressing}
+                      disabled={controlsDisabled}
                       selected={auditEnabled}
                       onClick={onAuditToggle}
                       className={cn(
@@ -813,7 +917,7 @@ export function MessageInput({
                             onClick={() =>
                               setFileFormat(active ? null : format)
                             }
-                            disabled={disabled || compressing}
+                            disabled={controlsDisabled}
                             className="h-8"
                             aria-pressed={active}
                             data-testid={`composer-format-${format}`}
@@ -838,7 +942,7 @@ export function MessageInput({
                         onClick={() =>
                           setVideoMode((current) => (current ? null : "t2v"))
                         }
-                        disabled={disabled || compressing}
+                        disabled={controlsDisabled}
                         className={cn(
                           "h-8",
                           videoMode &&
@@ -929,22 +1033,40 @@ export function MessageInput({
           </Popover>
         )}
 
-        <Button
-          type="button"
-          size="icon"
-          onClick={handleSubmit}
-          disabled={!canSend}
-          className={cn(
-            "h-10 w-10 shrink-0 rounded-[var(--m3-shape-full)] transition-[background-color,color,transform,box-shadow] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)]",
-            canSend
-              ? "[background:var(--m3-primary)] [color:var(--m3-on-primary)] shadow-[var(--m3-elevation-2)]"
-              : "[background:var(--m3-surface-container-high)] text-muted-foreground shadow-none",
-          )}
-          aria-label="送信"
-          data-testid="composer-send"
-        >
-          <Send className="ml-0.5 h-4 w-4" />
-        </Button>
+        {isStreaming && onStop ? (
+          <Button
+            type="button"
+            size="icon"
+            onClick={onStop}
+            className="h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)]"
+            aria-label="生成を停止"
+            data-testid="composer-stop"
+          >
+            <Square className="h-4 w-4 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="icon"
+            onClick={handleSubmit}
+            disabled={!canSend}
+            className={cn(
+              "h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] transition-[background-color,color,transform,box-shadow] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)]",
+              canSend
+                ? "[background:var(--m3-primary)] [color:var(--m3-on-primary)] shadow-[var(--m3-elevation-2)]"
+                : "[background:var(--m3-surface-container-high)] text-muted-foreground shadow-none",
+            )}
+            aria-label={submitting ? "送信準備中" : "送信"}
+            aria-busy={submitting}
+            data-testid="composer-send"
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="ml-0.5 h-4 w-4" />
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );

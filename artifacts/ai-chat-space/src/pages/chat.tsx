@@ -1341,6 +1341,11 @@ export function ChatPage() {
         <div className="mx-auto max-w-4xl">
           <MessageInput
             onSend={handleSend}
+            draftScope={
+              isPrivate ? "private" : `conversation:${conversationId ?? "new"}`
+            }
+            isStreaming={isStreaming}
+            onStop={stopStreaming}
             disabled={
               !selectedModel ||
               isStreaming ||
