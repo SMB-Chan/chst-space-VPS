@@ -46,6 +46,8 @@ fun ChatSpaceApp() {
     var modelsError by remember { mutableStateOf<String?>(null) }
     var selectedModel by remember { mutableStateOf(settings.selectedModel) }
     var reasoningLevel by remember { mutableStateOf(settings.reasoningLevel) }
+    var auditEnabled by remember { mutableStateOf(settings.auditEnabled) }
+    var translationMode by remember { mutableStateOf(settings.translationMode) }
     var listVersion by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
@@ -143,10 +145,24 @@ fun ChatSpaceApp() {
                     models = models,
                     modelsError = modelsError,
                     selectedModel = selectedModel,
+                    onSelectModel = {
+                        selectedModel = it
+                        settings.selectedModel = it
+                    },
                     reasoningLevel = reasoningLevel,
                     onReasoningChange = {
                         reasoningLevel = it
                         settings.reasoningLevel = it
+                    },
+                    auditEnabled = auditEnabled,
+                    onAuditChange = {
+                        auditEnabled = it
+                        settings.auditEnabled = it
+                    },
+                    translationMode = translationMode,
+                    onTranslationChange = {
+                        translationMode = it
+                        settings.translationMode = it
                     },
                     onConversationCreated = { newId, newTitle ->
                         screen = Screen.Chat(newId, newTitle)

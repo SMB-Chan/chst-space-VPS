@@ -107,11 +107,14 @@ private fun phaseLabel(kind: String, query: String?, step: Int?, maxSteps: Int?)
     "reading-files" -> "ファイルを解析中"
     "generating" -> "生成中"
     "generating-file" -> "ファイルを生成中"
+    "reviewing-layout" -> "レイアウトを確認中"
+    "revising-layout" -> "レイアウトを修正中"
     "auditing" -> "監査中"
     "verifying" -> "根拠を検証中"
     "revising" -> "最終報告を作成中"
+    "translating" -> "翻訳中"
     "specialist" -> "専門能力を実行中"
-    else -> "準備中"
+    else -> if (kind.isNotBlank()) kind else "準備中"
 }
 
 private fun phaseIcon(kind: String): ImageVector = when (kind) {

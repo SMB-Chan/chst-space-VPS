@@ -94,17 +94,30 @@ class ChatApi(private val baseUrl: () -> String) {
     /**
      * メッセージを送信し SSE を末尾まで読む。呼び出し元コルーチンのキャンセルで
      * 接続を閉じる (生成停止ボタンの実装)。
+     * auditModel / translateMode は Web 版と同じクエリパラメータで渡す。
      */
     suspend fun streamMessage(
         conversationId: Int,
         content: String,
         model: String,
         reasoning: String,
+        auditModel: String? = null,
+        translateMode: String? = null,
         onEvent: (StreamEvent) -> Unit,
     ): Unit = withContext(Dispatchers.IO) {
         val payload = json.encodeToString(MessageInput(content = content, modelId = model))
             .toRequestBody("application/json".toMediaType())
-        val query = "model=${Uri.encode(model)}&reasoning=${Uri.encode(reasoning)}"
+        val query = buildString {
+            append("model=").append(Uri.encode(model))
+            append("&reasoning=").append(Uri.encode(reasoning))
+            if (!auditModel.isNullOrBlank()) {
+                append("&auditModel=").append(Uri.encode(auditModel))
+                append("&auditReasoning=off")
+            }
+            if (!translateMode.isNullOrBlank() && translateMode != "off") {
+                append("&translate=").append(Uri.encode(translateMode))
+            }
+        }
         val req = Request.Builder()
             .url(url("/api/openai/conversations/$conversationId/messages?$query"))
             .post(payload)

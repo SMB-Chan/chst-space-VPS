@@ -39,6 +39,7 @@ data class ModelInfo(
     val description: String? = null,
     val supportsVision: Boolean = false,
     val supportsReasoning: Boolean = false,
+    val provider: String? = null,
 )
 
 @Serializable

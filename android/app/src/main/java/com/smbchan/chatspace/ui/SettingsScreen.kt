@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -154,6 +155,22 @@ fun SettingsScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+        Text("チャット動作", style = MaterialTheme.typography.titleMedium)
+        SettingSwitchRow(
+            label = "中立監査",
+            description = "別系統モデルが回答を点検します (ツールバーからも切替可)",
+            checked = settings.auditEnabled,
+            onCheckedChange = { settings.auditEnabled = it },
+        )
+        SettingSwitchRow(
+            label = "生成中のバイブレーション",
+            description = "送信・フェーズ変化・完了時に振動で通知します",
+            checked = settings.hapticsEnabled,
+            onCheckedChange = { settings.hapticsEnabled = it },
+        )
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
         Text("推論レベル (既定)", style = MaterialTheme.typography.titleMedium)
         SettingsStore.REASONING_LEVELS.forEach { level ->
             Row(
@@ -188,5 +205,30 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
