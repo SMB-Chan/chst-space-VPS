@@ -17,9 +17,31 @@ android {
         versionName = "1.0.0"
     }
 
+    val keystoreProperties = java.util.Properties().apply {
+        val f = rootProject.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    val releaseStoreFile = keystoreProperties.getProperty("storeFile")?.let {
+        rootProject.file(it)
+    }
+
+    signingConfigs {
+        if (releaseStoreFile?.exists() == true) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseStoreFile?.exists() == true) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
