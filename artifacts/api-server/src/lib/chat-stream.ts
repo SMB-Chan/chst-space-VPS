@@ -95,6 +95,8 @@ import {
 } from "./chat-stream-research";
 import type { StreamModelTextInput } from "./chat-stream-stage-types";
 import {
+  isLowRiskAnswer,
+  riskGateEnabled,
   shouldVerifySearchBackedAnswer,
   verifySearchBackedAnswer,
 } from "./chat-stream-factuality";
@@ -1111,13 +1113,19 @@ export async function streamChatReply(args: {
       let audit: { content: string; modelId: string } | undefined;
       let auditRaw = "";
       let factuality: FactualityReport | undefined;
-      const shouldVerifyFactuality = shouldVerifySearchBackedAnswer({
+      const isSearchBacked = shouldVerifySearchBackedAnswer({
         translationMode: Boolean(translationMode),
         sourceCount: responseSources.length,
         sourceText: factualitySourceText,
         generatesFile:
           wantsGeneratedFile(userText) || Boolean(requestedFileFormat),
       });
+      // Risk gate: skip the blocking verification round-trip for short drafts
+      // with no numeric/date/currency/quantity markers. Search-backed routing
+      // is preserved so the generic audit never double-runs.
+      const shouldVerifyFactuality =
+        isSearchBacked &&
+        !(riskGateEnabled() && isLowRiskAnswer(fullResponse));
 
       // Search-backed answers use the dedicated verification stage. A selected
       // audit model is reused as the verifier to avoid a second generic audit.
@@ -1149,9 +1157,11 @@ export async function streamChatReply(args: {
       }
 
       // A user stop aborts the shared signal, so no audit or revision work
-      // starts after the client explicitly cancels the turn.
+      // starts after the client explicitly cancels the turn. Search-backed
+      // answers route through factuality verification (or the risk gate), so
+      // the generic audit only runs for non-search-backed turns.
       if (
-        !shouldVerifyFactuality &&
+        !isSearchBacked &&
         auditModel &&
         auditModel.id !== modelId &&
         !clientAbort.signal.aborted
@@ -1484,7 +1494,8 @@ export async function streamChatReply(args: {
               sourceText: recoverySourceText,
               generatesFile:
                 wantsGeneratedFile(userText) || Boolean(requestedFileFormat),
-            })
+            }) &&
+            !(riskGateEnabled() && isLowRiskAnswer(fullResponse))
           ) {
             const verified = await verifySearchBackedAnswer({
               client,

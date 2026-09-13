@@ -19,10 +19,42 @@ import type {
   WithTimeoutFn,
 } from "./chat-stream-stage-types";
 
-const FACTUALITY_TIMEOUT_MS = 120_000;
-const FACTUALITY_MAX_OUTPUT_TOKENS = 1_600;
+const FACTUALITY_TIMEOUT_MS =
+  Number(process.env.FACTUALITY_TIMEOUT_MS) > 0
+    ? Number(process.env.FACTUALITY_TIMEOUT_MS)
+    : 60_000;
+const FACTUALITY_MAX_OUTPUT_TOKENS = 1_000;
 const UNSUPPORTED_CLAIM_NOTICE =
   "\n\n> **根拠上の注意:** 上記には、取得した資料だけでは確認できない主張が含まれます。根拠チェックの詳細を確認してください。";
+
+/**
+ * Risk gate: a short draft with no numeric, date, currency, percentage, or
+ * quantity markers carries little fabrication risk, so the extra blocking
+ * verification round-trip can be skipped. Set FACTUALITY_RISK_GATE=off to
+ * always run the verifier.
+ */
+const RISK_GATE_MAX_CHARS = 1_200;
+const DATA_CLAIM_PATTERN =
+  /[0-9０-９％%]|パーセント|パーセンテージ|円|ドル|ユーロ|倍|億|兆|km|kg|℃/;
+
+export function riskGateEnabled(): boolean {
+  const value = (process.env.FACTUALITY_RISK_GATE ?? "").trim().toLowerCase();
+  return !(
+    value === "off" ||
+    value === "false" ||
+    value === "0" ||
+    value === "disabled"
+  );
+}
+
+export function hasVerifiableDataClaims(answer: string): boolean {
+  return DATA_CLAIM_PATTERN.test(answer);
+}
+
+export function isLowRiskAnswer(answer: string): boolean {
+  const text = answer.trim();
+  return text.length <= RISK_GATE_MAX_CHARS && !hasVerifiableDataClaims(text);
+}
 
 export function shouldVerifySearchBackedAnswer(args: {
   translationMode: boolean;
