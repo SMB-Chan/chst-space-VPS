@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -17,13 +19,12 @@ android {
         versionName = "1.0.0"
     }
 
-    val keystoreProperties = java.util.Properties().apply {
+    val keystoreProperties = Properties().apply {
         val f = rootProject.file("keystore.properties")
-        if (f.exists()) f.inputStream().use { load(it) }
+        if (f.exists()) f.inputStream().use { stream -> load(stream) }
     }
-    val releaseStoreFile = keystoreProperties.getProperty("storeFile")?.let {
-        rootProject.file(it)
-    }
+    val storeFilePath = keystoreProperties.getProperty("storeFile")
+    val releaseStoreFile = if (storeFilePath != null) rootProject.file(storeFilePath) else null
 
     signingConfigs {
         if (releaseStoreFile?.exists() == true) {
