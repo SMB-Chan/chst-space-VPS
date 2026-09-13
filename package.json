@@ -21,9 +21,7 @@
       "vite>esbuild": "0.28.2"
     }
   },
-  "dependencies": {
-    "@replit/connectors-sdk": "^0.4.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "prettier": "^3.9.6",
     "typescript": "~6.0.3",

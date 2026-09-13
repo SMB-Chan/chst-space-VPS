@@ -48,6 +48,10 @@ const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+// Local-mode builds (VITE_AUTH_MODE=local) replace Clerk with the shim and
+// never require a publishable key.
+const isLocalAuth = import.meta.env.VITE_AUTH_MODE === "local";
+
 // Clerk passes full paths to routerPush/routerReplace, but wouter's
 // setLocation prepends the base — strip it to avoid doubling.
 function stripBase(path: string): string {
@@ -339,7 +343,7 @@ function App() {
     document.documentElement.classList.add("dark");
   }, []);
 
-  if (!clerkPubKey) {
+  if (!clerkPubKey && !isLocalAuth) {
     return <MissingClerkKey />;
   }
 

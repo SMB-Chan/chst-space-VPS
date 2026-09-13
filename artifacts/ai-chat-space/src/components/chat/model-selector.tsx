@@ -58,11 +58,19 @@ const MODELS: ModelInfo[] = [
     supportsReasoning: true,
   },
   {
-    id: "o4-mini",
-    label: "o4-mini",
+    id: "gpt-5.5",
+    label: "GPT-5.5",
     provider: "openai",
-    description: "高度な推論",
+    description: "汎用・バランス型",
     supportsVision: true,
+    supportsReasoning: true,
+  },
+  {
+    id: "deepseek/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    provider: "openai",
+    description: "推論特化・テキスト",
+    supportsVision: false,
     supportsReasoning: true,
   },
   {
@@ -177,7 +185,7 @@ const MODELS: ModelInfo[] = [
 ];
 
 const PROVIDER_LABELS: Record<string, string> = {
-  openai: "OpenAI",
+  openai: "Command Code",
   dashscope: "Alibaba Cloud (Qwen)",
   openrouter: "OpenRouter",
   xiaomi: "Xiaomi MiMo",

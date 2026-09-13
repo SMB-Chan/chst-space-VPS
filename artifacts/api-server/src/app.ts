@@ -1,3 +1,4 @@
+import path from "node:path";
 import express, {
   type Express,
   type Request,
@@ -45,6 +46,10 @@ import { requireStartupReadiness } from "./lib/startup-readiness";
 
 const app: Express = express();
 
+// AUTH_MODE=local (single-operator VPS/Tailnet deployment) skips all Clerk
+// wiring; requireAuth assigns the fixed operator identity instead.
+const isLocalAuth = process.env.AUTH_MODE === "local";
+
 app.use(
   pinoHttp({
     logger,
@@ -66,7 +71,9 @@ app.use(
     customErrorMessage: () => SAFE_HTTP_ERROR_MESSAGE,
   }),
 );
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+if (!isLocalAuth) {
+  app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+}
 
 const allowedOrigins = parseAllowedOrigins(process.env.FRONTEND_URL);
 const allowAnyDevelopmentOrigin =
@@ -106,20 +113,22 @@ app.use("/api", requireStartupReadiness);
 
 const configuredClerkHosts = getConfiguredClerkHosts();
 
-// Dynamic production publishable keys are only derived from a configured host
-// allowlist. If no request host matches, fall back to the configured key rather
-// than turning an arbitrary forwarded Host value into a new Clerk key.
-app.use(
-  clerkMiddleware((req) => {
-    const fallbackKey = process.env.CLERK_PUBLISHABLE_KEY;
-    const allowedHost = getAllowedClerkHost(req, configuredClerkHosts);
-    return {
-      publishableKey: allowedHost
-        ? publishableKeyFromHost(allowedHost, fallbackKey)
-        : fallbackKey,
-    };
-  }),
-);
+if (!isLocalAuth) {
+  // Dynamic production publishable keys are only derived from a configured host
+  // allowlist. If no request host matches, fall back to the configured key rather
+  // than turning an arbitrary forwarded Host value into a new Clerk key.
+  app.use(
+    clerkMiddleware((req) => {
+      const fallbackKey = process.env.CLERK_PUBLISHABLE_KEY;
+      const allowedHost = getAllowedClerkHost(req, configuredClerkHosts);
+      return {
+        publishableKey: allowedHost
+          ? publishableKeyFromHost(allowedHost, fallbackKey)
+          : fallbackKey,
+      };
+    }),
+  );
+}
 
 // Reuse the authenticated model-list request as a lightweight quota status
 // surface. No new API contract is introduced: safe quota values are response
@@ -164,6 +173,20 @@ app.use("/api", router);
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
+
+// Local-mode deployments serve the built frontend from the same process.
+// SERVE_STATIC_DIR points at the Vite build output (dist/public).
+const staticDir = process.env.SERVE_STATIC_DIR;
+if (staticDir) {
+  app.use(express.static(staticDir));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(staticDir, "index.html"));
+  });
+}
 
 // JSON形式のグローバルエラーハンドラ（413等のExpressエラーを含む）
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

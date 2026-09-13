@@ -3,8 +3,6 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
-import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
-
 const rawPort = process.env.PORT ?? '5173';
 const port = Number(rawPort);
 
@@ -14,6 +12,11 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH ?? '/';
 const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:5000';
+
+// Local-mode builds (VPS/Tailnet, AUTH_MODE=local) swap Clerk for a shim at
+// bundle time so the same components build without Clerk keys or network.
+const isLocalAuth = process.env.VITE_AUTH_MODE === 'local';
+const localAuthShim = path.resolve(import.meta.dirname, 'src', 'local-auth-shim.tsx');
 
 function normalizeAllowedHost(raw: string): string | null {
   const value = raw.trim();
@@ -28,11 +31,7 @@ function normalizeAllowedHost(raw: string): string | null {
 }
 
 function getAllowedHosts(): string[] {
-  const candidates = [
-    process.env.REPLIT_DEV_DOMAIN ?? '',
-    ...(process.env.REPLIT_DOMAINS ?? '').split(','),
-    ...(process.env.VITE_ALLOWED_HOSTS ?? '').split(','),
-  ];
+  const candidates = [...(process.env.VITE_ALLOWED_HOSTS ?? '').split(',')];
   return Array.from(
     new Set(
       candidates
@@ -42,41 +41,33 @@ function getAllowedHosts(): string[] {
   );
 }
 
-// Vite's default still permits localhost/.localhost and IP literals. Replit's
-// current dev/deployment hostnames are explicitly added from platform-provided
-// environment variables instead of disabling host validation globally.
 const allowedHosts = getAllowedHosts();
 
 export default defineConfig({
   base: basePath,
-  plugins: [
-    react(),
-    tailwindcss({ optimize: false }),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== 'production' &&
-    process.env.REPL_ID !== undefined
-      ? [
-          await import('@replit/vite-plugin-cartographer').then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, '..'),
-            }),
-          ),
-          await import('@replit/vite-plugin-dev-banner').then((m) =>
-            m.devBanner(),
-          ),
-        ]
-      : []),
-  ],
+  plugins: [react(), tailwindcss({ optimize: false })],
+  define: {
+    'import.meta.env.VITE_AUTH_MODE': JSON.stringify(
+      process.env.VITE_AUTH_MODE ?? '',
+    ),
+  },
   resolve: {
-    alias: {
-      '@': path.resolve(import.meta.dirname, 'src'),
-      '@assets': path.resolve(
-        import.meta.dirname,
-        '..',
-        '..',
-        'attached_assets',
-      ),
-    },
+    // Exact-match regexes: '@clerk/themes/shadcn.css' (imported by index.css)
+    // must keep resolving to the real package for Tailwind.
+    alias: [
+      ...(isLocalAuth
+        ? [
+            { find: /^@clerk\/react$/, replacement: localAuthShim },
+            { find: /^@clerk\/react\/internal$/, replacement: localAuthShim },
+            { find: /^@clerk\/themes$/, replacement: localAuthShim },
+          ]
+        : []),
+      { find: '@', replacement: path.resolve(import.meta.dirname, 'src') },
+      {
+        find: '@assets',
+        replacement: path.resolve(import.meta.dirname, '..', '..', 'attached_assets'),
+      },
+    ],
     dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(import.meta.dirname),

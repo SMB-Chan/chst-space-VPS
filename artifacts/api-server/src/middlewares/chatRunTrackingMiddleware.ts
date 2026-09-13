@@ -1,5 +1,4 @@
 import type { NextFunction, Request, Response } from "express";
-import { getAuth } from "@clerk/express";
 
 import { logger, safeFailureFields } from "../lib/logger";
 import {
@@ -7,15 +6,6 @@ import {
   withRunExecutionContext,
   type RunStepHandle,
 } from "../lib/run-execution";
-
-function authenticatedUserId(req: Request): string | undefined {
-  const auth = getAuth(req);
-  return (
-    (auth?.sessionClaims?.userId as string | undefined) ||
-    auth?.userId ||
-    undefined
-  );
-}
 
 function requestTraceId(req: Request): string | undefined {
   const value = (req as Request & { id?: unknown }).id;
@@ -68,7 +58,9 @@ export async function chatRunTrackingMiddleware(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const userId = authenticatedUserId(req);
+  // requireAuth already resolved the identity for both Clerk and local mode.
+  // Calling Clerk here throws when the VPS intentionally omits its middleware.
+  const userId = req.userId;
   if (!userId) {
     next();
     return;

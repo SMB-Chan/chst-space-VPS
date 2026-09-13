@@ -131,7 +131,7 @@ export interface ChatModel {
 }
 
 export const AVAILABLE_MODELS = [
-  // OpenAI models (via Replit AI Integrations)
+  // OpenAI models (AI_INTEGRATIONS_OPENAI_* — OpenAI-compatible backend)
   {
     id: "gpt-5.6-terra",
     label: "GPT-5.6 Terra",
@@ -151,11 +151,20 @@ export const AVAILABLE_MODELS = [
     reasoning: "openai" as ReasoningKind,
   },
   {
-    id: "o4-mini",
-    label: "o4-mini",
+    id: "gpt-5.5",
+    label: "GPT-5.5",
     provider: "openai" as ModelProvider,
-    description: "高度な推論",
+    description: "汎用・バランス型",
     supportsVision: true,
+    supportsReasoning: true,
+    reasoning: "openai" as ReasoningKind,
+  },
+  {
+    id: "deepseek/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    provider: "openai" as ModelProvider,
+    description: "推論特化・テキスト",
+    supportsVision: false,
     supportsReasoning: true,
     reasoning: "openai" as ReasoningKind,
   },

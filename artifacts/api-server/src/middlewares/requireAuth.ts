@@ -17,11 +17,24 @@ declare global {
   }
 }
 
+// "local" mode serves a single-operator deployment (VPS/Tailnet) where the
+// network perimeter is the authentication boundary. "clerk" keeps the
+// original Clerk-based flow. Select with AUTH_MODE=local.
+export const AUTH_MODE: "local" | "clerk" =
+  process.env.AUTH_MODE === "local" ? "local" : "clerk";
+
 export function requireAuth(
   req: Request,
   res: Response,
   next: NextFunction,
 ): void {
+  if (AUTH_MODE === "local") {
+    const userId = process.env.LOCAL_USER_ID || "local-user";
+    req.userId = userId;
+    req.userRole = "admin";
+    next();
+    return;
+  }
   const auth = getAuth(req);
   const userId =
     (auth?.sessionClaims?.userId as string | undefined) || auth?.userId;
