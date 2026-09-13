@@ -53,8 +53,6 @@ import com.smbchan.chatspace.data.ChatMessage
 import com.smbchan.chatspace.data.ModelInfo
 import com.smbchan.chatspace.data.Source
 
-private val accent get() = MaterialTheme.colorScheme.primary
-
 /** トップバーのモデル選択メニュー。 */
 @Composable
 fun ModelMenuButton(
@@ -65,7 +63,7 @@ fun ModelMenuButton(
     var expanded by remember { mutableStateOf(false) }
     val selected = models.firstOrNull { it.id == selectedModel }
     IconButton(onClick = { expanded = true }) {
-        Icon(Icons.Filled.SmartToy, contentDescription = "モデル選択")
+        Icon(Icons.Filled.AutoAwesome, contentDescription = "モデル選択")
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         if (models.isEmpty()) {
@@ -78,7 +76,7 @@ fun ModelMenuButton(
                         Text(
                             model.label,
                             fontWeight = if (model.id == selectedModel) FontWeight.Bold else FontWeight.Normal,
-                            color = if (model.id == selectedModel) accent else MaterialTheme.colorScheme.onSurface,
+                            color = if (model.id == selectedModel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         )
                         model.description?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -91,7 +89,7 @@ fun ModelMenuButton(
                 },
                 trailingIcon = {
                     if (model.id == selectedModel) {
-                        Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                 },
             )
@@ -156,7 +154,7 @@ fun ThinkingIndicator(statusKind: String, query: String?, step: Int?, maxSteps: 
                     .size(22.dp)
                     .scale(breathe)
                     .background(
-                        Brush.radialGradient(listOf(accent.copy(alpha = 0.35f), Color.Transparent)),
+                        Brush.radialGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), Color.Transparent)),
                         CircleShape,
                     ),
             )
@@ -166,7 +164,7 @@ fun ThinkingIndicator(statusKind: String, query: String?, step: Int?, maxSteps: 
                     .size(19.dp)
                     .scale(breathe)
                     .background(
-                        Brush.linearGradient(listOf(accent, Color(0xFFB48CF2))),
+                        Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, Color(0xFFB48CF2))),
                         CircleShape,
                     ),
             ) {
@@ -183,7 +181,7 @@ fun ThinkingIndicator(statusKind: String, query: String?, step: Int?, maxSteps: 
             label,
             style = TextStyle(
                 brush = Brush.linearGradient(
-                    colors = listOf(muted, muted, accent, muted, muted),
+                    colors = listOf(muted, muted, MaterialTheme.colorScheme.primary, muted, muted),
                     start = start,
                     end = Offset(start.x + 350f, 0f),
                 ),
@@ -221,7 +219,7 @@ fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
                     if (isUser) {
                         Modifier.background(
                             Brush.linearGradient(
-                                listOf(accent, accent.copy(alpha = 0.8f)),
+                                listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)),
                             ),
                             bubbleShape,
                         )
