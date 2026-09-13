@@ -41,7 +41,24 @@ describe("news search circuit", () => {
     expect(circuit?.queries.every((query) => query.includes("OpenAI"))).toBe(
       true,
     );
-    expect(circuit?.queries[0]).toBe("2026-09-08 OpenAI ニュース");
+    expect(circuit?.queries[0]).toBe("OpenAI 最新ニュース");
+  });
+
+  it("normalizes Japanese relation suffixes and keeps a cross-language recovery lane", () => {
+    const circuit = buildNewsSearchCircuit(
+      "LLM関連の新しいニュースはあるか？",
+      NOW,
+    );
+
+    expect(circuit).toMatchObject({
+      mode: "topic",
+      topic: "LLM",
+    });
+    expect(circuit?.queries).toEqual([
+      "LLM 最新ニュース",
+      "2026-09-08 LLM 公式 発表",
+      "LLM latest news",
+    ]);
   });
 
   it("anchors yesterday prompts to the previous JST calendar date", () => {
@@ -74,7 +91,7 @@ describe("news search circuit", () => {
       mode: "topic",
       topic: "TypeScript 7",
     });
-    expect(circuit?.queries[0]).toBe("2026-09-08 TypeScript 7 latest news");
+    expect(circuit?.queries[0]).toBe("TypeScript 7 latest news");
     expect(buildNewsSearchCircuit('What does the word "news" mean?', NOW)).toBe(
       null,
     );

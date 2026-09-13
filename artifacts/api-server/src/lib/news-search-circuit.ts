@@ -113,7 +113,7 @@ function extractNewsTopic(question: string): string {
     .replace(/https?:\/\/\S+/gi, " ")
     .replace(/20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?(?!\d)/g, " ")
     .replace(
-      /今日の出来事|本日の出来事|何が起き(?:た|ている)|今日|本日|今朝|今夜|きょう|昨日|きのう|最新|最近|直近|速報|ニュース|報道|ヘッドライン|時事/g,
+      /今日の出来事|本日の出来事|何が起き(?:た|ている)|今日|本日|今朝|今夜|きょう|昨日|きのう|最新|最近|直近|新しい|速報|ニュース|報道|ヘッドライン|時事/g,
       " ",
     )
     .replace(
@@ -128,6 +128,9 @@ function extractNewsTopic(question: string): string {
       /(?:について|に関して)?(?:分かる|わかる|知って(?:いる|る)|ありますか|あるか|何(?:ですか|がある)|どう(?:なっている|なった|ですか)|挙げて|列挙して)(?:か|ますか|ください)?/g,
       " ",
     )
+    // Grammatical qualifiers are not part of the entity. Keeping "関連" in
+    // e.g. "LLM関連" makes the exact topic token miss ordinary "LLM" titles.
+    .replace(/(?:に関する|関連(?:する)?(?:の)?)/g, " ")
     .replace(
       /\b(?:tell me|show me|find|search for|summari[sz]e|explain|about|regarding|with|current|please)\b/gi,
       " ",
@@ -204,14 +207,16 @@ export function buildNewsSearchCircuit(
   const candidates = topic
     ? isJapanese
       ? [
-          `${temporal.dateAnchor} ${topic} ニュース`,
+          // Do not require today's literal date in every lane: fresh articles
+          // are often indexed before the date string appears in title/snippet.
+          `${topic} 最新ニュース`,
           `${temporal.dateAnchor} ${topic} 公式 発表`,
-          `${temporal.dateAnchor} ${topic} 最新 報道`,
+          `${topic} latest news`,
         ]
       : [
-          `${temporal.dateAnchor} ${topic} latest news`,
+          `${topic} latest news`,
           `${temporal.dateAnchor} ${topic} official announcement`,
-          `${temporal.dateAnchor} ${topic} major reporting`,
+          `${topic} major reporting`,
         ]
     : isJapanese
       ? [

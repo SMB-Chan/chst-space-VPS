@@ -72,8 +72,8 @@ export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
 // this module and exercise the guard through it.
 export { isPrivateAddress };
 
-/** Maximum total search rounds (1 initial + follow-ups). */
-const MAX_SEARCH_ROUNDS = 3;
+/** Maximum total search rounds: three provider-backed attempts plus one independent HTML fallback. */
+const MAX_SEARCH_ROUNDS = 4;
 
 interface SearchDecisionOptions {
   forceQuery?: string;
