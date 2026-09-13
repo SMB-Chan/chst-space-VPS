@@ -1,0 +1,5 @@
+# Secrets and runtime-only files (never commit)
+.env
+searxng/limiter.toml
+searxng/*.log
+searxng/data/

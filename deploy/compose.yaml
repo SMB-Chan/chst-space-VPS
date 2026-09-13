@@ -1,0 +1,55 @@
+name: chat-space
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: chat-space-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: chat_space
+    volumes:
+      - chatpg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat -d chat_space"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: chat-space-searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
+      SEARXNG_LIMITER: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    image: chat-space:app
+    container_name: chat-space-app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: 2.0
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  chatpg:

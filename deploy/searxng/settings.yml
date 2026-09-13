@@ -1,0 +1,18 @@
+# SearXNG configuration for Chat-Space (committed template).
+# The secret_key is NOT stored here; it is injected at runtime from the
+# SEARXNG_SECRET environment variable (see deploy/.env). SearXNG overrides
+# server.secret_key from SEARXNG_SECRET (settings_defaults.py).
+#
+# JSON output MUST be enabled, otherwise the app's `format=json` search
+# requests are rejected.
+
+use_default_settings: true
+
+server:
+  image_proxy: true
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json
