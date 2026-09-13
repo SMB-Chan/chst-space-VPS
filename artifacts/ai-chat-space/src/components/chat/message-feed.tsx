@@ -34,6 +34,12 @@ import {
   Copy,
   RotateCcw,
   Check,
+  Brain,
+  Globe,
+  Telescope,
+  FileSearch,
+  ListChecks,
+  type LucideIcon,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useUser } from "@clerk/react";
@@ -56,6 +62,18 @@ export type StreamingPhase =
   | "verifying"
   | "revising"
   | null;
+
+export interface ActivityStep {
+  label: string;
+  at: number;
+}
+
+export interface ActivityLog {
+  steps: ActivityStep[];
+  totalMs: number;
+  startedAtMs: number;
+  finished: boolean;
+}
 
 export type ChatArtifact = {
   id?: number;
@@ -135,6 +153,8 @@ interface MessageFeedProps {
   onCancelVideo?: () => void;
   onRegenerate?: () => void;
   researchStep?: { step: number; maxSteps: number } | null;
+  liveActivity?: ActivityLog | null;
+  finishedActivity?: ActivityLog | null;
 }
 
 function VideoJobCard({
@@ -280,6 +300,191 @@ function PhaseDots() {
       <span className="w-1.5 h-1.5 rounded-[var(--m3-shape-full)] bg-current animate-bounce [animation-delay:-0.15s]" />
       <span className="w-1.5 h-1.5 rounded-[var(--m3-shape-full)] bg-current animate-bounce" />
     </span>
+  );
+}
+
+function phaseLabel(
+  phase: StreamingPhase,
+  researchStep?: { step: number; maxSteps: number } | null,
+): string {
+  if (!phase) return "";
+  if (phase === "thinking") return "推論中";
+  if (phase === "researching") {
+    return researchStep
+      ? `情報を収集中 (${researchStep.step}/${researchStep.maxSteps})`
+      : "情報を収集中";
+  }
+  if (phase === "searching") return "Webを検索中";
+  if (phase === "reading-images") return "画像を読み取り中";
+  if (phase === "reading-files") return "ファイルを解析中";
+  if (phase === "generating-file") return "ファイルを生成中";
+  if (phase === "reviewing-layout") return "レイアウトを確認中";
+  if (phase === "revising-layout") return "レイアウトを修正中";
+  if (phase === "generating") return "生成中";
+  if (phase === "auditing") return "監査中";
+  if (phase === "verifying") return "根拠を検証中";
+  if (phase === "revising") return "最終報告を作成中";
+  return "準備中";
+}
+
+function phaseIcon(phase: StreamingPhase): LucideIcon {
+  switch (phase) {
+    case "searching":
+      return Globe;
+    case "researching":
+      return Telescope;
+    case "reading-images":
+    case "reading-files":
+      return FileSearch;
+    case "auditing":
+    case "verifying":
+    case "revising":
+      return ListChecks;
+    case "generating":
+      return Sparkles;
+    default:
+      return Brain;
+  }
+}
+
+function formatActivityDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}秒`;
+  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+}
+
+/**
+ * ChatGPT/Claude-style "thinking" row: a breathing gradient orb plus a
+ * shimmer-swept phase label and a live elapsed-seconds counter.
+ */
+function ThinkingIndicator({
+  phase,
+  researchStep,
+  elapsedMs,
+}: {
+  phase: StreamingPhase;
+  researchStep?: { step: number; maxSteps: number } | null;
+  elapsedMs?: number;
+}) {
+  if (!phase) return null;
+  const Icon = phaseIcon(phase);
+  const seconds = elapsedMs ? Math.floor(elapsedMs / 1000) : 0;
+  return (
+    <div className="flex items-center gap-2.5 px-1 py-0.5" role="status">
+      <span
+        className="relative flex h-7 w-7 shrink-0 items-center justify-center"
+        aria-hidden
+      >
+        <span className="thinking-orb-halo absolute h-5 w-5 rounded-[var(--m3-shape-full)] bg-primary/35" />
+        <span className="thinking-orb relative flex h-5 w-5 items-center justify-center rounded-[var(--m3-shape-full)] bg-gradient-to-br from-primary via-primary to-[color:var(--app-status-accent)] shadow-[0_0_14px_2px] shadow-primary/30">
+          <Icon className="h-3 w-3 text-primary-foreground" strokeWidth={2.4} />
+        </span>
+      </span>
+      <span className="shimmer-text text-sm font-medium">
+        {phaseLabel(phase, researchStep)}
+      </span>
+      {seconds > 0 ? (
+        <span className="text-[11px] tabular-nums text-muted-foreground/70">
+          {formatActivityDuration(elapsedMs ?? 0)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Collapsible trail of what the assistant did this turn (Claude-style). */
+function ActivityTimeline({
+  activity,
+  live,
+}: {
+  activity?: ActivityLog | null;
+  live?: boolean;
+}) {
+  const [open, setOpen] = useState(Boolean(live));
+  const steps = activity?.steps ?? [];
+  if (steps.length === 0) return null;
+  return (
+    <div className="w-full overflow-hidden rounded-[var(--m3-shape-lg)] border border-[var(--m3-outline-variant)] [background:color-mix(in_oklab,var(--m3-surface-container-low)_65%,transparent)]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.04]"
+        aria-expanded={open}
+      >
+        <ListChecks className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+        <span className="font-medium">
+          {live ? "処理の流れ" : "推論の記録"}
+        </span>
+        <span className="opacity-50" aria-hidden>
+          ·
+        </span>
+        <span className="tabular-nums opacity-70">{steps.length}ステップ</span>
+        {activity && activity.finished && activity.totalMs > 0 ? (
+          <>
+            <span className="opacity-50" aria-hidden>
+              ·
+            </span>
+            <span className="tabular-nums opacity-70">
+              {formatActivityDuration(activity.totalMs)}
+            </span>
+          </>
+        ) : null}
+        {live && steps.length > 0 ? (
+          <span className="ml-1.5 flex min-w-0 items-center gap-1.5 text-primary/80">
+            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-[var(--m3-shape-full)] bg-primary" />
+            <span className="max-w-[220px] truncate">
+              {steps[steps.length - 1].label}
+            </span>
+          </span>
+        ) : null}
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 shrink-0 transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <ol className="border-t border-[var(--m3-outline-variant)] px-3.5 py-2.5">
+          {steps.map((step, index) => {
+            const isCurrent = Boolean(live) && index === steps.length - 1;
+            return (
+              <li
+                key={`${step.at}-${index}`}
+                className="animate-step-in relative flex items-baseline gap-2.5 py-1 pl-5 text-xs"
+              >
+                <span
+                  className="absolute left-[4.5px] top-1 h-2.5 w-2.5 rounded-[var(--m3-shape-full)] border-2"
+                  style={{
+                    borderColor: isCurrent
+                      ? "var(--m3-primary)"
+                      : "var(--m3-outline)",
+                    backgroundColor: isCurrent
+                      ? "color-mix(in oklab, var(--m3-primary) 35%, transparent)"
+                      : "var(--m3-surface-container)",
+                  }}
+                  aria-hidden
+                />
+                {index < steps.length - 1 ? (
+                  <span
+                    className="absolute left-[8.5px] top-4 bottom-[-4px] w-px bg-[var(--m3-outline-variant)]"
+                    aria-hidden
+                  />
+                ) : null}
+                <span className="flex-1 text-foreground/80">{step.label}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground/50">
+                  {new Date(step.at).toLocaleTimeString("ja-JP", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+    </div>
   );
 }
 
@@ -444,54 +649,6 @@ function FileDownloadButton({
   );
 }
 
-function GenerationBadge({
-  phase,
-  researchStep,
-}: {
-  phase: StreamingPhase;
-  researchStep?: { step: number; maxSteps: number } | null;
-}) {
-  if (!phase) return null;
-  const label =
-    phase === "thinking"
-      ? "推論中"
-      : phase === "researching"
-        ? researchStep
-          ? `情報を収集中 (${researchStep.step}/${researchStep.maxSteps})`
-          : "情報を収集中"
-        : phase === "searching"
-          ? "Webを検索中"
-          : phase === "reading-images"
-            ? "画像を読み取り中"
-            : phase === "reading-files"
-              ? "ファイルを解析中"
-              : phase === "generating-file"
-                ? "ファイルを生成中"
-                : phase === "reviewing-layout"
-                  ? "レイアウトを確認中"
-                  : phase === "revising-layout"
-                    ? "レイアウトを修正中"
-                    : phase === "generating"
-                      ? "生成中"
-                      : phase === "auditing"
-                        ? "監査中"
-                        : phase === "verifying"
-                          ? "根拠を検証中"
-                          : phase === "revising"
-                            ? "最終報告を作成中"
-                            : "準備中";
-  return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-      <span className="relative flex h-2 w-2">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-[var(--m3-shape-full)] bg-primary opacity-60" />
-        <span className="relative inline-flex rounded-[var(--m3-shape-full)] h-2 w-2 bg-primary" />
-      </span>
-      <span>{label}</span>
-      <PhaseDots />
-    </div>
-  );
-}
-
 interface MessageRowProps {
   message: OpenaiMessage;
   userInitial: string;
@@ -512,6 +669,8 @@ interface MessageRowProps {
   onRegenerate?: () => void;
   isLastAssistant: boolean;
   researchStep: { step: number; maxSteps: number } | null;
+  activityLog?: ActivityLog | null;
+  finishedActivity?: ActivityLog | null;
 }
 
 const MessageRow = memo(function MessageRow({
@@ -530,6 +689,8 @@ const MessageRow = memo(function MessageRow({
   onRegenerate,
   isLastAssistant,
   researchStep,
+  activityLog,
+  finishedActivity,
 }: MessageRowProps) {
   const [copiedId, setCopiedId] = useState<number | string | null>(null);
   const display = message as DisplayMessage;
@@ -646,24 +807,21 @@ const MessageRow = memo(function MessageRow({
         )}
 
         {!isUser && isStreamingMessage && !displayContent ? (
-          <div
-            className={cn(
-              surfaceVariants({ tone: "container", shape: "large" }),
-              "rounded-tl-[var(--m3-shape-xs)] px-5 py-4",
-            )}
-          >
-            <GenerationBadge
+          <div className="flex w-full flex-col gap-3 px-1 py-1.5">
+            <ThinkingIndicator
               phase={streamingPhase}
               researchStep={researchStep}
+              elapsedMs={activityLog?.totalMs ?? 0}
             />
+            <ActivityTimeline activity={activityLog} live />
           </div>
         ) : (
           <div
             className={cn(
               "break-words rounded-[var(--m3-shape-lg)] px-4 py-3 text-[15px] leading-relaxed [overflow-wrap:anywhere] md:px-5 md:py-4",
               isUser
-                ? "rounded-tr-[var(--m3-shape-xs)] bg-primary text-primary-foreground font-sans font-normal shadow-[var(--m3-elevation-2)]"
-                : "m3-surface-container rounded-tl-[var(--m3-shape-xs)] font-sans text-foreground prose-p:leading-loose",
+                ? "rounded-tr-[var(--m3-shape-xs)] bg-gradient-to-br from-primary to-primary/85 text-primary-foreground font-sans font-normal shadow-[var(--m3-elevation-2)]"
+                : "m3-surface-container rounded-[var(--m3-shape-xl)] rounded-tl-[var(--m3-shape-xs)] border border-[var(--m3-outline-variant)]/70 font-sans text-foreground prose-p:leading-loose",
             )}
           >
             {isUser ? (
@@ -679,7 +837,7 @@ const MessageRow = memo(function MessageRow({
                   (streamingPhase === "generating" ||
                     streamingPhase === "revising") && (
                     <span
-                      className="inline-block w-0.5 h-[1em] ml-0.5 align-[-0.1em] bg-primary animate-pulse"
+                      className="animate-caret-blink ml-0.5 inline-block h-[1.05em] w-[3px] translate-y-[0.12em] rounded-[2px] bg-gradient-to-b from-primary to-primary/50"
                       aria-hidden
                     />
                   )}
@@ -692,10 +850,21 @@ const MessageRow = memo(function MessageRow({
           displayContent &&
           (streamingPhase === "generating" ||
             streamingPhase === "revising") && (
-            <GenerationBadge
-              phase={streamingPhase}
-              researchStep={researchStep}
-            />
+            <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-[var(--m3-shape-full)] bg-primary" />
+              <span className="shimmer-text text-xs font-medium">
+                {phaseLabel(streamingPhase, researchStep)}
+              </span>
+            </div>
+          )}
+
+        {!isUser &&
+          !isStreamingMessage &&
+          isLastAssistant &&
+          finishedActivity &&
+          new Date(message.createdAt).getTime() >=
+            finishedActivity.startedAtMs && (
+            <ActivityTimeline activity={finishedActivity} />
           )}
 
         {!isUser && isStreamingMessage && specialistProgress && (
@@ -855,9 +1024,11 @@ function areMessageRowPropsEqual(
     return false;
   }
   if (previous.message.id !== STREAMING_ASSISTANT_ID) {
-    return previous.isLastAssistant
-      ? previous.onRegenerate === next.onRegenerate
-      : true;
+    if (!previous.isLastAssistant) return true;
+    return (
+      previous.onRegenerate === next.onRegenerate &&
+      previous.finishedActivity === next.finishedActivity
+    );
   }
   return (
     previous.streamingPhase === next.streamingPhase &&
@@ -869,7 +1040,8 @@ function areMessageRowPropsEqual(
     previous.onStop === next.onStop &&
     previous.streamingWarning === next.streamingWarning &&
     previous.onDismissWarning === next.onDismissWarning &&
-    previous.researchStep === next.researchStep
+    previous.researchStep === next.researchStep &&
+    previous.activityLog === next.activityLog
   );
 }
 
@@ -889,6 +1061,8 @@ export function MessageFeed({
   onCancelVideo,
   onRegenerate,
   researchStep = null,
+  liveActivity = null,
+  finishedActivity = null,
 }: MessageFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -994,6 +1168,12 @@ export function MessageFeed({
               onRegenerate={onRegenerate}
               isLastAssistant={message.id === lastAssistantId}
               researchStep={researchStep}
+              activityLog={
+                message.id === STREAMING_ASSISTANT_ID ? liveActivity : null
+              }
+              finishedActivity={
+                message.id === lastAssistantId ? finishedActivity : null
+              }
             />
           );
         })}

@@ -13,7 +13,12 @@ import {
   getOpenaiVideoJob,
   cancelOpenaiVideoJob,
 } from "@workspace/api-client-react";
-import { MessageFeed, type ChatArtifact } from "@/components/chat/message-feed";
+import {
+  MessageFeed,
+  type ActivityLog,
+  type ActivityStep,
+  type ChatArtifact,
+} from "@/components/chat/message-feed";
 import {
   MessageInput,
   type OutgoingAttachment,
@@ -379,6 +384,49 @@ async function streamMessage(
   }
 }
 
+function activityStepLabel(
+  kind: string,
+  query?: string,
+  researchStep?: { step: number; maxSteps: number } | null,
+): string {
+  switch (kind) {
+    case "starting":
+      return "準備中";
+    case "thinking":
+      return "推論中";
+    case "searching":
+      return query ? `「${query}」を検索` : "Webを検索";
+    case "fetching":
+      return "ページを取得";
+    case "researching":
+      return researchStep
+        ? `情報を収集 (${researchStep.step}/${researchStep.maxSteps})`
+        : "情報を収集";
+    case "reading-images":
+      return "画像を解析";
+    case "reading-files":
+      return "ファイルを解析";
+    case "generating":
+      return "回答を生成";
+    case "auditing":
+      return "回答を監査";
+    case "verifying":
+      return "根拠を検証";
+    case "revising":
+      return "最終報告を作成";
+    case "generating-file":
+      return "ファイルを生成";
+    case "reviewing-layout":
+      return "レイアウトを確認";
+    case "revising-layout":
+      return "レイアウトを修正";
+    case "specialist":
+      return "専門能力を実行";
+    default:
+      return kind;
+  }
+}
+
 export function ChatPage() {
   const params = useParams();
   const [location, setLocation] = useLocation();
@@ -462,6 +510,14 @@ export function ChatPage() {
   const [activeSkills, setActiveSkills] = useState<
     { id: string; label: string }[]
   >([]);
+  // 推論中表示用: 処理ステップの記録と経過時間 (ChatGPT/Claude風)
+  const activityStepsRef = useRef<ActivityStep[]>([]);
+  const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([]);
+  const streamStartedAtRef = useRef<number>(0);
+  const [elapsedTick, setElapsedTick] = useState(0);
+  const [finishedActivity, setFinishedActivity] = useState<ActivityLog | null>(
+    null,
+  );
   const [auditEnabled, setAuditEnabled] = useState(
     initialSettings.auditEnabled,
   );
@@ -496,6 +552,43 @@ export function ChatPage() {
     [streamRenderScheduler],
   );
 
+  useEffect(() => {
+    if (!isStreaming) return;
+    const timer = window.setInterval(() => setElapsedTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isStreaming]);
+
+  const liveActivity = useMemo<ActivityLog | null>(() => {
+    if (!isStreaming || streamStartedAtRef.current === 0) return null;
+    return {
+      steps: activitySteps,
+      totalMs: Math.max(0, elapsedTick - streamStartedAtRef.current),
+      startedAtMs: streamStartedAtRef.current,
+      finished: false,
+    };
+  }, [activitySteps, elapsedTick, isStreaming]);
+
+  const appendActivityStep = (
+    kind: string,
+    query?: string,
+    researchStepValue?: { step: number; maxSteps: number } | null,
+  ) => {
+    const label = activityStepLabel(kind, query, researchStepValue);
+    if (
+      activityStepsRef.current.length > 0 &&
+      activityStepsRef.current[activityStepsRef.current.length - 1].label ===
+        label
+    ) {
+      return;
+    }
+    const next = [
+      ...activityStepsRef.current.slice(-11),
+      { label, at: Date.now() },
+    ];
+    activityStepsRef.current = next;
+    setActivitySteps(next);
+  };
+
   const resetStreamingContent = () => {
     streamRenderScheduler.clear();
     setStreamingContent("");
@@ -508,6 +601,9 @@ export function ChatPage() {
     setIsStreaming(false);
     setSearchStatus(null);
     setResearchStep(null);
+    setActivitySteps([]);
+    activityStepsRef.current = [];
+    streamStartedAtRef.current = 0;
     setSpecialistProgress(null);
     setStreamingAudit("");
     setStreamingFactuality(null);
@@ -595,6 +691,10 @@ export function ChatPage() {
     setStreamingAudit("");
     setStreamingFactuality(null);
     setVideoJob(null);
+    setActivitySteps([]);
+    activityStepsRef.current = [];
+    streamStartedAtRef.current = 0;
+    setFinishedActivity(null);
     // Revoke object URLs created for ephemeral artifact downloads so we do not
     // leak memory when the user switches conversations.
     artifactBlobUrlCache.current.forEach((url) => URL.revokeObjectURL(url));
@@ -929,6 +1029,11 @@ export function ChatPage() {
     setStreamingFiles([]);
     setSearchStatus({ kind: "starting" });
     setSpecialistProgress(null);
+    activityStepsRef.current = [];
+    setActivitySteps([]);
+    streamStartedAtRef.current = Date.now();
+    setElapsedTick(streamStartedAtRef.current);
+    appendActivityStep("starting");
     streamSnapshotRef.current = {
       content: "",
       sources: [],
@@ -1033,6 +1138,22 @@ export function ChatPage() {
           setStreamingFactuality(null);
           setSpecialistProgress(null);
           setOptimisticUserMessage(null);
+          setSearchStatus(null);
+          setResearchStep(null);
+          const startedAt = streamStartedAtRef.current;
+          setFinishedActivity(
+            startedAt
+              ? {
+                  steps: activityStepsRef.current,
+                  totalMs: Math.max(0, Date.now() - startedAt),
+                  startedAtMs: startedAt,
+                  finished: true,
+                }
+              : null,
+          );
+          setActivitySteps([]);
+          activityStepsRef.current = [];
+          streamStartedAtRef.current = 0;
         }
       },
       (err, turnSaved) => {
@@ -1041,6 +1162,9 @@ export function ChatPage() {
         setResearchStep(null);
         setSpecialistProgress(null);
         setStreamError(err.message);
+        setActivitySteps([]);
+        activityStepsRef.current = [];
+        streamStartedAtRef.current = 0;
 
         if (isPrivate) {
           const now = new Date().toISOString();
@@ -1100,15 +1224,18 @@ export function ChatPage() {
       },
       (status, query) => {
         setSearchStatus(status ? { kind: status, query } : null);
+        if (status) appendActivityStep(status, query);
       },
       (event) => {
         setSpecialistProgress(event);
+        if (event.phase === "running") appendActivityStep("specialist");
       },
       (message) => {
         setSearchWarning(message);
       },
       (step) => {
         setResearchStep(step);
+        appendActivityStep("researching", undefined, step);
       },
       (sources) => {
         streamSnapshotRef.current.sources = sources;
@@ -1317,6 +1444,8 @@ export function ChatPage() {
             streamingWarning={searchWarning}
             onDismissWarning={() => setSearchWarning(null)}
             onRegenerate={!isPrivate ? handleRegenerate : undefined}
+            liveActivity={liveActivity}
+            finishedActivity={finishedActivity}
           />
         )}
       </div>

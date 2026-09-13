@@ -397,6 +397,95 @@
     }
   }
 
+  /* --- Chat "thinking" indicator (ChatGPT/Claude-style) --- */
+  @keyframes thinking-orb {
+    0%,
+    100% {
+      transform: scale(0.88);
+      opacity: 0.8;
+    }
+    50% {
+      transform: scale(1.1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes thinking-orb-halo {
+    0% {
+      transform: scale(0.55);
+      opacity: 0.5;
+    }
+    75%,
+    100% {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
+
+  @keyframes shimmer-sweep {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes caret-blink {
+    0%,
+    55% {
+      opacity: 1;
+    }
+    60%,
+    100% {
+      opacity: 0.1;
+    }
+  }
+
+  @keyframes step-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .thinking-orb {
+    animation: thinking-orb 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  .thinking-orb-halo {
+    animation: thinking-orb-halo 2.4s cubic-bezier(0.2, 0, 0.6, 1) infinite;
+  }
+
+  /* Gradient highlight sweeping through the label, like a moving sheen. */
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground)) 0%,
+      hsl(var(--muted-foreground)) 30%,
+      hsl(var(--primary)) 50%,
+      hsl(var(--muted-foreground)) 70%,
+      hsl(var(--muted-foreground)) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer-sweep 2.8s linear infinite;
+  }
+
+  .animate-caret-blink {
+    animation: caret-blink 1.1s steps(1, end) infinite;
+  }
+
+  .animate-step-in {
+    animation: step-in 260ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
   /* Custom scrollbar for webkit */
   ::-webkit-scrollbar {
     width: 6px;
@@ -413,8 +502,19 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .animate-rise-in {
+    .animate-rise-in,
+    .thinking-orb,
+    .thinking-orb-halo,
+    .shimmer-text,
+    .animate-caret-blink,
+    .animate-step-in {
       animation: none;
+    }
+    .shimmer-text {
+      background: none;
+      -webkit-background-clip: initial;
+      background-clip: initial;
+      color: hsl(var(--muted-foreground));
     }
   }
 }

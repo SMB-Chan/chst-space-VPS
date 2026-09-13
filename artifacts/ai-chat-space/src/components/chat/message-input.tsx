@@ -1038,7 +1038,7 @@ function Composer({
             type="button"
             size="icon"
             onClick={onStop}
-            className="h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)]"
+            className="h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] border border-destructive/30 [background:var(--m3-error-container)] text-destructive hover:bg-destructive/20 active:scale-95"
             aria-label="生成を停止"
             data-testid="composer-stop"
           >
@@ -1051,9 +1051,9 @@ function Composer({
             onClick={handleSubmit}
             disabled={!canSend}
             className={cn(
-              "h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] transition-[background-color,color,transform,box-shadow] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)]",
+              "h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] transition-[background-color,color,transform,box-shadow] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)] hover:scale-[1.04] active:scale-95",
               canSend
-                ? "[background:var(--m3-primary)] [color:var(--m3-on-primary)] shadow-[var(--m3-elevation-2)]"
+                ? "bg-gradient-to-br from-primary to-primary/85 [color:var(--m3-on-primary)] shadow-[var(--m3-elevation-2)] hover:shadow-[var(--m3-elevation-3)]"
                 : "[background:var(--m3-surface-container-high)] text-muted-foreground shadow-none",
             )}
             aria-label={submitting ? "送信準備中" : "送信"}
