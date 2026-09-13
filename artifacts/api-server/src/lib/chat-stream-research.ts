@@ -204,6 +204,7 @@ export async function runResearchLoop(args: {
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   tools: StreamModelTool[];
   initialCalls: SpecialistToolCall[];
+  initialSources?: FactualitySource[];
   hasPendingNonResearchCalls: boolean;
   imageAttachments?: { name: string; content: string; bytes: number }[];
   audioAttachments?: { name: string; buffer: Buffer; mime: string }[];
@@ -216,7 +217,7 @@ export async function runResearchLoop(args: {
   withTimeout: WithTimeoutFn;
   onUsage?: (usage: StreamModelUsage) => void;
 }): Promise<ResearchLoopResult> {
-  const sources: FactualitySource[] = [];
+  const sources: FactualitySource[] = [...(args.initialSources ?? [])];
   const evidenceParts: string[] = [];
   const deferredCalls: SpecialistToolCall[] = [];
   const question = latestUserQuestion(args.messages);

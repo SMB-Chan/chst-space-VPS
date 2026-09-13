@@ -555,7 +555,7 @@ export function assessNewsRetrieval(args: {
     result.publishedAt ? isFresh(result.publishedAt, now) : false,
   );
   const domains = new Set(
-    accepted
+    fresh
       .map((result) => evidenceHostOf(result))
       .filter((host): host is string => Boolean(host))
       .map(baseDomain),

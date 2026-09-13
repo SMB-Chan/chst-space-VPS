@@ -72,10 +72,13 @@ export { extractUrls, inferSearchQuery, parseSearchBingHtml, parseSearchHtml };
 // this module and exercise the guard through it.
 export { isPrivateAddress };
 
-/** Maximum total search rounds: three provider-backed attempts plus one independent HTML fallback. */
-const MAX_SEARCH_ROUNDS = 4;
+/** Ordinary search keeps its original three-round limit. */
+const MAX_SEARCH_ROUNDS = 3;
+const MAX_NEWS_SEARCH_ROUNDS = 4;
 
 interface SearchDecisionOptions {
+  /** One additional, explicitly bounded audit-repair search. */
+  newsRepair?: boolean;
   forceQuery?: string;
   signal?: AbortSignal;
   recentConversation?: string;
@@ -1379,88 +1382,100 @@ export async function buildWebContext(
     searched = true;
     if (newsCircuit) {
       query = newsQueries[0];
-      // Bounded recovery within MAX_SEARCH_ROUNDS: climb the provider ladder
-      // (news-first → general-news) before the final alternate HTML scrape.
-      const strategyLadder: SearchProviderStrategy[] = [
-        "news-first",
-        "general-news",
-      ];
-      const triedStrategies =
-        options?.newsSearchBudget?.strategiesTried ??
-        (options?.newsSearchBudget
-          ? (options.newsSearchBudget.strategiesTried = [])
-          : []);
-      let roundsUsed = 0;
-      let newsQualityGood = false;
-      for (const strategy of strategyLadder) {
-        if (signal?.aborted || newsQualityGood) break;
-        if (triedStrategies.includes(strategy)) continue;
-        triedStrategies.push(strategy);
-        const remaining = MAX_SEARCH_ROUNDS - roundsUsed;
-        if (remaining <= 0) break;
-        // Prefer a fresh query angle per strategy when available.
-        const queryOffset = strategy === "news-first" ? 0 : 1;
-        const strategyQueries = newsQueries
-          .slice(queryOffset)
-          .concat(newsQueries.slice(0, queryOffset));
-        const budgetForStrategy =
-          strategy === "news-first"
-            ? Math.min(2, remaining)
-            : Math.min(1, remaining);
-        let strategyStarted = false;
-        for (const fastQuery of strategyQueries.slice(0, budgetForStrategy)) {
-          if (signal?.aborted) break;
-          if (!strategyStarted && strategy !== "news-first") {
-            onStatus({
-              status: "search_escalation",
-              query: fastQuery,
-              circuit: newsCircuit.kind,
-              circuitMode: newsCircuit.mode,
-              providerStrategy: strategy,
-            });
-          }
-          strategyStarted = true;
-          await runSearchRound(fastQuery, undefined, "default", strategy);
-          roundsUsed += 1;
-          newsQualityGood = newsQuality?.quality === "good";
-          if (newsQualityGood) break;
-        }
-      }
-      newsQuality = assessNewsRetrieval({
-        results: newsResults,
-        queries: executedNewsQueries,
-        context: newsRelevanceContext,
-      });
-      const alternateAvailable = !options?.newsSearchBudget?.alternateUsed;
-      if (
-        newsQuality.quality !== "good" &&
-        !signal?.aborted &&
-        alternateAvailable &&
-        roundsUsed < MAX_SEARCH_ROUNDS
-      ) {
-        const escalationQuery =
-          newsQueries[
-            Math.min(MAX_SEARCH_ROUNDS - 1, newsQueries.length - 1)
-          ] ?? query;
-        if (options?.newsSearchBudget) {
-          options.newsSearchBudget.alternateUsed = true;
-        }
-        onStatus({
-          status: "search_escalation",
-          query: escalationQuery,
-          circuit: newsCircuit.kind,
-          circuitMode: newsCircuit.mode,
-          route: "alternate",
-          providerStrategy: "general-news",
-        });
-        // Final recovery within the same round budget: Bing HTML scrape so a
-        // Google News wrapper cannot be the only available result shape.
-        await runSearchRound(escalationQuery, undefined, "alternate");
+      if (options?.newsRepair) {
+        const repairQuery = sanitizeSearchQuery(
+          `${newsCircuit.dateAnchor} ${newsCircuit.topic ?? "major"} news official announcement`,
+        );
+        await runSearchRound(repairQuery, undefined, "default", "general-news");
         newsQuality = assessNewsRetrieval({
           results: newsResults,
           queries: executedNewsQueries,
           context: newsRelevanceContext,
         });
+      } else {
+        // Bounded recovery within MAX_NEWS_SEARCH_ROUNDS: climb the provider ladder
+        // (news-first → general-news) before the final alternate HTML scrape.
+        const strategyLadder: SearchProviderStrategy[] = [
+          "news-first",
+          "general-news",
+        ];
+        const triedStrategies =
+          options?.newsSearchBudget?.strategiesTried ??
+          (options?.newsSearchBudget
+            ? (options.newsSearchBudget.strategiesTried = [])
+            : []);
+        let roundsUsed = 0;
+        let newsQualityGood = false;
+        for (const strategy of strategyLadder) {
+          if (signal?.aborted || newsQualityGood) break;
+          if (triedStrategies.includes(strategy)) continue;
+          triedStrategies.push(strategy);
+          const remaining = MAX_NEWS_SEARCH_ROUNDS - roundsUsed;
+          if (remaining <= 0) break;
+          // Prefer a fresh query angle per strategy when available.
+          const queryOffset = strategy === "news-first" ? 0 : 1;
+          const strategyQueries = newsQueries
+            .slice(queryOffset)
+            .concat(newsQueries.slice(0, queryOffset));
+          const budgetForStrategy =
+            strategy === "news-first"
+              ? Math.min(2, remaining)
+              : Math.min(1, remaining);
+          let strategyStarted = false;
+          for (const fastQuery of strategyQueries.slice(0, budgetForStrategy)) {
+            if (signal?.aborted) break;
+            if (!strategyStarted && strategy !== "news-first") {
+              onStatus({
+                status: "search_escalation",
+                query: fastQuery,
+                circuit: newsCircuit.kind,
+                circuitMode: newsCircuit.mode,
+                providerStrategy: strategy,
+              });
+            }
+            strategyStarted = true;
+            await runSearchRound(fastQuery, undefined, "default", strategy);
+            roundsUsed += 1;
+            newsQualityGood = newsQuality?.quality === "good";
+            if (newsQualityGood) break;
+          }
+        }
+        newsQuality = assessNewsRetrieval({
+          results: newsResults,
+          queries: executedNewsQueries,
+          context: newsRelevanceContext,
+        });
+        const alternateAvailable = !options?.newsSearchBudget?.alternateUsed;
+        if (
+          newsQuality.quality !== "good" &&
+          !signal?.aborted &&
+          alternateAvailable &&
+          roundsUsed < MAX_NEWS_SEARCH_ROUNDS
+        ) {
+          const escalationQuery =
+            newsQueries[
+              Math.min(MAX_NEWS_SEARCH_ROUNDS - 1, newsQueries.length - 1)
+            ] ?? query;
+          if (options?.newsSearchBudget) {
+            options.newsSearchBudget.alternateUsed = true;
+          }
+          onStatus({
+            status: "search_escalation",
+            query: escalationQuery,
+            circuit: newsCircuit.kind,
+            circuitMode: newsCircuit.mode,
+            route: "alternate",
+            providerStrategy: "general-news",
+          });
+          // Final recovery within the same round budget: Bing HTML scrape so a
+          // Google News wrapper cannot be the only available result shape.
+          await runSearchRound(escalationQuery, undefined, "alternate");
+          newsQuality = assessNewsRetrieval({
+            results: newsResults,
+            queries: executedNewsQueries,
+            context: newsRelevanceContext,
+          });
+        }
       }
       if (newsQuality.quality !== "good") {
         const warning =

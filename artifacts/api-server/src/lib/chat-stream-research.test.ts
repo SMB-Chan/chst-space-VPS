@@ -72,3 +72,36 @@ describe("runResearchLoop", () => {
     expect(streamText).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("research citation continuity", () => {
+  it("renumbers new evidence after initial web sources", async () => {
+    const initial = { title: "Initial", url: "https://example.com/initial" };
+    const added = { title: "Added", url: "https://example.org/added" };
+    mocks.executeSpecialistTool.mockResolvedValueOnce({
+      ok: true,
+      capability: "web_search",
+      summary: "done",
+      text: "[1] Added evidence",
+      sources: [added],
+    });
+    const controller = new AbortController();
+    const research = await runResearchLoop({
+      client: {} as never,
+      provider: "openai",
+      modelId: "gpt-5.6-terra",
+      reasoningLevel: "off",
+      messages: [],
+      tools: [],
+      initialSources: [initial],
+      initialCalls: [{ id: "1", name: "web_search", arguments: "{}" }],
+      hasPendingNonResearchCalls: true,
+      signal: controller.signal,
+      clientGone: () => false,
+      emit: vi.fn(),
+      streamText: vi.fn().mockResolvedValue("Answer [2]"),
+      withTimeout: (create) => create(controller.signal),
+    });
+    expect(research.sources).toEqual([initial, added]);
+    expect(research.evidenceParts).toEqual(["[2] Added evidence"]);
+  });
+});

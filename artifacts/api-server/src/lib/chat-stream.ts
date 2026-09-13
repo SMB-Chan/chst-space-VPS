@@ -551,7 +551,7 @@ export async function streamChatReply(args: {
     // gathered. When web data IS present, the model should rely on it rather
     // than redundantly calling web_search again (which wastes latency and
     // risks timeout).
-    if (!translationMode && !webContext.contextText) {
+    if (!translationMode && webContext.sources.length === 0) {
       workingMessages.push({
         role: "system",
         content:
@@ -667,7 +667,8 @@ export async function streamChatReply(args: {
     const specialistTools = shouldAttachSpecialistTools({
       translationMode,
       hasBrokerToolCall: Boolean(brokerToolCall),
-      hasWebContext: Boolean(webContext.contextText),
+      hasWebContext:
+        webContext.sources.length > 0 && Boolean(webContext.contextText),
     })
       ? getSpecialistTools({
           imageAttachments: restrictSpecialist ? [] : imageAttachmentsForTools,
@@ -780,6 +781,7 @@ export async function streamChatReply(args: {
           messages: workingMessages,
           tools: specialistTools,
           initialCalls: researchCalls,
+          initialSources: webContext.sources,
           hasPendingNonResearchCalls: nonResearchCalls.length > 0,
           imageAttachments: imageAttachmentsForTools,
           audioAttachments: audioAttachmentsForTools,
@@ -1100,8 +1102,12 @@ export async function streamChatReply(args: {
         ),
       ];
       failureSources = responseSources;
-      const factualitySourceText =
-        webContext.contextText || researchEvidenceParts.join("\n\n");
+      const factualitySourceText = [
+        webContext.contextText,
+        ...researchEvidenceParts,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       let audit: { content: string; modelId: string } | undefined;
       let auditRaw = "";
       let factuality: FactualityReport | undefined;
@@ -1320,17 +1326,24 @@ export async function streamChatReply(args: {
       // this server has a working web-search path. Recover once, only for
       // normal chat: translation must never turn into an answer/research turn.
       if (
-        !activeNewsQuality &&
-        shouldRecoverWithWeb({
-          question: userText,
-          answer: fullResponse,
-          audit: auditRaw,
-          translationMode: Boolean(translationMode),
-        }) &&
+        !translationMode &&
+        !wantsGeneratedFile(userText) &&
+        !requestedFileFormat &&
+        ((activeNewsQuality && activeNewsQuality.quality !== "good") ||
+          factuality?.status === "insufficient" ||
+          shouldRecoverWithWeb({
+            question: userText,
+            answer: fullResponse,
+            audit: auditRaw,
+            translationMode: Boolean(translationMode),
+          })) &&
         !researchRecoveryUsed &&
         !clientAbort.signal.aborted
       ) {
         const originalResponse = fullResponse;
+        const originalSources = [...responseSources];
+        const originalFactuality = factuality;
+        const originalNewsQuality = activeNewsQuality;
         researchRecoveryUsed = true;
         try {
           if (!clientGone()) {
@@ -1356,6 +1369,7 @@ export async function streamChatReply(args: {
             },
             {
               forceQuery: userText,
+              newsRepair: Boolean(activeNewsQuality),
               recentConversation: buildRecentSearchConversation(
                 chatMessages,
                 userText,
@@ -1369,7 +1383,9 @@ export async function streamChatReply(args: {
           );
           if (
             !recoveredWebContext.contextText ||
-            recoveredWebContext.sources.length === 0
+            recoveredWebContext.sources.length === 0 ||
+            (recoveredWebContext.newsQuality &&
+              recoveredWebContext.newsQuality.quality !== "good")
           ) {
             throw new Error("Web recovery returned no usable evidence");
           }
@@ -1446,7 +1462,18 @@ export async function streamChatReply(args: {
           }
 
           fullResponse = recoveredResponse;
-          failureSources = recoveredWebContext.sources;
+          responseSources.splice(
+            0,
+            responseSources.length,
+            ...recoveredWebContext.sources,
+          );
+          failureSources = responseSources;
+          factuality = undefined;
+          if (!clientGone()) {
+            res.write(
+              `data: ${JSON.stringify({ sources: responseSources })}\n\n`,
+            );
+          }
           activeNewsQuality =
             recoveredWebContext.newsQuality ?? activeNewsQuality;
           const recoverySourceText = recoveredWebContext.contextText;
@@ -1489,6 +1516,10 @@ export async function streamChatReply(args: {
         } catch (error) {
           if (clientAbort.signal.aborted) throw error;
           fullResponse = originalResponse;
+          responseSources.splice(0, responseSources.length, ...originalSources);
+          failureSources = responseSources;
+          factuality = originalFactuality;
+          activeNewsQuality = originalNewsQuality;
           streamedResponse = originalResponse;
           logger.warn(
             safeFailureFields(error, "chat-stream", "WEB_RECOVERY_FAILED"),

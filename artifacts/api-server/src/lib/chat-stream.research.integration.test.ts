@@ -293,6 +293,60 @@ describe("streamChatReply research completion", () => {
     expect(result.sse).not.toContain("応答が空でした");
   });
 
+  it("repairs poor news once and persists the replacement sources", async () => {
+    const quality = {
+      kind: "news",
+      quality: "poor",
+      taskSuccess: "failed",
+      acceptedSourceCount: 0,
+      freshSourceCount: 0,
+      independentDomainCount: 0,
+      officialOrMajorSourceCount: 0,
+      queries: [],
+      rejected: [],
+    };
+    const sources = [
+      { title: "A", url: "https://example.com/news/a" },
+      { title: "B", url: "https://example.org/news/b" },
+    ];
+    mocks.buildWebContext
+      .mockResolvedValueOnce({
+        searched: true,
+        sources: [],
+        contextText: "No usable news",
+        newsQuality: quality,
+      })
+      .mockResolvedValueOnce({
+        searched: true,
+        sources,
+        contextText: "[1] News A\n[2] News B",
+        newsQuality: {
+          ...quality,
+          quality: "good",
+          freshSourceCount: 2,
+          acceptedSourceCount: 2,
+          independentDomainCount: 2,
+        },
+      });
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(textStream("確認できませんでした。"))
+      .mockResolvedValueOnce(textStream("確認したニュースです。[1][2]"))
+      .mockResolvedValueOnce(textStream("{}"));
+    const result = await runTurn(create);
+    expect(mocks.buildWebContext).toHaveBeenCalledTimes(2);
+    expect(mocks.buildWebContext.mock.calls[1]?.[5]).toMatchObject({
+      newsRepair: true,
+    });
+    expect(result.onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "確認したニュースです。[1][2]",
+        sources,
+      }),
+    );
+    expect(result.sse).toContain('"resetContent":true');
+  });
+
   it("uses long-term memory only when a user-scoped context is enabled", async () => {
     const privateCreate = vi
       .fn()

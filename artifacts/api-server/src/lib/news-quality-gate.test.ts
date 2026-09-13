@@ -285,3 +285,22 @@ describe("news retrieval quality gate", () => {
     ).toBe("low-relevance");
   });
 });
+
+describe("fresh source independence", () => {
+  it("does not let an old second domain satisfy fresh independence", () => {
+    const report = assessNewsRetrieval({
+      results: [
+        result("https://reuters.com/news/a", "News update A"),
+        result("https://reuters.com/news/b", "News update B"),
+        result(
+          "https://bbc.com/news/c",
+          "News update C",
+          "2026-08-01T00:00:00Z",
+        ),
+      ],
+      now: new Date("2026-09-08T04:00:00Z"),
+    });
+    expect(report.quality).toBe("partial");
+    expect(report.independentDomainCount).toBe(1);
+  });
+});
