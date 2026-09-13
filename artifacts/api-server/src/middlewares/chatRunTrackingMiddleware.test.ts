@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@clerk/express", () => ({
-  getAuth: () => { throw new Error("Clerk middleware is absent"); },
+  getAuth: () => {
+    throw new Error("Clerk middleware is absent");
+  },
 }));
 vi.mock("../lib/logger", () => ({
   logger: { warn: vi.fn() },
@@ -19,11 +21,14 @@ vi.mock("../lib/logger", () => ({
 }));
 vi.mock("../lib/run-execution", () => ({
   createRunExecutionContext: mocks.create,
-  withRunExecutionContext: (_context: unknown, callback: () => void) => callback(),
+  withRunExecutionContext: (_context: unknown, callback: () => void) =>
+    callback(),
 }));
 vi.mock("@workspace/db", () => ({
   conversations: { id: "id", userId: "user_id" },
-  db: { select: () => ({ from: () => ({ where: () => ({ limit: mocks.owns }) }) }) },
+  db: {
+    select: () => ({ from: () => ({ where: () => ({ limit: mocks.owns }) }) }),
+  },
 }));
 vi.mock("drizzle-orm", () => ({ and: vi.fn(), eq: vi.fn() }));
 
@@ -45,26 +50,42 @@ describe("chat run tracking after authentication", () => {
 
   async function invoke(userId?: string, conversationId?: string) {
     const req = {
-      userId, method: "POST", body: { modelId: "test-model" },
+      userId,
+      method: "POST",
+      body: { modelId: "test-model" },
       params: conversationId ? { conversationId } : {},
     } as unknown as Request;
-    const res = Object.assign(new EventEmitter(), { statusCode: 200, writableEnded: true });
+    const res = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: true,
+    });
     const next = vi.fn();
     await chatRunTrackingMiddleware(req, res as unknown as Response, next);
     expect(next).toHaveBeenCalledTimes(1);
     return res;
   }
 
-  it.each(["local-user", "user_clerk"])('tracks the authenticated identity %s without calling Clerk', async (userId) => {
-    const res = await invoke(userId, "42");
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ userId, conversationId: 42 }));
-    res.emit("finish");
-    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledWith("completed", { errorCode: null }));
-  });
+  it.each(["local-user", "user_clerk"])(
+    "tracks the authenticated identity %s without calling Clerk",
+    async (userId) => {
+      const res = await invoke(userId, "42");
+      expect(mocks.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId, conversationId: 42 }),
+      );
+      res.emit("finish");
+      await vi.waitFor(() =>
+        expect(mocks.finish).toHaveBeenCalledWith("completed", {
+          errorCode: null,
+        }),
+      );
+    },
+  );
 
   it("tracks ephemeral requests using the resolved identity", async () => {
     await invoke("local-user");
-    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ userId: "local-user", conversationId: null }));
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "local-user", conversationId: null }),
+    );
   });
 
   it("skips requests without an authenticated identity", async () => {

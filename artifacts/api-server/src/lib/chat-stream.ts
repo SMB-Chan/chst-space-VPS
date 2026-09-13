@@ -1124,8 +1124,7 @@ export async function streamChatReply(args: {
       // with no numeric/date/currency/quantity markers. Search-backed routing
       // is preserved so the generic audit never double-runs.
       const shouldVerifyFactuality =
-        isSearchBacked &&
-        !(riskGateEnabled() && isLowRiskAnswer(fullResponse));
+        isSearchBacked && !(riskGateEnabled() && isLowRiskAnswer(fullResponse));
 
       // Search-backed answers use the dedicated verification stage. A selected
       // audit model is reused as the verifier to avoid a second generic audit.

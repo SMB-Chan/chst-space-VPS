@@ -351,6 +351,24 @@ export async function ensureUserSettingsSchema(
   await query(ENSURE_USER_SETTINGS_SCHEMA_SQL);
 }
 
+export const ENSURE_GOOGLE_AUTH_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS google_auth (
+  user_id text PRIMARY KEY,
+  access_token text,
+  refresh_token text,
+  token_expires_at timestamptz,
+  scope text,
+  account_email text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+`.trim();
+
+export async function ensureGoogleAuthSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_GOOGLE_AUTH_SCHEMA_SQL);
+}
+
 export async function ensureUserUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -370,4 +388,5 @@ export async function ensureChatSchema(
   await ensureLlmMemoriesSchema(execute);
   await ensureUserUsageSchema(execute);
   await ensureUserSettingsSchema(execute);
+  await ensureGoogleAuthSchema(execute);
 }

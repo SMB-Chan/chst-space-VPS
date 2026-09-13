@@ -79,6 +79,50 @@ export function SettingsPage() {
   const [wipeDone, setWipeDone] = useState(false);
   const [installHint, setInstallHint] = useState<string | null>(null);
 
+  // Google 連携 (Calendar / Gmail / Drive) の状態
+  const [googleStatus, setGoogleStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    accountEmail: string | null;
+  } | null>(null);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const [googleMessage, setGoogleMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE}/api/google/status`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setGoogleStatus(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleGoogleDisconnect = async () => {
+    setGoogleBusy(true);
+    setGoogleMessage(null);
+    try {
+      const res = await fetch(`${BASE}/api/google`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGoogleStatus((prev) =>
+        prev ? { ...prev, connected: false, accountEmail: null } : prev,
+      );
+      setGoogleMessage("Google連携を解除しました。");
+    } catch (err) {
+      setGoogleMessage(
+        err instanceof Error ? err.message : "連携解除に失敗しました。",
+      );
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
   // Heal stale saved models only against the server-loaded catalog. The
   // bundled fallback list does not contain OpenRouter models; healing against
   // it used to overwrite the saved default on every visit (settings reset bug).
@@ -253,6 +297,61 @@ export function SettingsPage() {
           {installHint && (
             <p className="text-xs text-[var(--m3-on-surface-variant)]">
               {installHint}
+            </p>
+          )}
+        </SettingsSection>
+
+        <SettingsSection
+          title="Google 連携"
+          description="Googleカレンダーの予定管理、Gmailの検索・閲覧、Googleドライブのファイル検索をチャットから行えるようにします。連携すると、チャットでAIが必要に応じてこれらのツールを利用します。"
+        >
+          {googleStatus === null ? (
+            <p className="text-sm text-[var(--m3-on-surface-variant)]">
+              Google連携の状態を取得しています...
+            </p>
+          ) : !googleStatus.configured ? (
+            <p className="text-sm leading-relaxed text-[var(--m3-on-surface-variant)]">
+              サーバー側でGoogle
+              OAuthクライアントが設定されていません（GOOGLE_CLIENT_ID /
+              GOOGLE_CLIENT_SECRET）。
+            </p>
+          ) : googleStatus.connected ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="flex h-9 w-9 items-center justify-center rounded-[var(--m3-shape-full)] bg-[var(--m3-primary-container)] text-[var(--m3-on-primary-container)]">
+                  <Check className="h-4 w-4" />
+                </span>
+                <div>
+                  <div className="font-medium">連携済み</div>
+                  {googleStatus.accountEmail && (
+                    <div className="text-xs text-[var(--m3-on-surface-variant)]">
+                      {googleStatus.accountEmail}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                disabled={googleBusy}
+                onClick={() => void handleGoogleDisconnect()}
+              >
+                連携を解除
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="tonal"
+              disabled={googleBusy}
+              onClick={() => {
+                window.location.href = `${BASE}/api/google/auth`;
+              }}
+            >
+              Googleアカウントと連携する
+            </Button>
+          )}
+          {googleMessage && (
+            <p className="text-xs text-[var(--m3-on-surface-variant)]">
+              {googleMessage}
             </p>
           )}
         </SettingsSection>

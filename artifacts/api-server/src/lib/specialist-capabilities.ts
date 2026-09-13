@@ -29,6 +29,12 @@ import {
   executeFormTool,
   isFormTool,
 } from "./form-tools";
+import {
+  getGoogleToolDefinitions,
+  executeGoogleTool,
+  isGoogleTool,
+} from "./google-tools";
+import { isGoogleOAuthConfigured } from "./google-auth";
 import { generateAlibabaImage } from "./alibaba-image";
 import { isAlibabaSpecialistConfigured } from "./alibaba-specialist-config";
 import type { GeneratedAsset as StoredGeneratedAsset } from "./generated-assets";
@@ -784,6 +790,10 @@ export function getSpecialistTools(
     tools.push(...getMemoryToolDefinitions());
   }
 
+  if (isGoogleOAuthConfigured()) {
+    tools.push(...getGoogleToolDefinitions());
+  }
+
   // Submission stays unavailable until a route supplies a user-confirmation
   // token. Analysis is read-only and can remain available independently.
   tools.push(
@@ -1048,6 +1058,12 @@ export async function executeSpecialistTool(
       return executeFormTool(call, {
         submissionApproved: context.formSubmissionApproved === true,
       });
+    }
+    // Google tools: delegate to the Google integrations module
+    if (isGoogleTool(call.name)) {
+      const userId =
+        context.userId || process.env.LOCAL_USER_ID || "local-user";
+      return executeGoogleTool(call, { userId, signal: context.signal });
     }
     throw new Error("許可されていない専門能力です");
   } catch (error) {
