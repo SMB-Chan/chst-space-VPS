@@ -387,6 +387,39 @@ export async function ensureProviderCredentialsSchema(
   await query(ENSURE_PROVIDER_CREDENTIALS_SCHEMA_SQL);
 }
 
+export const ENSURE_PROJECTS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS projects (
+  id serial PRIMARY KEY,
+  user_id text NOT NULL,
+  name text NOT NULL,
+  slug text NOT NULL,
+  description text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS projects_user_slug_uidx ON projects(user_id, slug);
+CREATE INDEX IF NOT EXISTS projects_user_idx ON projects(user_id);
+
+CREATE TABLE IF NOT EXISTS project_memory (
+  project_id integer PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  user_id text NOT NULL,
+  todo text NOT NULL DEFAULT '',
+  credentials text NOT NULL DEFAULT '',
+  structure text NOT NULL DEFAULT '',
+  decisions text NOT NULL DEFAULT '',
+  notes text NOT NULL DEFAULT '',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id integer;
+`.trim();
+
+export async function ensureProjectsSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_PROJECTS_SCHEMA_SQL);
+}
+
 export async function ensureUserUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -408,4 +441,5 @@ export async function ensureChatSchema(
   await ensureUserSettingsSchema(execute);
   await ensureGoogleAuthSchema(execute);
   await ensureProviderCredentialsSchema(execute);
+  await ensureProjectsSchema(execute);
 }

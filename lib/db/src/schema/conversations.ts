@@ -1,4 +1,4 @@
-import { index, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -8,6 +8,8 @@ export const conversations = pgTable(
     id: serial("id").primaryKey(),
     title: text("title").notNull(),
     userId: text("user_id").notNull(),
+    /** Optional link to a project for shared project memory. */
+    projectId: integer("project_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

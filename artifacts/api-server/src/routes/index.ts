@@ -4,6 +4,7 @@ import openaiRouter from "./openai";
 import adminRouter from "./admin";
 import googleRouter from "./google";
 import devRouter from "./dev";
+import projectsRouter from "./projects";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(openaiRouter);
 router.use(adminRouter);
 router.use(googleRouter);
 router.use(devRouter);
+router.use(projectsRouter);
 
 export default router;

@@ -247,7 +247,8 @@ const MEMORY_SYSTEM_PROMPT = `
 - 記憶は過去の参考情報です。confidenceは申告値です。最新情報が必要な質問では記憶だけで回答せず、出典を再確認してください。`;
 
 export type ChatMemoryContext =
-  { enabled: true; userId: string } | { enabled: false };
+  | { enabled: true; userId: string; projectId?: number | null }
+  | { enabled: false };
 
 export type ChatFailureCallback = (input: {
   content: string;
@@ -615,6 +616,25 @@ export async function streamChatReply(args: {
         }
       } catch {
         // Memory store failures should not break the chat flow
+      }
+    }
+
+    // Project memory (TODO / credentials / structure) — keeps continuity when
+    // the operator switches models mid-project.
+    if (!translationMode && memory.enabled && memory.projectId != null) {
+      try {
+        const { loadProjectMemoryContext } = await import(
+          "./project-memory-store"
+        );
+        const projectPrompt = await loadProjectMemoryContext(
+          memory.userId,
+          memory.projectId,
+        );
+        if (projectPrompt) {
+          workingMessages.push({ role: "system", content: projectPrompt });
+        }
+      } catch {
+        // Project memory failures should not break the chat flow
       }
     }
 

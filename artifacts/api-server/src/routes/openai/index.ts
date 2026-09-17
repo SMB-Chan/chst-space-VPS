@@ -1243,9 +1243,17 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
       res.status(400).json({ error: "会話名を入力してください" });
       return;
     }
+    const rawProjectId = (req.body as { projectId?: unknown } | undefined)
+      ?.projectId;
+    const projectId =
+      typeof rawProjectId === "number" &&
+      Number.isSafeInteger(rawProjectId) &&
+      rawProjectId > 0
+        ? rawProjectId
+        : null;
     const [conversation] = await db
       .insert(conversations)
-      .values({ userId, title })
+      .values({ userId, title, projectId })
       .returning();
     res.status(201).json(conversation);
   } catch (err) {
@@ -1275,9 +1283,21 @@ router.patch(
         res.status(400).json({ error: "会話名を入力してください" });
         return;
       }
+      const rawProjectId = (req.body as { projectId?: unknown } | undefined)
+        ?.projectId;
+      const patch: { title: string; projectId?: number | null } = { title };
+      if (rawProjectId === null) {
+        patch.projectId = null;
+      } else if (
+        typeof rawProjectId === "number" &&
+        Number.isSafeInteger(rawProjectId) &&
+        rawProjectId > 0
+      ) {
+        patch.projectId = rawProjectId;
+      }
       const [updated] = await db
         .update(conversations)
-        .set({ title })
+        .set(patch)
         .where(
           and(
             eq(conversations.id, conversationId),
@@ -1543,7 +1563,11 @@ router.post(
         conversationId,
         requestedFileFormat,
         cancellation,
-        memory: { enabled: true, userId },
+        memory: {
+          enabled: true,
+          userId,
+          projectId: conversation.projectId,
+        },
         userRole: (req.userRole ?? "user") as UserRole,
         publicAiError,
         onComplete: async ({
