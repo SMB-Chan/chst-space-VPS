@@ -1,18 +1,25 @@
-/* ChatGPT-like mobile shell tokens — applied only under 768px via .mobile-shell root */
+/*
+ * Mobile shell tokens — aliases onto the shared Material 3 Expressive roles
+ * so the <768px experience stays tonally consistent with desktop.
+ */
 
 .mobile-shell {
-  --mx-bg: #000000;
-  --mx-panel: #1f1f1f;
-  --mx-panel-high: #2a2a2a;
-  --mx-panel-selected: #2d2d2d;
-  --mx-ink: #f5f5f5;
-  --mx-ink-muted: #bdbdbd;
-  --mx-ink-dim: #8e8e93;
-  --mx-accent: #ffffff;
-  --mx-radius-card: 24px;
-  --mx-radius-input: 28px;
-  --mx-radius-button: 20px;
-  --mx-radius-sheet: 32px;
+  --mx-bg: var(--m3-surface);
+  --mx-panel: var(--m3-surface-container);
+  --mx-panel-high: var(--m3-surface-container-high);
+  --mx-panel-selected: var(--m3-surface-container-highest);
+  --mx-ink: var(--m3-on-surface);
+  --mx-ink-muted: var(--m3-on-surface-variant);
+  --mx-ink-dim: color-mix(
+    in oklab,
+    var(--m3-on-surface-variant) 68%,
+    transparent
+  );
+  --mx-accent: var(--m3-primary);
+  --mx-radius-card: var(--m3-shape-lg);
+  --mx-radius-input: var(--m3-shape-xl);
+  --mx-radius-button: var(--m3-shape-md);
+  --mx-radius-sheet: var(--m3-shape-xxl);
   color: var(--mx-ink);
   background: var(--mx-bg);
   font-family: var(--app-font-sans, system-ui, -apple-system, sans-serif);
@@ -23,7 +30,7 @@
 }
 
 .mobile-shell ::selection {
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in oklab, var(--m3-primary) 32%, transparent);
 }
 
 .mobile-topbar {
@@ -111,11 +118,19 @@
   text-align: left;
   width: 100%;
   cursor: pointer;
-  border-radius: 16px;
+  border-radius: var(--m3-shape-md);
+  transition:
+    background-color var(--m3-duration-medium) var(--m3-motion-standard),
+    transform var(--m3-duration-short) var(--m3-motion-expressive);
 }
 
 .mobile-work-row:active {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(
+    in oklab,
+    var(--m3-on-surface) calc(var(--m3-state-pressed) * 100%),
+    transparent
+  );
+  transform: scale(0.99);
 }
 
 .mobile-work-icon {
@@ -151,9 +166,9 @@
 /* Force MessageInput container into dock shape on mobile shell */
 .mobile-shell [data-mobile-composer-root] {
   background: var(--mx-panel) !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid var(--m3-outline-variant) !important;
   border-radius: var(--mx-radius-input) !important;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: var(--m3-elevation-3) !important;
   overflow: hidden;
   position: sticky;
   bottom: 12px;
@@ -216,7 +231,7 @@
 
 .mobile-send-btn[data-ready="true"] {
   background: var(--mx-accent);
-  color: #111;
+  color: var(--m3-on-primary);
 }
 
 .mobile-model-chip {
@@ -228,7 +243,7 @@
   font-size: 15px;
   font-weight: 600;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: var(--m3-shape-sm);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -255,8 +270,8 @@
 .mobile-sheet-handle {
   width: 36px !important;
   height: 4px !important;
-  background: rgba(255, 255, 255, 0.22) !important;
-  border-radius: 999px !important;
+  background: var(--m3-outline) !important;
+  border-radius: var(--m3-shape-full) !important;
   margin: 10px auto 4px;
 }
 
@@ -271,7 +286,7 @@
 .mobile-sheet-section {
   margin: 0 16px 16px;
   background: var(--mx-panel-high);
-  border-radius: 18px;
+  border-radius: var(--m3-shape-md);
   overflow: hidden;
 }
 
@@ -284,7 +299,7 @@
   gap: 12px;
   padding: 14px 18px;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--m3-outline-variant);
   background: transparent;
   color: var(--mx-ink);
   font-size: 17px;
@@ -340,13 +355,21 @@
   margin: 8px 16px 8px;
   min-height: 52px;
   width: calc(100% - 32px);
-  border-radius: 999px;
+  border-radius: var(--m3-shape-full);
   border: 0;
-  background: #ffffff;
-  color: #111111;
+  background: var(--m3-primary);
+  color: var(--m3-on-primary);
+  box-shadow: var(--m3-elevation-1);
   font-size: 17px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--m3-duration-short) var(--m3-motion-expressive),
+    box-shadow var(--m3-duration-medium) var(--m3-motion-standard);
+}
+
+.mobile-done-btn:active {
+  transform: scale(0.98);
 }
 
 .mobile-drawer-panel {
@@ -359,8 +382,9 @@
   display: flex;
   flex-direction: column;
   transform: translateX(-105%);
-  transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+  transition: transform var(--m3-duration-long) var(--m3-motion-emphasized);
   padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--m3-elevation-3);
 }
 
 .mobile-drawer-panel[data-open="true"] {
@@ -380,7 +404,7 @@
   gap: 12px;
   min-height: 48px;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: var(--m3-shape-sm);
   border: 0;
   background: transparent;
   color: var(--mx-ink);
@@ -388,11 +412,18 @@
   text-align: left;
   cursor: pointer;
   width: 100%;
+  transition: background-color var(--m3-duration-medium)
+    var(--m3-motion-standard);
 }
 
-.mobile-drawer-item:active,
-.mobile-drawer-item[data-active="true"] {
+.mobile-drawer-item:active {
   background: var(--mx-panel-high);
+}
+
+.mobile-drawer-item[data-active="true"] {
+  background: var(--m3-primary-container);
+  color: var(--m3-on-primary-container);
+  font-weight: 500;
 }
 
 /* Hide the message feed under the Work list; keep the composer dock visible */

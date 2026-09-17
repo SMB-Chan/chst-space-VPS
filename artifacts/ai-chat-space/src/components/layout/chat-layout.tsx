@@ -205,7 +205,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         }}
       >
         <MobileShell>
-          <div className="m3-surface relative flex min-h-full w-full flex-col overflow-hidden bg-black">
+          <div className="m3-surface relative flex min-h-full w-full flex-col overflow-hidden">
             <div className="min-h-0 flex-1">{children}</div>
           </div>
         </MobileShell>

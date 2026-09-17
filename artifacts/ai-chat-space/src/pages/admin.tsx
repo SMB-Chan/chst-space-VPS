@@ -208,7 +208,7 @@ export default function AdminPage() {
                             usageRatio >= 1
                               ? "h-full bg-destructive"
                               : usageRatio > 0.8
-                                ? "h-full bg-amber-500"
+                                ? "h-full bg-[var(--app-status-warning)]"
                                 : "h-full bg-primary"
                           }
                           style={{ width: `${Math.round(usageRatio * 100)}%` }}

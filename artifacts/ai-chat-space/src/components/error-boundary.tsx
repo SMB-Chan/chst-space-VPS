@@ -4,6 +4,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from "react";
+import { Button } from "@/components/ui/button";
 
 export interface ErrorFallbackProps {
   error: Error;
@@ -46,17 +47,13 @@ function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
           この画面の表示中にエラーが起きました。もう一度試すか、ホームへ戻ってください。
         </p>
         {import.meta.env.DEV ? (
-          <pre className="mt-4 overflow-x-auto rounded bg-muted p-3 text-left text-xs text-foreground">
+          <pre className="mt-4 overflow-x-auto rounded-[var(--m3-shape-sm)] bg-[var(--m3-surface-container)] p-3 text-left text-xs text-foreground">
             {error.message || String(error)}
           </pre>
         ) : null}
-        <button
-          type="button"
-          onClick={resetError}
-          className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-        >
+        <Button variant="filled" className="mt-4" onClick={resetError}>
           もう一度試す
-        </button>
+        </Button>
       </div>
     </div>
   );

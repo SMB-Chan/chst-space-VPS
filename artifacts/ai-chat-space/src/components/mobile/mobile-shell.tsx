@@ -223,7 +223,7 @@ export function MobileShell({ children }: MobileShellProps) {
         aria-hidden={!drawerOpen}
       >
         <div className="mb-6 flex items-center gap-3 px-1">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--mx-panel-high)]">
+          <div className="grid h-10 w-10 place-items-center rounded-[var(--m3-shape-lg)] bg-[var(--m3-primary-container)] text-[var(--m3-on-primary-container)]">
             <MessageSquareText className="h-4 w-4" />
           </div>
           <div className="min-w-0">
