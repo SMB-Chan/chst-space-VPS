@@ -81,3 +81,9 @@ code-workspace/
 
 # Replit workspace connection details
 replit connect.txt
+
+# Nested git worktree (local only, never commit its contents from main)
+VPS chat-mobile-ui/
+
+# Local agent/config scratch (never commit)
+/.commandcode/
