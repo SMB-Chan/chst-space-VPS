@@ -24,6 +24,7 @@ import { ChatLayout } from "@/components/layout/chat-layout";
 import { ChatPage } from "@/pages/chat";
 import { HomePage } from "@/pages/home";
 import { SettingsPage } from "@/pages/settings";
+import { FilesPage } from "@/pages/files";
 import { loadSettings, saveSettings } from "@/lib/settings";
 import { shouldResetTranslationOnNavigation } from "@/lib/translation-route-policy";
 import {
@@ -286,6 +287,11 @@ function Router() {
       <Route path="/settings">
         <ProtectedChat>
           <SettingsPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/files">
+        <ProtectedChat>
+          <FilesPage />
         </ProtectedChat>
       </Route>
       <Route path="/conversations/:id">

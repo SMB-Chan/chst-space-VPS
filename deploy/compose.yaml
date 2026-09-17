@@ -45,10 +45,12 @@ services:
     env_file: .env
     environment:
       OPENCODE_ACCESS_MODE_FILE: /data/opencode-access-mode
+      CODE_WORKSPACE_ROOT: /data/code-workspace
     ports:
       - "127.0.0.1:8080:5000"
     volumes:
       - ./code-access-mode:/data/opencode-access-mode
+      - ../code-workspace:/data/code-workspace
     depends_on:
       db:
         condition: service_healthy

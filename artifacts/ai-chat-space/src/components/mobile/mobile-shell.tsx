@@ -6,7 +6,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Code2,
   FolderOpen,
   Loader2,
   LogOut,
@@ -27,6 +26,7 @@ import type { ReasoningLevel } from "@/lib/reasoning";
 import { SegmentedControl, type MobileTab } from "./segmented-control";
 import { WorkList, type WorkItem } from "./work-list";
 import { GithubMark } from "./github-mark";
+import { ProjectPanel } from "@/components/projects/project-panel";
 import {
   ModelSettingsSheet,
   type SpeedPreference,
@@ -180,16 +180,24 @@ export function MobileShell({ children }: MobileShellProps) {
             className="absolute inset-x-0 top-0 bottom-[140px] z-20 flex flex-col bg-[var(--mx-bg)]"
             data-testid="mobile-work-panel"
           >
-            <div className="mobile-body flex-1">
+            <div className="mobile-body flex-1 space-y-4 px-3 pt-4">
+              <div className="rounded-[20px] bg-[var(--mx-panel)] p-3">
+                <ProjectPanel
+                  compact
+                  onProjectCreated={() => {
+                    /* list refreshes internally */
+                  }}
+                />
+              </div>
               {isLoading ? (
-                <div className="flex justify-center py-16">
+                <div className="flex justify-center py-8">
                   <Loader2 className="h-5 w-5 animate-spin text-[var(--mx-ink-muted)]" />
                 </div>
               ) : (
                 <WorkList
                   items={workItems}
                   onSelect={handleSelectWork}
-                  emptyLabel="作業はまだありません。下の入力欄から始められます。"
+                  emptyLabel="作業はまだありません。上の欄からプロジェクトを作成できます。"
                 />
               )}
             </div>
@@ -251,31 +259,13 @@ export function MobileShell({ children }: MobileShellProps) {
             type="button"
             className="mobile-drawer-item"
             onClick={() => {
-              window.open(
-                `${window.location.protocol}//${window.location.hostname}:8091/`,
-                "_blank",
-                "noopener,noreferrer",
-              );
+              setLocation("/files");
+              setTab("chat");
               setDrawerOpen(false);
             }}
           >
             <FolderOpen className="h-4 w-4" />
             ファイル
-          </button>
-          <button
-            type="button"
-            className="mobile-drawer-item"
-            onClick={() => {
-              window.open(
-                `${window.location.protocol}//${window.location.hostname}:4096/`,
-                "_blank",
-                "noopener,noreferrer",
-              );
-              setDrawerOpen(false);
-            }}
-          >
-            <Code2 className="h-4 w-4" />
-            コーディング
           </button>
           <button
             type="button"

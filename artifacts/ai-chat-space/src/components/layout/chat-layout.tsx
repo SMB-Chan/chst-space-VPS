@@ -44,6 +44,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileShell } from "@/components/mobile/mobile-shell";
+import { ProjectPanel } from "@/components/projects/project-panel";
+import { FolderOpen } from "lucide-react";
 import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
 
@@ -104,6 +106,11 @@ export function ChatLayout({ children }: ChatLayoutProps) {
 
   const handleSettings = useCallback(() => {
     setLocation("/settings");
+    if (isMobile) setSidebarOpen(false);
+  }, [setLocation, isMobile]);
+
+  const handleFiles = useCallback(() => {
+    setLocation("/files");
     if (isMobile) setSidebarOpen(false);
   }, [setLocation, isMobile]);
 
@@ -349,6 +356,18 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                   <Shield className="h-4 w-4" />
                   プライベート
                 </Button>
+                <Button
+                  onClick={handleFiles}
+                  className="h-10 w-full justify-start rounded-[var(--m3-shape-md)]"
+                  variant={location === "/files" ? "tonal" : "ghost"}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  ファイル
+                </Button>
+              </div>
+
+              <div className="px-1 pb-2">
+                <ProjectPanel compact onOpenFiles={() => handleFiles()} />
               </div>
 
               <div className="flex-1 space-y-1 overflow-y-auto px-3 pb-3">

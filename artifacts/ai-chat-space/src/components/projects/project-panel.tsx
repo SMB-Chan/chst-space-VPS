@@ -1,0 +1,170 @@
+import { useCallback, useEffect, useState } from "react";
+import { FolderKanban, Loader2, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { FileBrowser } from "@/components/files/file-browser";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+export interface ProjectSummary {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+}
+
+interface ProjectPanelProps {
+  /** Called after a project is created (e.g. refresh work list). */
+  onProjectCreated?: (project: ProjectSummary) => void;
+  /** Called when user opens files for a project. */
+  onOpenFiles?: (folder: string) => void;
+  compact?: boolean;
+}
+
+export function ProjectPanel({
+  onProjectCreated,
+  onOpenFiles,
+  compact,
+}: ProjectPanelProps) {
+  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [showFiles, setShowFiles] = useState(false);
+  const [filesPath, setFilesPath] = useState("");
+
+  const refresh = useCallback(async () => {
+    const res = await fetch(`${BASE}/api/projects`, { credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { projects: ProjectSummary[] };
+    setProjects(data.projects);
+    return data.projects;
+  }, []);
+
+  useEffect(() => {
+    void refresh().catch(() => setMessage("一覧を読み込めませんでした。"));
+  }, [refresh]);
+
+  const handleCreate = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${BASE}/api/projects`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        project?: ProjectSummary;
+        folder?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.project) {
+        throw new Error(data.error || "作成に失敗しました。");
+      }
+      setName("");
+      await refresh();
+      setMessage(
+        `「${data.project.name}」を作成しました${
+          data.folder ? `（フォルダ: ${data.folder}/）` : ""
+        }`,
+      );
+      onProjectCreated?.(data.project);
+      if (data.folder) {
+        setFilesPath(data.folder);
+        setShowFiles(true);
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "作成に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <FolderKanban className="h-4 w-4" />
+          プロジェクト
+        </h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1 text-xs"
+          onClick={() => {
+            setShowFiles((v) => !v);
+            if (!showFiles && !filesPath) setFilesPath("");
+          }}
+        >
+          ファイル
+        </Button>
+      </div>
+
+      <div className="flex gap-2">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="新しいプロジェクト名"
+          className={compact ? "h-9 text-sm" : ""}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleCreate();
+          }}
+        />
+        <Button
+          disabled={busy || !name.trim()}
+          onClick={() => void handleCreate()}
+          className="gap-1"
+          size={compact ? "sm" : "default"}
+        >
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Plus className="h-4 w-4" />
+          )}
+          作成
+        </Button>
+      </div>
+
+      {!projects ? (
+        <p className="text-xs text-[var(--m3-on-surface-variant)]">読み込み中...</p>
+      ) : projects.length === 0 ? (
+        <p className="text-xs text-[var(--m3-on-surface-variant)]">
+          まだプロジェクトがありません。名前を付けて作成すると、ワークスペースにフォルダも作られます。
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {projects.map((project) => (
+            <li key={project.id}>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-[var(--m3-shape-md)] px-2 py-1.5 text-left text-sm hover:bg-[var(--m3-surface-container)]"
+                onClick={() => {
+                  setFilesPath(project.slug || project.name);
+                  setShowFiles(true);
+                  onOpenFiles?.(project.slug || project.name);
+                }}
+              >
+                <FolderKanban className="h-3.5 w-3.5 shrink-0 text-[var(--m3-primary)]" />
+                <span className="truncate">{project.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {showFiles && (
+        <div className="h-[min(50dvh,420px)]">
+          <FileBrowser initialPath={filesPath} />
+        </div>
+      )}
+
+      {message && (
+        <p className="text-xs text-[var(--m3-on-surface-variant)]">{message}</p>
+      )}
+    </div>
+  );
+}

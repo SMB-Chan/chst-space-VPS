@@ -6,6 +6,7 @@ import googleRouter from "./google";
 import devRouter from "./dev";
 import projectsRouter from "./projects";
 import toolBankRouter from "./tool-bank";
+import filesRouter from "./files";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(googleRouter);
 router.use(devRouter);
 router.use(projectsRouter);
 router.use(toolBankRouter);
+router.use(filesRouter);
 
 export default router;

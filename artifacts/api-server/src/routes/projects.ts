@@ -11,6 +11,7 @@ import {
   upsertProjectMemorySection,
   type ProjectMemorySection,
 } from "../lib/project-memory-store";
+import { createProjectFolder } from "./files";
 
 const router: Router = Router();
 
@@ -60,7 +61,20 @@ router.post("/projects", requireAuth, async (req: Request, res: Response) => {
   }
   try {
     const project = await createProject(getUserId(req), parsed.data);
-    res.status(201).json({ project });
+    let folder: string | null = null;
+    try {
+      folder = createProjectFolder(project.name);
+      await upsertProjectMemorySection(
+        getUserId(req),
+        project.id,
+        "structure",
+        `ワークスペース: \`${folder}/\``,
+      );
+    } catch {
+      /* folder creation is best-effort */
+    }
+    const full = await getProject(getUserId(req), project.id);
+    res.status(201).json({ project: full ?? project, folder });
   } catch (err) {
     res.status(400).json({
       error: err instanceof Error ? err.message : "プロジェクトを作成できませんでした。",
