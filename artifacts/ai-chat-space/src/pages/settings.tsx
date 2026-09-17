@@ -360,6 +360,43 @@ export function SettingsPage() {
         </SettingsSection>
 
         <SettingsSection
+          title="開発環境"
+          description="VPS上のコーディング用ワークスペースです。Tailnet内から開きます（ポートはホスト側に公開）。"
+        >
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="tonal"
+              onClick={() => {
+                window.open(
+                  `${window.location.protocol}//${window.location.hostname}:8091/`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
+            >
+              ファイルブラウザ
+            </Button>
+            <Button
+              variant="tonal"
+              onClick={() => {
+                window.open(
+                  `${window.location.protocol}//${window.location.hostname}:4096/`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
+            >
+              コーディング (OpenCode)
+            </Button>
+          </div>
+          <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
+            ワークスペースは <code>code-workspace/</code>{" "}
+            配下のプロジェクト一覧です。Basic
+            auth（OpenCode）とfilebrowserのログイン情報はサーバー側の設定に従います。
+          </p>
+        </SettingsSection>
+
+        <SettingsSection
           title="プライベートセッション"
           description="ナビゲーションの「プライベート」から始める会話はサーバーに保存されず、長期メモリの参照・保存も行いません。タブを閉じると履歴は消えます。通常の会話はアカウントに紐づいて残ります。"
         />

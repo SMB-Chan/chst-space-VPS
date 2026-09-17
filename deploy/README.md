@@ -27,23 +27,31 @@ The compose project name is pinned to `chat-space` so the postgres volume
 `chat-space_chatpg` and network `chat-space_default` are stable across
 redeploys regardless of the directory compose is invoked from.
 
-## Coding environment (OpenCode)
+## Coding environment (OpenCode + file browser)
 
-The standalone `/opt/opencode-sandbox` stack was folded into this project as
-the `code` service (`chat-space:code`, `127.0.0.1:4096`).
+The standalone `/opt/opencode-sandbox` and `/opt/filebrowser` stacks were folded
+into this project:
 
-- Workspace: `<repo>/code-workspace` (mounted at `/workspace`)
-- Basic auth: `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` in `deploy/.env`
+| Service | Container | Port | Purpose |
+| --- | --- | --- | --- |
+| `code` | `chat-space-code` | `127.0.0.1:4096` | OpenCode web |
+| `files` | `chat-space-files` | `127.0.0.1:8091` | filebrowser over `code-workspace` |
+
+- Workspace: `<repo>/code-workspace` (mounted at `/workspace` and `/srv`)
+- Basic auth (OpenCode): `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`
 - Nginx front (optional): `deploy/code/nginx-oc-picker.conf` →
   `/etc/nginx/conf.d/oc-picker.conf`, still listening on `127.0.0.1:8096`
 - Picker asset: copy `deploy/code/picker.js` to `/opt/oc-picker/picker.js`
+- filebrowser DB: `deploy/filebrowser/` (gitignored)
 
 Build/run:
 
 ```bash
 sudo docker build -f deploy/code/Dockerfile -t chat-space:code deploy/code
-cd deploy && sudo docker compose up -d code
+cd deploy && sudo docker compose up -d code files
 ```
+
+Settings →「開発環境」からも開けます（ホスト名 `:8091` / `:4096`）。
 
 
 ## Prerequisites (VPS)

@@ -6,6 +6,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Code2,
+  FolderOpen,
   Loader2,
   LogOut,
   MessageSquareText,
@@ -244,6 +246,36 @@ export function MobileShell({ children }: MobileShellProps) {
           >
             <Shield className="h-4 w-4" />
             プライベート
+          </button>
+          <button
+            type="button"
+            className="mobile-drawer-item"
+            onClick={() => {
+              window.open(
+                `${window.location.protocol}//${window.location.hostname}:8091/`,
+                "_blank",
+                "noopener,noreferrer",
+              );
+              setDrawerOpen(false);
+            }}
+          >
+            <FolderOpen className="h-4 w-4" />
+            ファイル
+          </button>
+          <button
+            type="button"
+            className="mobile-drawer-item"
+            onClick={() => {
+              window.open(
+                `${window.location.protocol}//${window.location.hostname}:4096/`,
+                "_blank",
+                "noopener,noreferrer",
+              );
+              setDrawerOpen(false);
+            }}
+          >
+            <Code2 className="h-4 w-4" />
+            コーディング
           </button>
           <button
             type="button"

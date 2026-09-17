@@ -79,6 +79,22 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # File browser over the coding workspace (replaces standalone sandbox-fm).
+  files:
+    image: filebrowser/filebrowser:latest
+    container_name: chat-space-files
+    restart: unless-stopped
+    user: "1000:1000"
+    command: ["-d", "/database/filebrowser.db"]
+    ports:
+      - "127.0.0.1:8091:80"
+    volumes:
+      - ../code-workspace:/srv
+      - ./filebrowser:/database
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   chatpg:
   code-data:

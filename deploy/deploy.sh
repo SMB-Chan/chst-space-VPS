@@ -19,6 +19,9 @@ sudo docker build -f deploy/code/Dockerfile -t chat-space:code deploy/code
 
 # Coding workspace (OpenCode projects) — create once, owned by deploy user.
 mkdir -p "$REPO_ROOT/code-workspace"
+mkdir -p "$SCRIPT_DIR/filebrowser"
+# filebrowser runs as uid 1000 inside the container; keep the DB writable.
+chown -R 1000:1000 "$SCRIPT_DIR/filebrowser" 2>/dev/null || true
 
 cd "$SCRIPT_DIR"
 sudo docker compose up -d db

@@ -6,3 +6,5 @@ searxng/data/
 # OpenCode workspace projects (live git clones on the VPS)
 ../code-workspace/
 code-workspace/
+# filebrowser database
+filebrowser/
