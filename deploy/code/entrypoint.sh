@@ -56,7 +56,8 @@ elif [ "$MODE" = "ask" ]; then
 EOF
   EXTRA_ARGS=""
 else
-  # auto — autonomous coding: approve almost everything, keep hard rails
+  # auto — autonomous coding: permission allow except catastrophic bash / .env
+  # (opencode serve has no --auto flag; allow-deny rails are the equivalent)
   cat > "$CONFIG_DIR/opencode.jsonc" <<'EOF'
 {
   "$schema": "https://opencode.ai/config.json",
@@ -77,15 +78,14 @@ else
       "rm -rf ~": "deny",
       "rm -rf $HOME": "deny",
       "mkfs *": "deny",
-      "dd if=*": "deny",
-      ":(){ :|:& };:": "deny"
+      "dd if=*": "deny"
     },
     "external_directory": "allow",
     "doom_loop": "ask"
   }
 }
 EOF
-  EXTRA_ARGS="--auto"
+  EXTRA_ARGS=""
 fi
 
 echo "opencode access mode: $MODE"
