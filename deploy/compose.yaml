@@ -43,8 +43,12 @@ services:
     container_name: chat-space-app
     restart: unless-stopped
     env_file: .env
+    environment:
+      OPENCODE_ACCESS_MODE_FILE: /data/opencode-access-mode
     ports:
       - "127.0.0.1:8080:5000"
+    volumes:
+      - ./code-access-mode:/data/opencode-access-mode
     depends_on:
       db:
         condition: service_healthy
@@ -53,8 +57,6 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # VPS coding environment (OpenCode web). Replaces the standalone
-  # /opt/opencode-sandbox stack. Workspace lives under this deploy tree.
   code:
     image: chat-space:code
     container_name: chat-space-code
@@ -62,14 +64,17 @@ services:
     init: true
     build:
       context: ./code
-    command: ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    entrypoint: ["/usr/local/bin/chat-space-code-entrypoint"]
     environment:
       OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-}
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+      # ask | auto | full — written into OpenCode permission config at start
+      OPENCODE_ACCESS_MODE: ${OPENCODE_ACCESS_MODE:-auto}
     ports:
       - "127.0.0.1:4096:4096"
     volumes:
       - ../code-workspace:/workspace
+      - ./code-access-mode:/access-mode
       - code-data:/home/node/.local/share/opencode
       - code-github:/home/node/.config/gh
       - code-npm:/home/node/.npm

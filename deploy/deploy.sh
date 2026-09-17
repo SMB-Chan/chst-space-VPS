@@ -20,6 +20,10 @@ sudo docker build -f deploy/code/Dockerfile -t chat-space:code deploy/code
 # Coding workspace (OpenCode projects) — create once, owned by deploy user.
 mkdir -p "$REPO_ROOT/code-workspace"
 mkdir -p "$SCRIPT_DIR/filebrowser"
+# OpenCode access mode file (ask|auto|full) — entrypoint reads this at start.
+if [ ! -f "$SCRIPT_DIR/code-access-mode" ]; then
+  printf 'auto\n' > "$SCRIPT_DIR/code-access-mode"
+fi
 # filebrowser runs as uid 1000 inside the container; keep the DB writable.
 chown -R 1000:1000 "$SCRIPT_DIR/filebrowser" 2>/dev/null || true
 

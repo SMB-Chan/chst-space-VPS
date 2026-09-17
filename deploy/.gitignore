@@ -8,3 +8,5 @@ searxng/data/
 code-workspace/
 # filebrowser database
 filebrowser/
+# OpenCode access mode (runtime)
+code-access-mode

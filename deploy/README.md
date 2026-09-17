@@ -44,6 +44,18 @@ into this project:
 - Picker asset: copy `deploy/code/picker.js` to `/opt/oc-picker/picker.js`
 - filebrowser DB: `deploy/filebrowser/` (gitignored)
 
+### Access modes (autonomous coding)
+
+`OPENCODE_ACCESS_MODE` or `deploy/code-access-mode` (`ask` | `auto` | `full`):
+
+| Mode | Behavior |
+| --- | --- |
+| `ask` | edit/bash require approval |
+| `auto` | auto-approve (`--auto`); deny catastrophic bash; block `.env` reads |
+| `full` | `permission: allow` — everything |
+
+Settings →「開発環境」から変更できます。反映は `docker compose restart code`。
+
 Build/run:
 
 ```bash

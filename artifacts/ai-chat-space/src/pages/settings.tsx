@@ -89,6 +89,58 @@ export function SettingsPage() {
   const [googleBusy, setGoogleBusy] = useState(false);
   const [googleMessage, setGoogleMessage] = useState<string | null>(null);
 
+  // OpenCode access mode (ask / auto / full)
+  const [accessMode, setAccessMode] = useState<"ask" | "auto" | "full">("auto");
+  const [accessModeLoading, setAccessModeLoading] = useState(true);
+  const [accessModeBusy, setAccessModeBusy] = useState(false);
+  const [accessModeMessage, setAccessModeMessage] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE}/api/dev/access-mode`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { mode?: "ask" | "auto" | "full" } | null) => {
+        if (!cancelled && data?.mode) setAccessMode(data.mode);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setAccessModeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleAccessModeChange = async (
+    mode: "ask" | "auto" | "full",
+  ) => {
+    setAccessModeBusy(true);
+    setAccessModeMessage(null);
+    try {
+      const res = await fetch(`${BASE}/api/dev/access-mode`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok) throw new Error(data.error || "保存に失敗しました。");
+      setAccessMode(mode);
+      setAccessModeMessage(data.message || "保存しました。");
+    } catch (err) {
+      setAccessModeMessage(
+        err instanceof Error ? err.message : "保存に失敗しました。",
+      );
+    } finally {
+      setAccessModeBusy(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     fetch(`${BASE}/api/google/status`, { credentials: "include" })
@@ -361,7 +413,7 @@ export function SettingsPage() {
 
         <SettingsSection
           title="開発環境"
-          description="VPS上のコーディング用ワークスペースです。Tailnet内から開きます（ポートはホスト側に公開）。"
+          description="VPS上のコーディング用ワークスペースです。Tailnet内から開きます（ポートはホスト側に公開）。Markdownはチャット画面で描画済みです。"
         >
           <div className="flex flex-wrap gap-2">
             <Button
@@ -389,6 +441,45 @@ export function SettingsPage() {
               コーディング (OpenCode)
             </Button>
           </div>
+
+          <div className="space-y-2 pt-2">
+            <div className="text-sm font-medium">自律コーディングのアクセスモード</div>
+            {accessModeLoading ? (
+              <p className="text-sm text-[var(--m3-on-surface-variant)]">
+                読み込み中...
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(["ask", "auto", "full"] as const).map((mode) => (
+                  <Button
+                    key={mode}
+                    variant={accessMode === mode ? "filled" : "outline"}
+                    disabled={accessModeBusy}
+                    onClick={() => void handleAccessModeChange(mode)}
+                  >
+                    {mode === "ask"
+                      ? "確認モード"
+                      : mode === "auto"
+                        ? "自動承認"
+                        : "フルアクセス"}
+                  </Button>
+                ))}
+              </div>
+            )}
+            <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
+              <strong>自動承認</strong>
+              は編集・シェルを自動許可し、破壊的なコマンドのみ拒否します（自律コーディング向け）。
+              <strong>フルアクセス</strong> はすべて許可します。
+              変更は次回の code コンテナ起動時に反映されます
+              （<code>docker compose restart code</code>）。
+            </p>
+            {accessModeMessage && (
+              <p className="text-xs text-[var(--m3-on-surface-variant)]">
+                {accessModeMessage}
+              </p>
+            )}
+          </div>
+
           <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
             ワークスペースは <code>code-workspace/</code>{" "}
             配下のプロジェクト一覧です。Basic

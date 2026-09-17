@@ -31,12 +31,17 @@ RUN npm install -g opencode-ai
 RUN mkdir -p \
       /workspace \
       /home/node/.local/share/opencode \
+      /home/node/.config/opencode \
       /home/node/.config/gh \
       /home/node/.npm && \
     chown -R node:node /workspace /home/node
+
+# Entrypoint writes permission config from OPENCODE_ACCESS_MODE / /access-mode
+COPY entrypoint.sh /usr/local/bin/chat-space-code-entrypoint
+RUN chmod +x /usr/local/bin/chat-space-code-entrypoint
 
 USER node
 
 WORKDIR /workspace
 
-CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]
+ENTRYPOINT ["/usr/local/bin/chat-space-code-entrypoint"]
