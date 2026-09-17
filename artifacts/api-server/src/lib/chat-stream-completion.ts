@@ -3,7 +3,11 @@ import type { ExtractedArtifact } from "./artifacts";
 import type { FactualityReport } from "./factuality";
 import type { GeneratedFile } from "./file-generation";
 import { logger, safeFailureFields } from "./logger";
-import { executeRunStep, failCurrentRun } from "./run-execution";
+import {
+  executeRunStep,
+  failCurrentRun,
+  getRunExecutionContext,
+} from "./run-execution";
 import type { GeneratedAsset } from "./specialist-capabilities";
 
 export interface ChatCompletionInput {
@@ -90,6 +94,11 @@ export async function persistAndEmitChatCompletion(args: {
   onComplete?: ChatCompletionCallback;
   input: ChatCompletionInput;
   includeArtifactContent: boolean;
+  receipt?: {
+    omittedHistoryTurns?: number;
+    truncatedHistoryTurns?: number;
+    omittedWebSections?: number;
+  };
 }): Promise<boolean> {
   const input = args.input.content.trim()
     ? args.input
@@ -154,6 +163,20 @@ export async function persistAndEmitChatCompletion(args: {
 
   if (input.filesMeta && input.filesMeta.length > 0 && !args.clientGone()) {
     writeEvent(args.res, { filesMeta: input.filesMeta });
+  }
+
+  const receipt = {
+    runId: getRunExecutionContext()?.runId ?? null,
+    ...(args.receipt ?? {}),
+  };
+  if (
+    (receipt.runId ||
+      receipt.omittedHistoryTurns ||
+      receipt.truncatedHistoryTurns ||
+      receipt.omittedWebSections) &&
+    !args.clientGone()
+  ) {
+    writeEvent(args.res, { receipt });
   }
 
   const artifacts = input.artifacts ?? [];

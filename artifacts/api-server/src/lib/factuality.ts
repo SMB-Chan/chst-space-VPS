@@ -1,5 +1,6 @@
 import { compactAuditSourceText } from "./audit";
 import type { AuditPatchOperation } from "./audit-patch";
+import { clipHeadTailUtf8Safe } from "./text-truncation";
 import {
   normalizeNewsQualityReport,
   type NewsQualityReport,
@@ -66,12 +67,7 @@ export const FACTUALITY_SYSTEM_PROMPT = `あなたは、Web証拠に基づく回
 {"status":"verified|mixed|insufficient","summary":"短い検証結果","claims":[{"claim":"短い事実主張","verdict":"supported|contradicted|unknown","sourceIds":[1],"reason":"判定根拠"}],"operations":[{"find":"回答内の一意な原文","replacement":"修正文"}]}`;
 
 function boundedHeadTail(text: string, maxChars: number): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= maxChars) return trimmed;
-  const marker = "\n…（検証入力を省略）…\n";
-  const available = Math.max(0, maxChars - marker.length);
-  const head = Math.ceil(available * 0.6);
-  return trimmed.slice(0, head) + marker + trimmed.slice(-(available - head));
+  return clipHeadTailUtf8Safe(text.trim(), maxChars, "\n…（検証入力を省略）…\n");
 }
 
 export function buildFactualityUserMessage(args: {

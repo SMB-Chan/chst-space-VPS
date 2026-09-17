@@ -1,3 +1,5 @@
+import { clipHeadTailUtf8Safe } from "./text-truncation";
+
 export const AUDIT_SYSTEM_PROMPT = `あなたは会話の記憶を持たない監査役です。直前のやり取り以外は知りません。親しみや同調は不要です。厳格で中立に、主張の穴を探してください。
 
 監査対象は「回答」です。質問者に代わって答え直さない。足りない点は指摘し、良い点は短く認める。
@@ -33,12 +35,7 @@ export const AUDIT_INPUT_LIMITS = {
 } as const;
 
 function boundedHeadTail(text: string, maxChars: number): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= maxChars) return trimmed;
-  const marker = "\n…（監査入力を省略）…\n";
-  const available = Math.max(0, maxChars - marker.length);
-  const head = Math.ceil(available * 0.6);
-  return trimmed.slice(0, head) + marker + trimmed.slice(-(available - head));
+  return clipHeadTailUtf8Safe(text.trim(), maxChars, "\n…（監査入力を省略）…\n");
 }
 
 /** Keep only snippets/pages cited by the draft, then apply a hard input cap. */

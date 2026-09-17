@@ -81,4 +81,23 @@ describe("persistAndEmitChatCompletion", () => {
     expect(output).toContain("メッセージの保存に失敗しました");
     expect(output).not.toContain('"done":true');
   });
+
+  it("emits a run receipt with history and web budget outcomes", async () => {
+    const write = vi.fn();
+    const completed = await persistAndEmitChatCompletion({
+      res: { write } as unknown as Response,
+      clientGone: () => false,
+      onComplete: async () => undefined,
+      input: { content: "answer", sources: [] },
+      includeArtifactContent: false,
+      receipt: { omittedHistoryTurns: 2, omittedWebSections: 1 },
+    });
+
+    expect(completed).toBe(true);
+    const output = write.mock.calls.join("");
+    expect(output).toContain('"receipt"');
+    expect(output).toContain('"omittedHistoryTurns":2');
+    expect(output).toContain('"omittedWebSections":1');
+    expect(output).toContain('"done":true');
+  });
 });

@@ -64,6 +64,12 @@ export async function streamMessage(
         removed?: number | null;
       }[],
     ) => void;
+    onReceipt?: (receipt: {
+      runId?: string | null;
+      omittedHistoryTurns?: number | null;
+      truncatedHistoryTurns?: number | null;
+      omittedWebSections?: number | null;
+    }) => void;
   },
 ) {
   try {
@@ -141,6 +147,15 @@ export async function streamMessage(
         if (parsed.status === "fetching") onStatus("fetching");
         if (parsed.status === "researching") {
           onStatus("researching");
+          if (
+            typeof parsed.step === "number" &&
+            typeof parsed.maxSteps === "number"
+          ) {
+            onResearchStep({ step: parsed.step, maxSteps: parsed.maxSteps });
+          }
+        }
+        if (parsed.status === "coding") {
+          onStatus("coding");
           if (
             typeof parsed.step === "number" &&
             typeof parsed.maxSteps === "number"
@@ -300,6 +315,40 @@ export async function streamMessage(
             ];
           });
           if (files.length > 0) extra.onFilesMeta(files);
+        }
+        if (parsed.receipt && typeof parsed.receipt === "object") {
+          const record = parsed.receipt as Record<string, unknown>;
+          const receipt: {
+            runId?: string | null;
+            omittedHistoryTurns?: number | null;
+            truncatedHistoryTurns?: number | null;
+            omittedWebSections?: number | null;
+          } = {};
+          if (typeof record.runId === "string" && record.runId) {
+            receipt.runId = record.runId;
+          }
+          for (const key of [
+            "omittedHistoryTurns",
+            "truncatedHistoryTurns",
+            "omittedWebSections",
+          ] as const) {
+            const value = record[key];
+            if (
+              typeof value === "number" &&
+              Number.isSafeInteger(value) &&
+              value > 0
+            ) {
+              receipt[key] = value;
+            }
+          }
+          if (
+            receipt.runId ||
+            receipt.omittedHistoryTurns ||
+            receipt.truncatedHistoryTurns ||
+            receipt.omittedWebSections
+          ) {
+            extra?.onReceipt?.(receipt);
+          }
         }
         if (typeof parsed.content === "string" && parsed.content) {
           if (parsed.status === "revising") {

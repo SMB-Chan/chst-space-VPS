@@ -61,6 +61,7 @@ export type StreamingPhase =
   | "auditing"
   | "verifying"
   | "revising"
+  | "coding"
   | null;
 
 export interface ActivityStep {
@@ -91,7 +92,14 @@ type DisplayMessage = OpenaiMessage & {
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
   durationMs?: number | null;
-  filesMeta?: { path: string; kind: string; added?: number | null; removed?: number | null }[] | null;
+  filesMeta?:
+    | {
+        path: string;
+        kind: string;
+        added?: number | null;
+        removed?: number | null;
+      }[]
+    | null;
   generatedAssets?:
     | {
         id: number;
@@ -147,6 +155,7 @@ interface MessageFeedProps {
   streamingFiles?: { id: number; filename: string; mimeType: string }[];
   streamingAudit?: string;
   streamingFactuality?: FactualityReport | null;
+  streamingReceipt?: TurnReceipt | null;
   isStreaming?: boolean;
   onStop?: () => void;
   streamingWarning?: string | null;
@@ -262,6 +271,11 @@ function SpecialistProgress({
     edit_image: "画像編集",
     transcribe_audio: "音声認識",
     synthesize_speech: "音声合成",
+    code_list: "ファイル一覧",
+    code_read: "ファイル読取",
+    code_search: "コード検索",
+    code_write: "ファイル書込",
+    code_edit: "ファイル編集",
   };
   const label = labels[progress.capability] ?? "専門能力";
   const failed = progress.phase === "failed";
@@ -322,6 +336,11 @@ function phaseLabel(
   if (phase === "generating-file") return "ファイルを生成中";
   if (phase === "reviewing-layout") return "レイアウトを確認中";
   if (phase === "revising-layout") return "レイアウトを修正中";
+  if (phase === "coding") {
+    return researchStep
+      ? `コードを編集中 (${researchStep.step}/${researchStep.maxSteps})`
+      : "コードを編集中";
+  }
   if (phase === "generating") return "生成中";
   if (phase === "auditing") return "監査中";
   if (phase === "verifying") return "根拠を検証中";
@@ -337,6 +356,7 @@ function phaseIcon(phase: StreamingPhase): LucideIcon {
       return Telescope;
     case "reading-images":
     case "reading-files":
+    case "coding":
       return FileSearch;
     case "auditing":
     case "verifying":
@@ -651,6 +671,13 @@ function FileDownloadButton({
   );
 }
 
+export interface TurnReceipt {
+  runId?: string | null;
+  omittedHistoryTurns?: number | null;
+  truncatedHistoryTurns?: number | null;
+  omittedWebSections?: number | null;
+}
+
 interface MessageRowProps {
   message: OpenaiMessage;
   userInitial: string;
@@ -664,6 +691,7 @@ interface MessageRowProps {
   streamingFiles: { id: number; filename: string; mimeType: string }[];
   streamingAudit: string;
   streamingFactuality: FactualityReport | null;
+  streamingReceipt?: TurnReceipt | null;
   isStreaming: boolean;
   onStop?: () => void;
   streamingWarning?: string | null;
@@ -684,6 +712,7 @@ const MessageRow = memo(function MessageRow({
   streamingFiles,
   streamingAudit,
   streamingFactuality,
+  streamingReceipt,
   isStreaming,
   onStop,
   streamingWarning,
@@ -976,6 +1005,28 @@ const MessageRow = memo(function MessageRow({
             </div>
           )}
         {!isUser &&
+          isStreamingMessage &&
+          streamingReceipt &&
+          ((streamingReceipt.omittedHistoryTurns ?? 0) > 0 ||
+            (streamingReceipt.truncatedHistoryTurns ?? 0) > 0 ||
+            (streamingReceipt.omittedWebSections ?? 0) > 0) && (
+            <div className="w-full px-1 text-xs text-muted-foreground">
+              <span>
+                長い会話のため
+                {(streamingReceipt.omittedHistoryTurns ?? 0) > 0
+                  ? `古い履歴${streamingReceipt.omittedHistoryTurns}ターン`
+                  : ""}
+                {(streamingReceipt.truncatedHistoryTurns ?? 0) > 0
+                  ? `${(streamingReceipt.omittedHistoryTurns ?? 0) > 0 ? "・" : ""}一部を要約`
+                  : ""}
+                {(streamingReceipt.omittedWebSections ?? 0) > 0
+                  ? `${(streamingReceipt.omittedHistoryTurns ?? 0) > 0 || (streamingReceipt.truncatedHistoryTurns ?? 0) > 0 ? "・" : ""}Web根拠${streamingReceipt.omittedWebSections}件`
+                  : ""}
+                を省略しています。不明点は推測せず確認してください。
+              </span>
+            </div>
+          )}
+        {!isUser &&
           ((display.filesMeta && display.filesMeta.length > 0) ||
             (typeof display.durationMs === "number" &&
               display.durationMs > 0)) && (
@@ -1066,6 +1117,7 @@ function areMessageRowPropsEqual(
     previous.streamingFiles === next.streamingFiles &&
     previous.streamingAudit === next.streamingAudit &&
     previous.streamingFactuality === next.streamingFactuality &&
+    previous.streamingReceipt === next.streamingReceipt &&
     previous.isStreaming === next.isStreaming &&
     previous.onStop === next.onStop &&
     previous.streamingWarning === next.streamingWarning &&
@@ -1083,6 +1135,7 @@ export function MessageFeed({
   streamingFiles = [],
   streamingAudit = "",
   streamingFactuality = null,
+  streamingReceipt = null,
   isStreaming = false,
   onStop,
   streamingWarning,
@@ -1191,6 +1244,11 @@ export function MessageFeed({
               streamingFiles={streamingFiles}
               streamingAudit={streamingAudit}
               streamingFactuality={streamingFactuality}
+              streamingReceipt={
+                message.id === STREAMING_ASSISTANT_ID
+                  ? streamingReceipt
+                  : null
+              }
               isStreaming={isStreaming}
               onStop={onStop}
               streamingWarning={streamingWarning}

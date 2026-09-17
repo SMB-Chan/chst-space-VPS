@@ -6,6 +6,7 @@ import {
 import type OpenAI from "openai";
 import { logger, safeFailureFields } from "./logger";
 import { readResponseTextLimited } from "./bounded-body";
+import { clipHeadUtf8Safe } from "./text-truncation";
 import {
   assertSafeUrl,
   createSafeDnsLookup,
@@ -110,9 +111,62 @@ export interface WebContext {
     publisherUrl?: string | null;
   }[];
   contextText: string;
+  /** Sections dropped by the bounded pack (oldest first). */
+  omittedSections?: number;
   searchWarning?: string;
   newsQuality?: NewsQualityReport;
   visualEvidences?: WebVisualEvidence[];
+}
+
+/**
+ * Bounded context pack: web evidence grows with every round (snippets +
+ * full pages), so cap the assembled prompt text. Snippet/result sections are
+ * preferred over raw page bodies when the budget is tight, and any omission
+ * is explicit — never silent.
+ */
+export const WEB_CONTEXT_MAX_CHARS = 24_000;
+
+export function packWebContextParts(
+  parts: string[],
+  maxChars = WEB_CONTEXT_MAX_CHARS,
+): { contextText: string; omittedSections: number } {
+  if (parts.length === 0) return { contextText: "", omittedSections: 0 };
+  const joined = parts.join("\n\n");
+  if (joined.length <= maxChars)
+    return { contextText: joined, omittedSections: 0 };
+  const reserve =
+    `\n\n…（Web根拠の古い ${parts.length} セクション中一部を省略。` +
+    `不明点は不明と答え、欠けた根拠を推測で補わないこと）`;
+  const budget = Math.max(1_000, maxChars - reserve.length);
+  const scored = parts.map((text, index) => {
+    const isPageBody = text.startsWith("【ページ内容");
+    return { text, index, isPageBody };
+  });
+  const selected: { text: string; index: number }[] = [];
+  let used = 0;
+  const take = (candidate: (typeof scored)[number]): boolean => {
+    const cost = candidate.text.length + (selected.length > 0 ? 2 : 0);
+    if (used + cost > budget) return false;
+    selected.push({ text: candidate.text, index: candidate.index });
+    used += cost;
+    return true;
+  };
+  for (const candidate of scored) {
+    if (!candidate.isPageBody) take(candidate);
+  }
+  for (const candidate of scored) {
+    if (candidate.isPageBody) take(candidate);
+  }
+  if (selected.length === 0) {
+    const head = clipHeadUtf8Safe(parts[parts.length - 1], budget);
+    return { contextText: head + reserve, omittedSections: parts.length - 1 };
+  }
+  selected.sort((a, b) => a.index - b.index);
+  const omittedSections = parts.length - selected.length;
+  const contextText =
+    selected.map((item) => item.text).join("\n\n") +
+    (omittedSections > 0 ? reserve : "");
+  return { contextText, omittedSections };
 }
 
 export type SearchRoute = "default" | "alternate";
@@ -1551,7 +1605,7 @@ export async function buildWebContext(
     searched,
     query,
     sources,
-    contextText: parts.join("\n\n"),
+    ...packWebContextParts(parts),
     searchWarning,
     newsQuality,
     visualEvidences,

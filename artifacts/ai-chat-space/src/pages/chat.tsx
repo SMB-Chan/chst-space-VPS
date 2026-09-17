@@ -77,6 +77,13 @@ type StreamFileTouch = {
   removed?: number | null;
 };
 
+type StreamReceipt = {
+  runId?: string | null;
+  omittedHistoryTurns?: number | null;
+  truncatedHistoryTurns?: number | null;
+  omittedWebSections?: number | null;
+};
+
 const FILE_TOUCH_KINDS = new Set(["edit", "create", "generate"]);
 
 function parseFilesMeta(raw: unknown): StreamFileTouch[] | null {
@@ -106,6 +113,35 @@ function parseFilesMeta(raw: unknown): StreamFileTouch[] | null {
     return [touch];
   });
   return cleaned.length > 0 ? cleaned : null;
+}
+
+function parseStreamReceipt(raw: unknown): StreamReceipt | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const receipt: StreamReceipt = {};
+  if (typeof record.runId === "string" && record.runId) {
+    receipt.runId = record.runId;
+  }
+  for (const key of [
+    "omittedHistoryTurns",
+    "truncatedHistoryTurns",
+    "omittedWebSections",
+  ] as const) {
+    const value = record[key];
+    if (
+      typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value > 0
+    ) {
+      receipt[key] = value;
+    }
+  }
+  return receipt.runId ||
+    receipt.omittedHistoryTurns ||
+    receipt.truncatedHistoryTurns ||
+    receipt.omittedWebSections
+    ? receipt
+    : null;
 }
 
 async function streamMessage(
@@ -151,6 +187,7 @@ async function streamMessage(
     codingMode?: boolean;
     projectId?: number | null;
     onFilesMeta?: (files: StreamFileTouch[]) => void;
+    onReceipt?: (receipt: StreamReceipt) => void;
   },
 ) {
   try {
@@ -246,6 +283,15 @@ async function streamMessage(
       if (parsed.status === "fetching") onStatus("fetching");
       if (parsed.status === "researching") {
         onStatus("researching");
+        if (
+          typeof parsed.step === "number" &&
+          typeof parsed.maxSteps === "number"
+        ) {
+          onResearchStep({ step: parsed.step, maxSteps: parsed.maxSteps });
+        }
+      }
+      if (parsed.status === "coding") {
+        onStatus("coding");
         if (
           typeof parsed.step === "number" &&
           typeof parsed.maxSteps === "number"
@@ -376,6 +422,10 @@ async function streamMessage(
       if (Array.isArray(parsed.filesMeta) && extra?.onFilesMeta) {
         const files = parseFilesMeta(parsed.filesMeta);
         if (files) extra.onFilesMeta(files);
+      }
+      if (parsed.receipt && extra?.onReceipt) {
+        const receipt = parseStreamReceipt(parsed.receipt);
+        if (receipt) extra.onReceipt(receipt);
       }
       if (typeof parsed.content === "string" && parsed.content) {
         receivedContent = true;
@@ -516,6 +566,7 @@ export function ChatPage() {
     factuality: null as FactualityReport | null,
     artifacts: [] as ChatArtifact[],
     filesMeta: [] as StreamFileTouch[],
+    receipt: null as StreamReceipt | null,
   });
   const artifactBlobUrlCache = useRef(new Map<string, string>());
   const [modelRestoredForConv, setModelRestoredForConv] = useState<
@@ -543,6 +594,8 @@ export function ChatPage() {
   const [streamingFilesMeta, setStreamingFilesMeta] = useState<
     StreamFileTouch[]
   >([]);
+  const [streamingReceipt, setStreamingReceipt] =
+    useState<StreamReceipt | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<{
@@ -829,6 +882,7 @@ export function ChatPage() {
       setStreamingArtifacts([]);
       setStreamingFiles([]);
       setStreamingFilesMeta([]);
+      setStreamingReceipt(null);
       setStreamingAudit("");
       setStreamingFactuality(null);
       setSpecialistProgress(null);
@@ -840,6 +894,7 @@ export function ChatPage() {
         audit: "",
         factuality: null,
         filesMeta: [],
+        receipt: null,
       };
       setStreamError(
         "応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。",
@@ -1090,6 +1145,7 @@ export function ChatPage() {
     setStreamingArtifacts([]);
     setStreamingFiles([]);
     setStreamingFilesMeta([]);
+    setStreamingReceipt(null);
     setSearchStatus({ kind: "starting" });
     setSpecialistProgress(null);
     activityStepsRef.current = [];
@@ -1104,6 +1160,7 @@ export function ChatPage() {
       factuality: null,
       artifacts: [],
       filesMeta: [],
+      receipt: null,
     };
 
     abortRef.current?.abort();
@@ -1359,6 +1416,10 @@ export function ChatPage() {
           streamSnapshotRef.current.filesMeta = filesMeta;
           setStreamingFilesMeta(filesMeta);
         },
+        onReceipt: (receipt) => {
+          streamSnapshotRef.current.receipt = receipt;
+          setStreamingReceipt(receipt);
+        },
       },
     );
     return true;
@@ -1499,23 +1560,26 @@ export function ChatPage() {
                             ? "verifying"
                             : searchStatus?.kind === "researching"
                               ? "researching"
-                              : searchStatus?.kind === "searching" ||
-                                  searchStatus?.kind === "fetching"
-                                ? "searching"
-                                : searchStatus?.kind === "generating-file"
-                                  ? "generating-file"
-                                  : searchStatus?.kind === "reviewing-layout"
-                                    ? "reviewing-layout"
-                                    : searchStatus?.kind === "revising-layout"
-                                      ? "revising-layout"
-                                      : streamingContent
-                                        ? "generating"
-                                        : "starting"
+                              : searchStatus?.kind === "coding"
+                                ? "coding"
+                                : searchStatus?.kind === "searching" ||
+                                    searchStatus?.kind === "fetching"
+                                  ? "searching"
+                                  : searchStatus?.kind === "generating-file"
+                                    ? "generating-file"
+                                    : searchStatus?.kind === "reviewing-layout"
+                                      ? "reviewing-layout"
+                                      : searchStatus?.kind === "revising-layout"
+                                        ? "revising-layout"
+                                        : streamingContent
+                                          ? "generating"
+                                          : "starting"
                 : null
             }
             researchStep={researchStep}
             streamingAudit={streamingAudit}
             streamingFactuality={streamingFactuality}
+            streamingReceipt={streamingReceipt}
             specialistProgress={specialistProgress}
             streamingFiles={streamingFiles}
             videoJob={videoJob}

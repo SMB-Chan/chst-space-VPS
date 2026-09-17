@@ -1656,6 +1656,10 @@ router.post(
       // window instead of overflowing it (providers then drop old turns).
       const budgetedHistory = budgetConversationHistory(historicalChatMessages);
       const chatMessages = [...budgetedHistory.messages];
+      const historyReceipt = {
+        omittedHistoryTurns: budgetedHistory.omittedTurnCount,
+        truncatedHistoryTurns: budgetedHistory.truncatedTurnCount,
+      };
       chatMessages.push({
         role: "user",
         content: useVisionBridge
@@ -1711,6 +1715,7 @@ router.post(
         },
         userRole: (req.userRole ?? "user") as UserRole,
         publicAiError,
+        historyReceipt,
         onComplete: async ({
           content,
           sources,

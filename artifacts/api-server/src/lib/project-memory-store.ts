@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { clipHeadUtf8Safe } from "./text-truncation";
 import {
   db,
   projects,
@@ -222,7 +223,7 @@ export function formatProjectMemoryContext(
   parts.push(`\n</untrusted_project_memory>`);
   const text = parts.join("\n");
   if (text.length > PROJECT_MEMORY_CONTEXT_MAX_CHARS) {
-    return `${text.slice(0, PROJECT_MEMORY_CONTEXT_MAX_CHARS)}\n…（メモリが長いため末尾を省略）\n</untrusted_project_memory>`;
+    return `${clipHeadUtf8Safe(text, PROJECT_MEMORY_CONTEXT_MAX_CHARS, "\n…（メモリが長いため省略）…\n")}\n</untrusted_project_memory>`;
   }
   return text;
 }

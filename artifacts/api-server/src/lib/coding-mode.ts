@@ -1,18 +1,62 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 /**
- * Explicit coding mode: the model writes project files by emitting fenced
- * blocks whose info string is `file:<relative-path>`. The server applies the
- * writes inside the project's workspace folder, records a per-file diff and
- * streams the touch list to the chat UI.
+ * Explicit coding mode: the model inspects the project with tools, then
+ * writes files via search-replace / full write. `file:` fences remain a
+ * fallback when the model cannot call tools.
  */
 
 export const CODING_FENCE_PREFIX = "file:";
 export const CODING_WRITE_MAX_BYTES = 1_000_000;
 export const CODING_PATCH_MAX_CHARS = 20_000;
 export const CODING_MAX_FILES_PER_TURN = 25;
+export const CODING_READ_MAX_BYTES = 200_000;
+export const CODING_SEARCH_MAX_MATCHES = 40;
+export const CODING_TREE_MAX_ENTRIES = 180;
+export const CODING_LIST_MAX_ENTRIES = 200;
 const DIFF_MAX_LINES = 1200;
+const SKIP_DIRS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  ".next",
+  ".turbo",
+  ".cache",
+  ".venv",
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  "vendor",
+]);
+const BINARY_EXT = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "ico",
+  "pdf",
+  "zip",
+  "gz",
+  "woff",
+  "woff2",
+  "ttf",
+  "eot",
+  "mp3",
+  "mp4",
+  "wasm",
+  "sqlite",
+  "bin",
+]);
 
 export interface CodingFileBlock {
   path: string;
@@ -34,17 +78,20 @@ export interface CodingTouch {
 export function codingModePrompt(projectFolder: string): string {
   return [
     "【コーディングモード】",
-    `この会話は今プロジェクト「${projectFolder}/」のコーディング作業です。`,
-    "ファイルを作成・変更するときは、必ず次の形式のフェンスブロックで最終内容全体を出力してください:",
-    "```file:<プロジェクト内相対パス>",
-    "(ファイル全文)",
-    "```",
-    "ルール:",
-    "- 1ファイル1ブロック。パスは ../ を含まない相対パス。",
-    "- フェンスの外には説明・要約・実行手順だけを書く。コード本文を重複させない。",
-    "- 部分変更でも全文を出す。省略記号は使わない。",
-    "- 変更しないファイルは出力しない。",
-    "- ファイルを書かない通常の質問には通常通り答える。",
+    `プロジェクト「${projectFolder}/」を自律的に編集します。`,
+    "ツール:",
+    "- code_list: ディレクトリ一覧",
+    "- code_read: ファイル読み取り",
+    "- code_search: 内容検索",
+    "- code_edit: 既存ファイルの部分置換（推奨）",
+    "- code_write: 新規作成または全文置換",
+    "手順:",
+    "- 書く前に list/search/read で現状を確認する。推測で上書きしない。",
+    "- 既存ファイルは code_edit。unique な old_string を使う。",
+    "- 新規ファイルだけ code_write。",
+    "- 変更しないファイルは触らない。",
+    "- 回答本文にコード全文を貼らない。何をなぜ変えたか短く書く。",
+    "- ツールが使えないときだけ ```file:<相対パス> フェンスで全文を出す。",
   ].join("\n");
 }
 
@@ -131,6 +178,257 @@ export function applyCodingWrite(
   mkdirSync(path.dirname(abs), { recursive: true });
   writeFileSync(abs, content, "utf8");
   return { kind: previous === null ? "create" : "edit", previous };
+}
+
+function isSkippedDir(name: string): boolean {
+  return SKIP_DIRS.has(name) || name.startsWith(".git");
+}
+
+function isProbablyBinary(relPath: string, sample?: string): boolean {
+  const ext = path.extname(relPath).slice(1).toLowerCase();
+  if (BINARY_EXT.has(ext)) return true;
+  return Boolean(sample?.includes("\0"));
+}
+
+export interface CodingDirEntry {
+  path: string;
+  isDir: boolean;
+  size: number;
+}
+
+export function listCodingDir(rootDir: string, relPath = ""): CodingDirEntry[] {
+  const clean = relPath ? normalizeCodingPath(relPath) : "";
+  if (relPath && !clean) throw new Error("パスが不正です。");
+  const abs = clean ? resolveCodingPath(rootDir, clean) : path.resolve(rootDir);
+  if (!existsSync(abs)) throw new Error("パスが見つかりません。");
+  const st = statSync(abs);
+  if (!st.isDirectory()) throw new Error("ディレクトリではありません。");
+  const entries = readdirSync(abs, { withFileTypes: true })
+    .filter((entry) => !isSkippedDir(entry.name))
+    .slice(0, CODING_LIST_MAX_ENTRIES)
+    .map((entry) => {
+      const child = path.join(abs, entry.name);
+      let size = 0;
+      try {
+        size = statSync(child).size;
+      } catch {
+        /* ignore */
+      }
+      const childRel = clean ? `${clean}/${entry.name}` : entry.name;
+      return { path: childRel, isDir: entry.isDirectory(), size };
+    });
+  entries.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    return a.path.localeCompare(b.path);
+  });
+  return entries;
+}
+
+export function formatCodingTree(
+  rootDir: string,
+  maxEntries = CODING_TREE_MAX_ENTRIES,
+): string {
+  const lines: string[] = [];
+  const walk = (dir: string, rel: string, depth: number): void => {
+    if (lines.length >= maxEntries) return;
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    names.sort((a, b) => a.localeCompare(b));
+    for (const name of names) {
+      if (lines.length >= maxEntries) return;
+      if (isSkippedDir(name)) continue;
+      const abs = path.join(dir, name);
+      const childRel = rel ? `${rel}/${name}` : name;
+      let isDir = false;
+      try {
+        isDir = statSync(abs).isDirectory();
+      } catch {
+        continue;
+      }
+      const indent = "  ".repeat(depth);
+      lines.push(isDir ? `${indent}${name}/` : `${indent}${name}`);
+      if (isDir && depth < 4) walk(abs, childRel, depth + 1);
+    }
+  };
+  if (!existsSync(rootDir)) return "(プロジェクトフォルダがありません)";
+  walk(rootDir, "", 0);
+  if (lines.length === 0) return "(空のプロジェクト)";
+  if (lines.length >= maxEntries) lines.push("…");
+  return lines.join("\n");
+}
+
+export interface CodingFileRead {
+  path: string;
+  content: string;
+  startLine: number;
+  endLine: number;
+  truncated: boolean;
+}
+
+export function readCodingFile(
+  rootDir: string,
+  relPath: string,
+  offset = 1,
+  limit = 400,
+): CodingFileRead {
+  const clean = normalizeCodingPath(relPath);
+  if (!clean) throw new Error("パスが不正です。");
+  const abs = resolveCodingPath(rootDir, clean);
+  if (!existsSync(abs)) throw new Error("ファイルが見つかりません。");
+  const st = statSync(abs);
+  if (st.isDirectory())
+    throw new Error("ディレクトリです。code_list を使ってください。");
+  if (st.size > CODING_READ_MAX_BYTES) {
+    throw new Error("ファイルが大きすぎます (上限 200KB)。");
+  }
+  const raw = readFileSync(abs, "utf8");
+  if (isProbablyBinary(clean, raw)) {
+    throw new Error("バイナリファイルは読めません。");
+  }
+  const lines = raw.split("\n");
+  const start = Math.max(1, Math.floor(offset));
+  const take = Math.max(1, Math.min(2_000, Math.floor(limit)));
+  const slice = lines.slice(start - 1, start - 1 + take);
+  const numbered = slice.map(
+    (line, index) => `${String(start + index).padStart(5, " ")}|${line}`,
+  );
+  return {
+    path: clean,
+    content: numbered.join("\n"),
+    startLine: start,
+    endLine: start + slice.length - 1,
+    truncated: start - 1 + take < lines.length,
+  };
+}
+
+export interface CodingSearchHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export function searchCodingFiles(
+  rootDir: string,
+  query: string,
+  opts?: { path?: string; glob?: string; maxResults?: number },
+): CodingSearchHit[] {
+  const needle = query.trim();
+  if (!needle) throw new Error("検索クエリが空です。");
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(needle, "m");
+  } catch {
+    pattern = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "m");
+  }
+  const startRel = opts?.path ? normalizeCodingPath(opts.path) : "";
+  if (opts?.path && startRel == null) throw new Error("パスが不正です。");
+  const startAbs = startRel
+    ? resolveCodingPath(rootDir, startRel)
+    : path.resolve(rootDir);
+  const glob = opts?.glob?.replace(/^\*\*\//, "").replace(/^\*\./, ".") ?? "";
+  const maxResults = Math.min(
+    CODING_SEARCH_MAX_MATCHES,
+    Math.max(1, opts?.maxResults ?? CODING_SEARCH_MAX_MATCHES),
+  );
+  const hits: CodingSearchHit[] = [];
+  const walk = (dir: string, rel: string): void => {
+    if (hits.length >= maxResults) return;
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (hits.length >= maxResults) return;
+      if (isSkippedDir(name)) continue;
+      const abs = path.join(dir, name);
+      const childRel = rel ? `${rel}/${name}` : name;
+      let st;
+      try {
+        st = statSync(abs);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(abs, childRel);
+        continue;
+      }
+      if (glob && !childRel.endsWith(glob) && !name.endsWith(glob)) continue;
+      if (st.size > CODING_READ_MAX_BYTES) continue;
+      if (isProbablyBinary(childRel)) continue;
+      let text: string;
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      if (text.includes("\0")) continue;
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (hits.length >= maxResults) return;
+        if (pattern.test(lines[i] ?? "")) {
+          hits.push({
+            path: childRel,
+            line: i + 1,
+            text: (lines[i] ?? "").slice(0, 240),
+          });
+        }
+        pattern.lastIndex = 0;
+      }
+    }
+  };
+  if (!existsSync(startAbs)) throw new Error("パスが見つかりません。");
+  const startSt = statSync(startAbs);
+  if (startSt.isDirectory()) walk(startAbs, startRel ?? "");
+  else if (startRel) {
+    walk(path.dirname(startAbs), path.posix.dirname(startRel));
+    return hits.filter((hit) => hit.path === startRel);
+  }
+  return hits;
+}
+
+export function applyCodingEdit(
+  rootDir: string,
+  relPath: string,
+  oldString: string,
+  newString: string,
+  replaceAll = false,
+): CodingTouch {
+  const clean = normalizeCodingPath(relPath);
+  if (!clean) throw new Error("パスが不正です。");
+  if (!oldString) throw new Error("old_string が空です。");
+  if (oldString === newString) {
+    throw new Error("old_string と new_string が同じです。");
+  }
+  const abs = resolveCodingPath(rootDir, clean);
+  if (!existsSync(abs)) throw new Error("ファイルが見つかりません。");
+  const previous = readFileSync(abs, "utf8");
+  const occurrences = previous.split(oldString).length - 1;
+  if (occurrences === 0) {
+    throw new Error("old_string がファイル内に見つかりません。");
+  }
+  if (occurrences > 1 && !replaceAll) {
+    throw new Error(
+      `old_string が ${occurrences} 箇所あります。もっと長い文脈を含めるか replace_all を使ってください。`,
+    );
+  }
+  const next = replaceAll
+    ? previous.split(oldString).join(newString)
+    : previous.replace(oldString, newString);
+  const written = applyCodingWrite(rootDir, clean, next);
+  const diff = diffLines(written.previous, next);
+  return {
+    path: clean,
+    kind: written.kind,
+    added: diff.added,
+    removed: diff.removed,
+    patch: diff.patch,
+  };
 }
 
 export interface LineDiff {
