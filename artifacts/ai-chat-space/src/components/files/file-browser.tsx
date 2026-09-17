@@ -23,6 +23,8 @@ interface FileItem {
   isDir: boolean;
   size: number;
   mtime: string | null;
+  /** True when this top-level folder backs a chat project. */
+  projectLinked?: boolean;
 }
 
 interface ListResponse {
@@ -97,7 +99,9 @@ export function FileBrowser({ className, initialPath = "" }: FileBrowserProps) {
       if (!res.ok) throw new Error(body.error || "読み込み失敗");
       setEditing({ path: item.path, content: body.content ?? "" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ファイルを開けませんでした。");
+      setError(
+        err instanceof Error ? err.message : "ファイルを開けませんでした。",
+      );
     }
   };
 
@@ -143,7 +147,10 @@ export function FileBrowser({ className, initialPath = "" }: FileBrowserProps) {
   };
 
   const remove = async (item: FileItem) => {
-    if (!window.confirm(`「${item.name}」を削除しますか？`)) return;
+    const message = item.projectLinked
+      ? `「${item.name}」はプロジェクトのフォルダです。削除するとプロジェクトとそのメモリも削除されます。よろしいですか？`
+      : `「${item.name}」を削除しますか？`;
+    if (!window.confirm(message)) return;
     try {
       const res = await fetch(
         `${BASE}/api/files?path=${encodeURIComponent(item.path)}`,
@@ -306,9 +313,7 @@ export function FileBrowser({ className, initialPath = "" }: FileBrowserProps) {
           <textarea
             value={editing.content}
             onChange={(e) =>
-              setEditing((s) =>
-                s ? { ...s, content: e.target.value } : s,
-              )
+              setEditing((s) => (s ? { ...s, content: e.target.value } : s))
             }
             spellCheck={false}
             className="min-h-0 flex-1 resize-none bg-[var(--m3-surface)] px-3 py-2 font-mono text-xs outline-none"

@@ -11,7 +11,7 @@ import {
   upsertProjectMemorySection,
   type ProjectMemorySection,
 } from "../lib/project-memory-store";
-import { createProjectFolder } from "./files";
+import { createProjectFolder, removeProjectFolder } from "./files";
 
 const router: Router = Router();
 
@@ -48,7 +48,10 @@ router.get("/projects", requireAuth, async (req: Request, res: Response) => {
     res.json({ projects: await listProjects(getUserId(req)) });
   } catch (err) {
     res.status(500).json({
-      error: err instanceof Error ? err.message : "プロジェクト一覧を取得できませんでした。",
+      error:
+        err instanceof Error
+          ? err.message
+          : "プロジェクト一覧を取得できませんでした。",
     });
   }
 });
@@ -77,75 +80,106 @@ router.post("/projects", requireAuth, async (req: Request, res: Response) => {
     res.status(201).json({ project: full ?? project, folder });
   } catch (err) {
     res.status(400).json({
-      error: err instanceof Error ? err.message : "プロジェクトを作成できませんでした。",
+      error:
+        err instanceof Error
+          ? err.message
+          : "プロジェクトを作成できませんでした。",
     });
   }
 });
 
-router.get("/projects/:id", requireAuth, async (req: Request, res: Response) => {
-  const id = parseProjectId(req.params.id);
-  if (id == null) {
-    res.status(400).json({ error: "不正なプロジェクトIDです。" });
-    return;
-  }
-  try {
-    const project = await getProject(getUserId(req), id);
-    if (!project) {
-      res.status(404).json({ error: "プロジェクトが見つかりません。" });
+router.get(
+  "/projects/:id",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const id = parseProjectId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: "不正なプロジェクトIDです。" });
       return;
     }
-    res.json({ project });
-  } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : "プロジェクトを取得できませんでした。",
-    });
-  }
-});
+    try {
+      const project = await getProject(getUserId(req), id);
+      if (!project) {
+        res.status(404).json({ error: "プロジェクトが見つかりません。" });
+        return;
+      }
+      res.json({ project });
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err instanceof Error
+            ? err.message
+            : "プロジェクトを取得できませんでした。",
+      });
+    }
+  },
+);
 
-router.patch("/projects/:id", requireAuth, async (req: Request, res: Response) => {
-  const id = parseProjectId(req.params.id);
-  if (id == null) {
-    res.status(400).json({ error: "不正なプロジェクトIDです。" });
-    return;
-  }
-  const parsed = updateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "更新内容が不正です。" });
-    return;
-  }
-  try {
-    const project = await updateProject(getUserId(req), id, parsed.data);
-    if (!project) {
-      res.status(404).json({ error: "プロジェクトが見つかりません。" });
+router.patch(
+  "/projects/:id",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const id = parseProjectId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: "不正なプロジェクトIDです。" });
       return;
     }
-    res.json({ project });
-  } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : "更新できませんでした。",
-    });
-  }
-});
+    const parsed = updateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "更新内容が不正です。" });
+      return;
+    }
+    try {
+      const project = await updateProject(getUserId(req), id, parsed.data);
+      if (!project) {
+        res.status(404).json({ error: "プロジェクトが見つかりません。" });
+        return;
+      }
+      res.json({ project });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "更新できませんでした。",
+      });
+    }
+  },
+);
 
-router.delete("/projects/:id", requireAuth, async (req: Request, res: Response) => {
-  const id = parseProjectId(req.params.id);
-  if (id == null) {
-    res.status(400).json({ error: "不正なプロジェクトIDです。" });
-    return;
-  }
-  try {
-    const ok = await deleteProject(getUserId(req), id);
-    if (!ok) {
-      res.status(404).json({ error: "プロジェクトが見つかりません。" });
+router.delete(
+  "/projects/:id",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const id = parseProjectId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: "不正なプロジェクトIDです。" });
       return;
     }
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : "削除できませんでした。",
-    });
-  }
-});
+    try {
+      // Read the folder name before the row disappears, then remove both sides:
+      // the registry entry and its workspace folder. Folder removal is
+      // best-effort; a locked folder must not resurrect the deleted project.
+      const project = await getProject(getUserId(req), id);
+      const ok = await deleteProject(getUserId(req), id);
+      if (!ok) {
+        res.status(404).json({ error: "プロジェクトが見つかりません。" });
+        return;
+      }
+      let folderDeleted = false;
+      if (project) {
+        try {
+          removeProjectFolder(project.name);
+          folderDeleted = true;
+        } catch {
+          /* keep the deletion; the folder can be cleaned up manually */
+        }
+      }
+      res.json({ deleted: true, folderDeleted });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "削除できませんでした。",
+      });
+    }
+  },
+);
 
 router.get(
   "/projects/:id/memory",
@@ -171,7 +205,8 @@ router.get(
       });
     } catch (err) {
       res.status(500).json({
-        error: err instanceof Error ? err.message : "メモリを取得できませんでした。",
+        error:
+          err instanceof Error ? err.message : "メモリを取得できませんでした。",
       });
     }
   },

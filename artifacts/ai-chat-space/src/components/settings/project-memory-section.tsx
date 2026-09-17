@@ -137,7 +137,9 @@ export function ProjectMemorySection() {
       );
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error || "保存に失敗しました。");
-      setMessage(`${SECTIONS.find((s) => s.id === section)?.label} を保存しました。`);
+      setMessage(
+        `${SECTIONS.find((s) => s.id === section)?.label} を保存しました。`,
+      );
       await loadMemory(selectedId);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "保存に失敗しました。");
@@ -148,7 +150,12 @@ export function ProjectMemorySection() {
 
   const handleDelete = async () => {
     if (selectedId == null) return;
-    if (!window.confirm("このプロジェクトとメモリを削除しますか？")) return;
+    if (
+      !window.confirm(
+        "このプロジェクトを削除しますか？メモリとワークスペースフォルダも削除されます。",
+      )
+    )
+      return;
     setBusy(true);
     try {
       const res = await fetch(`${BASE}/api/projects/${selectedId}`, {
@@ -159,7 +166,7 @@ export function ProjectMemorySection() {
       setSelectedId(null);
       const list = await refreshProjects();
       setSelectedId(list[0]?.id ?? null);
-      setMessage("プロジェクトを削除しました。");
+      setMessage("プロジェクトとワークスペースフォルダを削除しました。");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "削除に失敗しました。");
     } finally {

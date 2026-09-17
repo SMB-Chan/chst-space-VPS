@@ -11,14 +11,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { requireAuth } from "./middleware";
+import { requireAuth, getUserId } from "./middleware";
+import { projectNameToFolder } from "../lib/workspace-folders";
 
 const router: Router = Router();
 
 export function workspaceRoot(): string {
-  return (
-    process.env.CODE_WORKSPACE_ROOT?.trim() || "/data/code-workspace"
-  );
+  return process.env.CODE_WORKSPACE_ROOT?.trim() || "/data/code-workspace";
 }
 
 /** Resolve a user-supplied relative path inside the workspace (no escape). */
@@ -40,7 +39,7 @@ function ensureRoot(): string {
   return root;
 }
 
-router.get("/files", requireAuth, (req: Request, res: Response) => {
+router.get("/files", requireAuth, async (req: Request, res: Response) => {
   try {
     const rel = typeof req.query.path === "string" ? req.query.path : "";
     const abs = resolveSafe(rel);
@@ -54,6 +53,11 @@ router.get("/files", requireAuth, (req: Request, res: Response) => {
       res.status(400).json({ error: "ディレクトリではありません。" });
       return;
     }
+    // Only the workspace root can hold project folders; deeper paths never match.
+    const linked =
+      rel === ""
+        ? await linkedProjectFolders(getUserId(req))
+        : new Map<string, number>();
     const items = readdirSync(abs, { withFileTypes: true })
       .map((entry) => {
         const childAbs = path.join(abs, entry.name);
@@ -66,12 +70,16 @@ router.get("/files", requireAuth, (req: Request, res: Response) => {
         } catch {
           /* ignore */
         }
+        const isDir = entry.isDirectory();
         return {
           name: entry.name,
-          path: path.posix.join(rel.replace(/\/+$/, ""), entry.name).replace(/^\//, ""),
-          isDir: entry.isDirectory(),
+          path: path.posix
+            .join(rel.replace(/\/+$/, ""), entry.name)
+            .replace(/^\//, ""),
+          isDir,
           size,
           mtime,
+          projectLinked: isDir && linked.has(entry.name) ? true : undefined,
         };
       })
       .sort((a, b) => {
@@ -86,7 +94,8 @@ router.get("/files", requireAuth, (req: Request, res: Response) => {
     });
   } catch (err) {
     res.status(400).json({
-      error: err instanceof Error ? err.message : "一覧を取得できませんでした。",
+      error:
+        err instanceof Error ? err.message : "一覧を取得できませんでした。",
     });
   }
 });
@@ -124,7 +133,8 @@ router.get("/files/download", requireAuth, (req: Request, res: Response) => {
     res.download(abs, path.basename(abs));
   } catch (err) {
     res.status(400).json({
-      error: err instanceof Error ? err.message : "ダウンロードに失敗しました。",
+      error:
+        err instanceof Error ? err.message : "ダウンロードに失敗しました。",
     });
   }
 });
@@ -150,7 +160,8 @@ router.post("/files/mkdir", requireAuth, (req: Request, res: Response) => {
 router.put("/files/content", requireAuth, (req: Request, res: Response) => {
   try {
     const rel = typeof req.body?.path === "string" ? req.body.path : "";
-    const content = typeof req.body?.content === "string" ? req.body.content : null;
+    const content =
+      typeof req.body?.content === "string" ? req.body.content : null;
     if (!rel || content == null) {
       res.status(400).json({ error: "path / content が必要です。" });
       return;
@@ -191,7 +202,7 @@ router.post("/files/rename", requireAuth, (req: Request, res: Response) => {
   }
 });
 
-router.delete("/files", requireAuth, (req: Request, res: Response) => {
+router.delete("/files", requireAuth, async (req: Request, res: Response) => {
   try {
     const rel = typeof req.query.path === "string" ? req.query.path : "";
     if (!rel) {
@@ -208,8 +219,20 @@ router.delete("/files", requireAuth, (req: Request, res: Response) => {
       res.status(404).json({ error: "パスが見つかりません。" });
       return;
     }
+    // A top-level folder may back a project. Deleting it deletes the project
+    // (and its memory) too, so the registry never lists an orphaned project.
+    const segments = rel.replace(/^\/+|\/+$/g, "").split("/");
+    let projectDeleted = false;
+    if (segments.length === 1) {
+      const linked = await linkedProjectFolders(getUserId(req));
+      const projectId = linked.get(segments[0]);
+      if (projectId != null) {
+        const { deleteProject } = await import("../lib/project-memory-store");
+        projectDeleted = await deleteProject(getUserId(req), projectId);
+      }
+    }
     rmSync(abs, { recursive: true, force: true });
-    res.json({ path: rel, deleted: true });
+    res.json({ path: rel, deleted: true, projectDeleted });
   } catch (err) {
     res.status(400).json({
       error: err instanceof Error ? err.message : "削除に失敗しました。",
@@ -219,11 +242,7 @@ router.delete("/files", requireAuth, (req: Request, res: Response) => {
 
 /** Create a project folder under the workspace (used by project create). */
 export function createProjectFolder(name: string): string {
-  const safe = name
-    .trim()
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .slice(0, 80);
-  const folder = safe || `project-${Date.now()}`;
+  const folder = projectNameToFolder(name);
   const abs = resolveSafe(folder);
   ensureRoot();
   if (!existsSync(abs)) {
@@ -238,6 +257,31 @@ export function createProjectFolder(name: string): string {
     );
   }
   return folder;
+}
+
+/**
+ * Map of workspace folder name -> project id for the user's own projects.
+ * Folder deletion uses this to keep the project registry in sync, so removing
+ * a project folder in the file browser does not leave an orphaned project.
+ */
+async function linkedProjectFolders(
+  userId: string,
+): Promise<Map<string, number>> {
+  const { listProjects } = await import("../lib/project-memory-store");
+  const map = new Map<string, number>();
+  for (const project of await listProjects(userId)) {
+    map.set(projectNameToFolder(project.name), project.id);
+  }
+  return map;
+}
+
+/** Remove the workspace folder that belongs to a project name. Best effort. */
+export function removeProjectFolder(name: string): void {
+  const folder = projectNameToFolder(name);
+  const abs = resolveSafe(folder);
+  const root = path.resolve(workspaceRoot());
+  if (abs === root || !existsSync(abs)) return;
+  rmSync(abs, { recursive: true, force: true });
 }
 
 export default router;
