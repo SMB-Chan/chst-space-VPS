@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListOpenaiConversationsQueryKey } from "@workspace/api-client-react";
+import { ProviderCredentialsSection } from "@/components/settings/provider-credentials-section";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -189,9 +190,11 @@ export function SettingsPage() {
             設定
           </h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--m3-on-surface-variant)]">
-            モデル、監査、インストール、保存データを一か所で管理します。
+            モデル、LLMプロバイダー、監査、インストール、保存データを一か所で管理します。
           </p>
         </div>
+
+        <ProviderCredentialsSection />
 
         <SettingsSection
           title="既定のモデル"

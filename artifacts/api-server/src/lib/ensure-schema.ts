@@ -369,6 +369,24 @@ export async function ensureGoogleAuthSchema(
   await query(ENSURE_GOOGLE_AUTH_SCHEMA_SQL);
 }
 
+export const ENSURE_PROVIDER_CREDENTIALS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS provider_credentials (
+  user_id text NOT NULL,
+  provider text NOT NULL,
+  api_key_encrypted text NOT NULL,
+  base_url text,
+  key_hint text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, provider)
+);
+`.trim();
+
+export async function ensureProviderCredentialsSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_PROVIDER_CREDENTIALS_SCHEMA_SQL);
+}
+
 export async function ensureUserUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -389,4 +407,5 @@ export async function ensureChatSchema(
   await ensureUserUsageSchema(execute);
   await ensureUserSettingsSchema(execute);
   await ensureGoogleAuthSchema(execute);
+  await ensureProviderCredentialsSchema(execute);
 }

@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getAuth } from "@clerk/express";
 import {
   denyNotAllowedUser,
@@ -6,6 +7,7 @@ import {
   isUserAllowed,
   type UserRole,
 } from "./allowedUsers";
+import { warmProviderOverrides } from "../lib/provider-credentials";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -15,6 +17,16 @@ declare global {
       userRole?: UserRole;
     }
   }
+}
+
+/** Request-scoped user context for libraries that cannot take `req` (e.g. LLM clients). */
+export const requestUserContext = new AsyncLocalStorage<{
+  userId: string;
+  userRole: UserRole;
+}>();
+
+export function getRequestUserId(): string | undefined {
+  return requestUserContext.getStore()?.userId;
 }
 
 // "local" mode serves a single-operator deployment (VPS/Tailnet) where the
@@ -32,7 +44,10 @@ export function requireAuth(
     const userId = process.env.LOCAL_USER_ID || "local-user";
     req.userId = userId;
     req.userRole = "admin";
-    next();
+    void warmProviderOverrides(userId).catch(() => {
+      /* non-fatal: falls back to env keys until warm succeeds */
+    });
+    requestUserContext.run({ userId, userRole: "admin" }, () => next());
     return;
   }
   const auth = getAuth(req);
@@ -48,7 +63,11 @@ export function requireAuth(
   }
   req.userId = userId;
   req.userRole = getUserRole(userId);
-  next();
+  const userRole = req.userRole;
+  void warmProviderOverrides(userId).catch(() => {
+    /* non-fatal */
+  });
+  requestUserContext.run({ userId, userRole }, () => next());
 }
 
 /** Moderator boundary: admin-only endpoints mount this after requireAuth. */
@@ -66,3 +85,4 @@ export function requireAdmin(
     code: "ADMIN_ONLY",
   });
 }
+

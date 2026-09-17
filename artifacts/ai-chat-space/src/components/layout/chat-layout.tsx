@@ -43,6 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileShell } from "@/components/mobile/mobile-shell";
 import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
 
@@ -186,6 +187,41 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         : activeConversation
           ? "AI workspace"
           : "新しいアイデアを始める";
+
+  // <768px: ChatGPT-style shell (menu + Chat/Work). Desktop keeps the existing layout.
+  if (isMobile === true) {
+    return (
+      <AlertDialog
+        open={pendingDeleteId != null}
+        onOpenChange={(dialogOpen) => {
+          if (!dialogOpen) setPendingDeleteId(null);
+        }}
+      >
+        <MobileShell>
+          <div className="m3-surface relative flex min-h-full w-full flex-col overflow-hidden bg-black">
+            <div className="min-h-0 flex-1">{children}</div>
+          </div>
+        </MobileShell>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>この会話を削除しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              削除するとメッセージは元に戻せません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-[var(--m3-error)] text-[var(--m3-on-error)] hover:brightness-[0.96]"
+            >
+              削除する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   return (
     <div className="m3-surface relative flex h-[100dvh] w-full overflow-hidden">

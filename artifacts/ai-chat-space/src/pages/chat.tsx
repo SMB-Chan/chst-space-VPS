@@ -1343,7 +1343,7 @@ export function ChatPage() {
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden" data-chat-feed="">
         {!isPrivate &&
         (invalidConversationId ||
           (conversationLoadError && !optimisticUserMessage && !isStreaming)) ? (
@@ -1466,7 +1466,10 @@ export function ChatPage() {
         </div>
       )}
 
-      <div className="bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-8 sm:px-5 md:px-6 md:pb-5 md:pt-10">
+      <div
+        className="bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-8 sm:px-5 md:px-6 md:pb-5 md:pt-10"
+        data-chat-composer-region=""
+      >
         <div className="mx-auto max-w-4xl">
           <MessageInput
             onSend={handleSend}

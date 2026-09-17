@@ -27,6 +27,13 @@ import {
   type ReasoningLevel,
 } from "../../lib/ai-clients";
 import {
+  DEFAULT_PROVIDER_BASE_URLS,
+  deleteProviderCredential,
+  isProviderId,
+  listProviderCredentials,
+  upsertProviderCredential,
+} from "../../lib/provider-credentials";
+import {
   getAvailableChatModels,
   getCapabilityRegistryWithAvailability,
 } from "../../lib/specialist-capabilities";
@@ -660,6 +667,113 @@ router.put("/openai/settings", requireAuth, async (req, res) => {
   } catch (err) {
     logSafeHttpError(req, 500, err, "HTTP_DATABASE");
     res.status(500).json({ error: "設定を保存できませんでした。" });
+  }
+});
+
+/** LLM provider API keys (BYOK) managed from the settings screen. */
+router.get("/openai/providers", requireAuth, async (req, res) => {
+  try {
+    const providers = await listProviderCredentials(getUserId(req));
+    res.json({ providers });
+  } catch (err) {
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
+    res.status(500).json({ error: "プロバイダー設定を取得できませんでした。" });
+  }
+});
+
+router.put("/openai/providers/:provider", requireAuth, async (req, res) => {
+  const provider = req.params.provider;
+  if (!isProviderId(provider)) {
+    res.status(400).json({ error: "未対応のプロバイダーです。" });
+    return;
+  }
+  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey : "";
+  const baseUrl =
+    typeof req.body?.baseUrl === "string" ? req.body.baseUrl : null;
+  try {
+    const saved = await upsertProviderCredential(
+      getUserId(req),
+      provider,
+      apiKey,
+      baseUrl,
+    );
+    res.json({ provider: saved });
+  } catch (err) {
+    const message =
+      err instanceof Error && /空です/.test(err.message)
+        ? err.message
+        : "APIキーを保存できませんでした。";
+    if (message.includes("空です")) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
+    res.status(500).json({ error: message });
+  }
+});
+
+router.delete("/openai/providers/:provider", requireAuth, async (req, res) => {
+  const provider = req.params.provider;
+  if (!isProviderId(provider)) {
+    res.status(400).json({ error: "未対応のプロバイダーです。" });
+    return;
+  }
+  try {
+    await deleteProviderCredential(getUserId(req), provider);
+    res.status(204).send();
+  } catch (err) {
+    logSafeHttpError(req, 500, err, "HTTP_DATABASE");
+    res.status(500).json({ error: "APIキーを削除できませんでした。" });
+  }
+});
+
+/** Validates a key against the provider without persisting it first. */
+router.post("/openai/providers/:provider/test", requireAuth, async (req, res) => {
+  const provider = req.params.provider;
+  if (!isProviderId(provider)) {
+    res.status(400).json({ error: "未対応のプロバイダーです。" });
+    return;
+  }
+  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+  const baseUrl =
+    typeof req.body?.baseUrl === "string" && req.body.baseUrl.trim()
+      ? req.body.baseUrl.trim()
+      : DEFAULT_PROVIDER_BASE_URLS[provider];
+  if (!apiKey) {
+    res.status(400).json({ error: "APIキーを入力してください。" });
+    return;
+  }
+
+  const url =
+    provider === "openai"
+      ? (baseUrl || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || "https://api.openai.com/v1") +
+        "/models"
+      : (baseUrl || "") + "/models";
+  if (!url.startsWith("http")) {
+    res.status(400).json({ error: "接続先URLが不正です。" });
+    return;
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (response.ok) {
+      res.json({ ok: true, message: "接続に成功しました。" });
+      return;
+    }
+    const detail = await response.text().catch(() => "");
+    res.status(response.status === 401 || response.status === 403 ? 400 : 502).json({
+      ok: false,
+      error:
+        response.status === 401 || response.status === 403
+          ? "APIキーが拒否されました。キーを確認してください。"
+          : `接続に失敗しました (HTTP ${response.status}).${detail ? ` ${detail.slice(0, 160)}` : ""}`,
+    });
+  } catch (err) {
+    logSafeHttpError(req, 502, err, "HTTP_PROVIDER");
+    res.status(502).json({ ok: false, error: "プロバイダーへの接続に失敗しました。" });
   }
 });
 

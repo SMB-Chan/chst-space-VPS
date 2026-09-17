@@ -1,0 +1,408 @@
+/* ChatGPT-like mobile shell tokens — applied only under 768px via .mobile-shell root */
+
+.mobile-shell {
+  --mx-bg: #000000;
+  --mx-panel: #1f1f1f;
+  --mx-panel-high: #2a2a2a;
+  --mx-panel-selected: #2d2d2d;
+  --mx-ink: #f5f5f5;
+  --mx-ink-muted: #bdbdbd;
+  --mx-ink-dim: #8e8e93;
+  --mx-accent: #ffffff;
+  --mx-radius-card: 24px;
+  --mx-radius-input: 28px;
+  --mx-radius-button: 20px;
+  --mx-radius-sheet: 32px;
+  color: var(--mx-ink);
+  background: var(--mx-bg);
+  font-family: var(--app-font-sans, system-ui, -apple-system, sans-serif);
+}
+
+.mobile-shell * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-shell ::selection {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.mobile-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 16px 8px;
+  min-height: 64px;
+  position: relative;
+}
+
+.mobile-menu-btn {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  background: var(--mx-panel);
+  color: var(--mx-ink);
+  border: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.mobile-menu-btn:active {
+  transform: translateY(-50%) scale(0.96);
+}
+
+.mobile-segment {
+  display: inline-flex;
+  align-items: center;
+  background: var(--mx-panel);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+}
+
+.mobile-segment button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink-muted);
+  font-size: 15px;
+  font-weight: 500;
+  min-width: 96px;
+  height: 40px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.mobile-segment button[aria-selected="true"] {
+  background: var(--mx-panel-selected);
+  color: var(--mx-ink);
+}
+
+.mobile-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-work-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 32px 16px 120px;
+}
+
+.mobile-work-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 12px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink);
+  font-size: 17px;
+  font-weight: 400;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  border-radius: 16px;
+}
+
+.mobile-work-row:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mobile-work-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--mx-ink);
+}
+
+.mobile-work-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Composer dock — floats above the list, thick rounded dark bar */
+.mobile-composer-wrap {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, var(--mx-bg) 70%, transparent);
+  pointer-events: none;
+}
+
+.mobile-composer-wrap > * {
+  pointer-events: auto;
+}
+
+/* Force MessageInput container into dock shape on mobile shell */
+.mobile-shell [data-mobile-composer-root] {
+  background: var(--mx-panel) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: var(--mx-radius-input) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45) !important;
+  overflow: hidden;
+  position: sticky;
+  bottom: 12px;
+  z-index: 25;
+}
+
+/* Chat page composer footer floats like ChatGPT */
+.mobile-shell main > div:last-child,
+.mobile-shell [data-chat-composer-region] {
+  background: transparent !important;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  padding-top: 16px !important;
+}
+
+.mobile-shell [data-mobile-composer-root] textarea {
+  min-height: 48px !important;
+  max-height: 140px !important;
+  padding: 16px 18px 4px !important;
+  color: var(--mx-ink) !important;
+}
+
+.mobile-shell [data-mobile-composer-root] textarea::placeholder {
+  color: var(--mx-ink-dim) !important;
+}
+
+.mobile-shell .mobile-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 10px;
+}
+
+.mobile-plus-btn,
+.mobile-mic-btn,
+.mobile-send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-plus-btn {
+  background: transparent;
+  color: var(--mx-ink);
+}
+
+.mobile-mic-btn {
+  background: transparent;
+  color: var(--mx-ink);
+}
+
+.mobile-send-btn {
+  background: var(--mx-panel-high);
+  color: var(--mx-ink-muted);
+}
+
+.mobile-send-btn[data-ready="true"] {
+  background: var(--mx-accent);
+  color: #111;
+}
+
+.mobile-model-chip {
+  margin-left: auto;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 46%;
+}
+
+.mobile-model-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings bottom sheet */
+.mobile-sheet-content {
+  background: var(--mx-panel) !important;
+  border: 0 !important;
+  border-radius: var(--mx-radius-sheet) var(--mx-radius-sheet) 0 0 !important;
+  color: var(--mx-ink);
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  max-height: min(88dvh, 720px);
+}
+
+.mobile-sheet-handle {
+  width: 36px !important;
+  height: 4px !important;
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-radius: 999px !important;
+  margin: 10px auto 4px;
+}
+
+.mobile-sheet-title {
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  padding: 8px 0 16px;
+  color: var(--mx-ink);
+}
+
+.mobile-sheet-section {
+  margin: 0 16px 16px;
+  background: var(--mx-panel-high);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.mobile-option-row {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: var(--mx-ink);
+  font-size: 17px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-option-row:last-child {
+  border-bottom: 0;
+}
+
+.mobile-option-row[aria-selected="true"] {
+  background: var(--mx-panel-selected);
+}
+
+.mobile-option-row .sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--mx-ink-muted);
+  font-weight: 400;
+}
+
+.mobile-option-row .check {
+  color: var(--mx-ink);
+  flex-shrink: 0;
+}
+
+.mobile-select-row {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink);
+  font-size: 17px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mobile-select-row .value {
+  color: var(--mx-ink-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-done-btn {
+  margin: 8px 16px 8px;
+  min-height: 52px;
+  width: calc(100% - 32px);
+  border-radius: 999px;
+  border: 0;
+  background: #ffffff;
+  color: #111111;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mobile-drawer-panel {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(86vw, 320px);
+  z-index: 40;
+  background: var(--mx-panel);
+  color: var(--mx-ink);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-105%);
+  transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+  padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+}
+
+.mobile-drawer-panel[data-open="true"] {
+  transform: translateX(0);
+}
+
+.mobile-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.mobile-drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--mx-ink);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.mobile-drawer-item:active,
+.mobile-drawer-item[data-active="true"] {
+  background: var(--mx-panel-high);
+}
+
+/* Hide the message feed under the Work list; keep the composer dock visible */
+.mobile-shell[data-tab="work"] [data-chat-feed] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.mobile-shell[data-tab="work"] [data-chat-composer-region] {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+}

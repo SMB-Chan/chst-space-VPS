@@ -3,3 +3,6 @@
 searxng/limiter.toml
 searxng/*.log
 searxng/data/
+# OpenCode workspace projects (live git clones on the VPS)
+../code-workspace/
+code-workspace/

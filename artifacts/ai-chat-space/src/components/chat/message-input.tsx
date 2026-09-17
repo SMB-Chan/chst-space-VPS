@@ -1,4 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  openMobileModelSheet,
+} from "@/components/mobile/mobile-shell";
+import { formatModelChipLabel } from "@/components/mobile/model-settings-sheet";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -266,6 +271,7 @@ function Composer({
   onGenerateVideo,
 }: MessageInputProps) {
   const models = useAvailableModels();
+  const isMobile = useIsMobile() === true;
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<StagedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -574,13 +580,30 @@ function Composer({
   const hasComposerStatus =
     hasActiveSkills || activeModes.length > 0 || translationActive;
 
+  const modelChipLabel = formatModelChipLabel(
+    models.find((model) => model.id === selectedModel)?.label ?? selectedModel,
+    reasoningLevel,
+  );
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const onSubmit = () => {
+      void handleSubmit();
+    };
+    window.addEventListener("mobile-submit-composer", onSubmit);
+    return () => window.removeEventListener("mobile-submit-composer", onSubmit);
+  }, [isMobile, handleSubmit]);
+
   return (
     <div
       className={cn(
         "relative flex flex-col rounded-[var(--m3-shape-xl)] border border-transparent transition-[border-color,box-shadow,background-color,transform] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-emphasized)] focus-within:ring-2 focus-within:ring-primary/30",
         toolsOpen && "ring-1 ring-primary/15",
+        isMobile &&
+          "mobile-composer-dock border-[rgba(255,255,255,0.06)] [background:var(--mx-panel)] [border-radius:var(--mx-radius-input)] shadow-[0_12px_40px_rgba(0,0,0,0.45)] focus-within:ring-0",
       )}
       data-testid="composer"
+      data-mobile-composer-root={isMobile ? "" : undefined}
       aria-label={
         translationActive
           ? `翻訳モード: ${translationModeLabel(translationMode)}`
@@ -749,14 +772,102 @@ function Composer({
           placeholder ??
           (fileFormat
             ? `この内容を ${fileFormat.toUpperCase()} で生成...`
-            : "メッセージを入力...")
+            : isMobile
+              ? "ChatGPT と作業する"
+              : "メッセージを入力...")
         }
-        className="max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-3 font-sans text-base leading-relaxed outline-none placeholder:text-muted-foreground/55 scrollbar-none"
+        className={cn(
+          "max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-3 font-sans text-base leading-relaxed outline-none placeholder:text-muted-foreground/55 scrollbar-none",
+          isMobile &&
+            "min-h-[48px] max-h-[140px] px-[18px] pb-0 pt-4 text-[var(--mx-ink)] placeholder:text-[var(--mx-ink-dim)]",
+        )}
         rows={1}
         disabled={controlsDisabled}
         data-testid="composer-textarea"
       />
 
+      {isMobile ? (
+        <div className="mobile-composer-actions">
+          <button
+            type="button"
+            className="mobile-plus-btn"
+            aria-label="ファイルを添付"
+            disabled={controlsDisabled}
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="composer-attach"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+              <path
+                d="M10 3.5v13M3.5 10h13"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            className="mobile-model-chip"
+            onClick={() => {
+              if (showModelSelector) openMobileModelSheet();
+              else setToolsOpen(true);
+            }}
+            data-testid="mobile-model-chip"
+          >
+            <span>{modelChipLabel}</span>
+          </button>
+
+          <div className="text-[var(--mx-ink)]">
+            <QwenAudioRealtime
+              conversationId={conversationId}
+              selectedModel={selectedModel}
+              disabled={controlsDisabled}
+              onTranscript={(transcript) => {
+                void onSend(transcript);
+              }}
+            />
+          </div>
+
+          {isStreaming && onStop ? (
+            <button
+              type="button"
+              className="mobile-send-btn"
+              data-ready="true"
+              onClick={onStop}
+              aria-label="生成を停止"
+              data-testid="composer-stop"
+            >
+              <Square className="h-4 w-4 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="mobile-send-btn"
+              data-ready={canSend}
+              onClick={() => void handleSubmit()}
+              disabled={!canSend}
+              aria-label={submitting ? "送信準備中" : "送信"}
+              aria-busy={submitting}
+              data-testid="composer-send"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 19V5M12 5l-6 6M12 5l6 6"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          )}
+        </div>
+      ) : (
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-2.5 pb-2.5 pt-1.5">
         <Button
           type="button"
@@ -1068,6 +1179,7 @@ function Composer({
           </Button>
         )}
       </div>
+      )}
     </div>
   );
 }

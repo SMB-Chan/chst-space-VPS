@@ -28,6 +28,8 @@ services:
       SEARXNG_BASE_URL: http://searxng:8080/
       SEARXNG_SECRET: ${SEARXNG_SECRET}
       SEARXNG_LIMITER: "false"
+    ports:
+      - "127.0.0.1:8888:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -51,5 +53,35 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # VPS coding environment (OpenCode web). Replaces the standalone
+  # /opt/opencode-sandbox stack. Workspace lives under this deploy tree.
+  code:
+    image: chat-space:code
+    container_name: chat-space-code
+    restart: unless-stopped
+    init: true
+    build:
+      context: ./code
+    command: ["opencode", "web", "--hostname", "0.0.0.0", "--port", "4096"]
+    environment:
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+    ports:
+      - "127.0.0.1:4096:4096"
+    volumes:
+      - ../code-workspace:/workspace
+      - code-data:/home/node/.local/share/opencode
+      - code-github:/home/node/.config/gh
+      - code-npm:/home/node/.npm
+    mem_limit: 3g
+    cpus: 3.0
+    pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   chatpg:
+  code-data:
+  code-github:
+  code-npm:
+

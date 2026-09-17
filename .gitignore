@@ -56,6 +56,9 @@ Thumbs.db
 # LLM memory store (runtime SQLite database)
 data/llm-memory/
 
+# OpenCode coding workspace (live project clones on the VPS)
+code-workspace/
+
 # generated test bundles
 .ssrf-test-bundle.mjs
 

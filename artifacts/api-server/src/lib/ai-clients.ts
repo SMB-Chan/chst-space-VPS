@@ -12,6 +12,8 @@ import {
 } from "./circuit-breaker";
 import { resolveOpenRouterApiKey } from "./openrouter-config";
 import { isProviderFrozen } from "./provider-policy";
+import { getRequestUserId } from "../middlewares/requireAuth";
+import { resolveUserProviderApiKey } from "./provider-credentials";
 
 // Replit-managed OpenAI proxy
 if (
@@ -539,6 +541,43 @@ export function isUnsupportedGenerationParam(err: unknown): boolean {
   );
 }
 
+function buildUserOverrideClient(
+  provider: ModelProvider,
+  apiKey: string,
+  baseUrl?: string | null,
+): OpenAI | null {
+  const baseURL =
+    baseUrl ||
+    (provider === "openrouter"
+      ? OPENROUTER_BASE_URL
+      : provider === "xiaomi"
+        ? process.env.XIAOMI_BASE_URL?.trim() || XIAOMI_BASE_URL
+        : provider === "dashscope"
+          ? resolveAlibabaDashScopeBaseUrl(process.env)
+          : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+
+  if (!baseURL) return null;
+
+  return new OpenAI({
+    apiKey,
+    baseURL,
+    fetch:
+      provider === "dashscope"
+        ? createAlibabaTokenPlanQuotaGuardedFetch(llmFetch)
+        : llmFetch,
+    ...(provider === "openrouter"
+      ? {
+          defaultHeaders: {
+            "HTTP-Referer":
+              process.env.APP_PUBLIC_URL?.trim() ||
+              "https://chat-smb.replit.app",
+            "X-Title": "Chat Space",
+          },
+        }
+      : {}),
+  });
+}
+
 export function getClientForModel(
   modelId: string,
   explicitProvider?: ModelProvider,
@@ -553,10 +592,24 @@ export function getClientForModel(
       `${provider} のモデルは一時凍結中です。別のモデルを選択してください。`,
     );
   }
+
+  const userId = getRequestUserId();
+  const override = resolveUserProviderApiKey(userId, provider);
+  if (override?.apiKey) {
+    const client = buildUserOverrideClient(
+      provider,
+      override.apiKey,
+      override.baseUrl,
+    );
+    if (client) {
+      return { client, provider };
+    }
+  }
+
   if (provider === "dashscope") {
     if (!dashscopeClient) {
       throw new Error(
-        "DashScope APIキーが設定されていません。DASHSCOPE_API_KEY を確認してください。",
+        "DashScope APIキーが設定されていません。設定画面からAPIキーを追加するか、DASHSCOPE_API_KEY を確認してください。",
       );
     }
     return { client: dashscopeClient, provider: "dashscope" };
@@ -564,7 +617,7 @@ export function getClientForModel(
   if (provider === "openrouter") {
     if (!openrouterClient) {
       throw new Error(
-        "OpenRouter APIキーが設定されていません。OPEN_ROUTER または OPENROUTER_API_KEY を確認してください。",
+        "OpenRouter APIキーが設定されていません。設定画面からAPIキーを追加するか、OPEN_ROUTER / OPENROUTER_API_KEY を確認してください。",
       );
     }
     return { client: openrouterClient, provider: "openrouter" };
@@ -572,12 +625,16 @@ export function getClientForModel(
   if (provider === "xiaomi") {
     if (!xiaomiClient) {
       throw new Error(
-        "Xiaomi APIキーが設定されていません。Xiaomi_Mimo_KEY または XIAOMI_API_KEY を確認してください。",
+        "Xiaomi APIキーが設定されていません。設定画面からAPIキーを追加するか、XIAOMI_API_KEY を確認してください。",
       );
     }
     return { client: xiaomiClient, provider: "xiaomi" };
   }
-  if (!openaiClient) throw new Error("OpenAI APIが設定されていません。");
+  if (!openaiClient) {
+    throw new Error(
+      "OpenAI APIが設定されていません。設定画面からAPIキーを追加するか、環境変数を確認してください。",
+    );
+  }
   return { client: openaiClient, provider: "openai" };
 }
 
