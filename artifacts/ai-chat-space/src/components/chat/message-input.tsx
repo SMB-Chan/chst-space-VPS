@@ -33,6 +33,7 @@ import { Chip } from "@/design-system/chip";
 import { QwenAudioRealtime } from "./qwen-audio-realtime";
 import {
   ModelSelector,
+  getModelLabel,
   useAvailableModels,
   type ModelInfo,
 } from "./model-selector";
@@ -703,7 +704,7 @@ function Composer({
               key={mode}
               asChild
               selected
-              className="min-h-6 px-2 text-[10px]"
+              className="min-h-6 px-2 text-[11px]"
             >
               <span>{mode}</span>
             </Chip>
@@ -1074,8 +1075,8 @@ function Composer({
                         <Scale className="h-3.5 w-3.5" />
                         {auditEnabled ? "ON" : "OFF"}
                         {auditEnabled && auditModel && (
-                          <span className="ml-1 max-w-32 truncate text-[10px] opacity-70">
-                            {auditModel}
+                          <span className="ml-1 max-w-48 truncate text-[11px] opacity-70">
+                            {getModelLabel(auditModel, models)}
                           </span>
                         )}
                       </Chip>
@@ -1087,7 +1088,7 @@ function Composer({
                       <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                         コーディング
                       </label>
-                      <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Chip
                           selected={codingMode}
                           onClick={() => {
@@ -1105,30 +1106,28 @@ function Composer({
                           <Code2 className="h-3.5 w-3.5" />
                           {codingMode ? "ON" : "OFF"}
                         </Chip>
-                        {codingMode ? (
-                          codingProjects.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5">
-                              {codingProjects.map((project) => (
-                                <Chip
-                                  key={project.id}
-                                  selected={codingProjectId === project.id}
-                                  onClick={() => setCodingProjectId(project.id)}
-                                  disabled={controlsDisabled}
-                                  className="h-8 max-w-full"
-                                  aria-pressed={codingProjectId === project.id}
-                                >
-                                  <span className="truncate">
-                                    {project.name}
-                                  </span>
-                                </Chip>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-[11px] text-muted-foreground">
-                              ファイルタブでプロジェクトを作成してください。
-                            </p>
-                          )
-                        ) : null}
+                        {codingMode && codingProjects.length > 0 && (
+                          <select
+                            value={codingProjectId ?? ""}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              if (v) setCodingProjectId(v);
+                            }}
+                            disabled={controlsDisabled}
+                            className="m3-field h-8 min-w-0 flex-1 rounded-[var(--m3-shape-sm)] bg-transparent px-2 text-xs"
+                          >
+                            {codingProjects.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        {codingMode && codingProjects.length === 0 && (
+                          <span className="text-[11px] text-muted-foreground">
+                            ファイルタブでプロジェクトを作成してください。
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}

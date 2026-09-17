@@ -626,7 +626,7 @@ export function ModelSelector({
           size="sm"
           data-testid="button-model-selector"
           className={cn(
-            "h-8 gap-1.5 rounded-[var(--m3-shape-full)] px-3 text-xs font-medium transition-all duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
+            "h-9 gap-1.5 rounded-[var(--m3-shape-full)] px-3 text-[13px] font-medium transition-all duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
             "border border-border/60 bg-card/50 text-muted-foreground hover:bg-card/80 hover:text-foreground",
             current?.provider === "dashscope" &&
               "[color:var(--app-status-accent)] [border-color:var(--app-status-accent)] [background:var(--app-status-accent-container)] hover:[color:var(--app-status-accent)] hover:[border-color:var(--app-status-accent)] hover:[background:var(--app-status-accent-container)]",
