@@ -420,6 +420,51 @@ export async function ensureProjectsSchema(
   await query(ENSURE_PROJECTS_SCHEMA_SQL);
 }
 
+export const ENSURE_TOOL_BANK_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS tool_bank (
+  id serial PRIMARY KEY,
+  user_id text NOT NULL,
+  slug text NOT NULL,
+  name text NOT NULL,
+  summary text NOT NULL DEFAULT '',
+  language text NOT NULL DEFAULT 'text',
+  code text NOT NULL,
+  usage text NOT NULL DEFAULT '',
+  tags jsonb NOT NULL DEFAULT '[]'::jsonb,
+  source_project_id integer,
+  status text NOT NULL DEFAULT 'active',
+  version integer NOT NULL DEFAULT 1,
+  change_summary text NOT NULL DEFAULT '',
+  use_count integer NOT NULL DEFAULT 0,
+  last_used_at timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tool_bank_user_slug_uidx ON tool_bank(user_id, slug);
+CREATE INDEX IF NOT EXISTS tool_bank_user_status_idx ON tool_bank(user_id, status);
+CREATE INDEX IF NOT EXISTS tool_bank_user_updated_idx ON tool_bank(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS project_tool_copies (
+  id serial PRIMARY KEY,
+  project_id integer NOT NULL,
+  user_id text NOT NULL,
+  tool_id integer NOT NULL,
+  code text NOT NULL,
+  tool_version integer NOT NULL,
+  copied_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS project_tool_copies_project_tool_uidx
+  ON project_tool_copies(project_id, tool_id);
+CREATE INDEX IF NOT EXISTS project_tool_copies_user_idx ON project_tool_copies(user_id);
+`.trim();
+
+export async function ensureToolBankSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_TOOL_BANK_SCHEMA_SQL);
+}
+
 export async function ensureUserUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -442,4 +487,5 @@ export async function ensureChatSchema(
   await ensureGoogleAuthSchema(execute);
   await ensureProviderCredentialsSchema(execute);
   await ensureProjectsSchema(execute);
+  await ensureToolBankSchema(execute);
 }

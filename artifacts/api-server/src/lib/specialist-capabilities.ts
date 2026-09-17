@@ -25,6 +25,11 @@ import {
   isMemoryTool,
 } from "./llm-memory-tools";
 import {
+  getToolBankToolDefinitions,
+  runToolBankTool,
+  TOOL_BANK_TOOL_NAMES,
+} from "./tool-bank-tools";
+import {
   getFormToolDefinitions,
   executeFormTool,
   isFormTool,
@@ -489,7 +494,8 @@ export interface SpecialistToolResult {
     | "speech-to-text"
     | "audio-synthesis"
     | "web-search"
-    | "fetch-page";
+    | "fetch-page"
+    | "tool-bank";
   summary: string;
   text?: string;
   asset?: GeneratedAsset;
@@ -505,13 +511,22 @@ export interface SpecialistToolCall {
 }
 
 const EVIDENCE_TOOL_NAMES = new Set(["web_search", "fetch_page"]);
-const READ_ONLY_TOOL_NAMES = new Set(["memory_recall", "analyze_forms"]);
+const READ_ONLY_TOOL_NAMES = new Set([
+  "memory_recall",
+  "analyze_forms",
+  "tool_bank_search",
+  "tool_bank_get",
+]);
 const MUTATION_TOOL_NAMES = new Set([
   "memory_store",
   "memory_update",
   "memory_forget",
   "memory_invalidate",
   "memory_supersede",
+  "tool_bank_save",
+  "tool_bank_update",
+  "tool_bank_delete",
+  "tool_bank_copy",
 ]);
 const EXTERNAL_ACTION_TOOL_NAMES = new Set(["fill_form"]);
 
@@ -790,6 +805,10 @@ export function getSpecialistTools(
     tools.push(...getMemoryToolDefinitions());
   }
 
+  if (context.userId) {
+    tools.push(...getToolBankToolDefinitions());
+  }
+
   if (isGoogleOAuthConfigured()) {
     tools.push(...getGoogleToolDefinitions());
   }
@@ -1052,6 +1071,10 @@ export async function executeSpecialistTool(
     // Memory tools: delegate to the memory tools module
     if (isMemoryTool(call.name)) {
       return executeMemoryTool(call, context);
+    }
+
+    if (TOOL_BANK_TOOL_NAMES.has(call.name)) {
+      return runToolBankTool(call, context);
     }
     // Form tools: delegate to the form tools module
     if (isFormTool(call.name)) {

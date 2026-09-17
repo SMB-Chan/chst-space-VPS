@@ -633,8 +633,19 @@ export async function streamChatReply(args: {
         if (projectPrompt) {
           workingMessages.push({ role: "system", content: projectPrompt });
         }
+
+        const { listToolBank, formatToolBankContext } = await import(
+          "./tool-bank-store"
+        );
+        const bankTools = await listToolBank(memory.userId, {
+          status: "active",
+        });
+        const bankPrompt = formatToolBankContext(bankTools);
+        if (bankPrompt) {
+          workingMessages.push({ role: "system", content: bankPrompt });
+        }
       } catch {
-        // Project memory failures should not break the chat flow
+        // Project memory / tool bank failures should not break the chat flow
       }
     }
 

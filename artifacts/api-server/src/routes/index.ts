@@ -5,6 +5,7 @@ import adminRouter from "./admin";
 import googleRouter from "./google";
 import devRouter from "./dev";
 import projectsRouter from "./projects";
+import toolBankRouter from "./tool-bank";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(adminRouter);
 router.use(googleRouter);
 router.use(devRouter);
 router.use(projectsRouter);
+router.use(toolBankRouter);
 
 export default router;

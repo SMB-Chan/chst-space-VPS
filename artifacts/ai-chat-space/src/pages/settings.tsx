@@ -30,6 +30,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListOpenaiConversationsQueryKey } from "@workspace/api-client-react";
 import { ProviderCredentialsSection } from "@/components/settings/provider-credentials-section";
 import { ProjectMemorySection } from "@/components/settings/project-memory-section";
+import { ToolBankSection } from "@/components/settings/tool-bank-section";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -250,6 +251,8 @@ export function SettingsPage() {
         <ProviderCredentialsSection />
 
         <ProjectMemorySection />
+
+        <ToolBankSection />
 
         <SettingsSection
           title="既定のモデル"
