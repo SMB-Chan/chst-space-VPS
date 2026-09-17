@@ -72,6 +72,10 @@ PORT=5173 BASE_PATH=/ pnpm --filter @workspace/ai-chat-space run dev
 
 Vite は `/api` を `API_PROXY_TARGET`（未設定なら `http://127.0.0.1:5000`）へプロキシします。
 
+### VPS へのデプロイ（Docker Compose）
+
+Docker Compose を使ったセルフホスト手順は [deploy/README.md](./deploy/README.md) を参照してください。PostgreSQL・アプリ・SearXNG・コーディング環境（OpenCode + file browser）をまとめて起動できます。
+
 ### その他のコマンド
 
 ```bash
