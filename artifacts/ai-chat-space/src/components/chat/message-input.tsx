@@ -831,9 +831,7 @@ function Composer({
             ? "変更したいファイルや内容を指示..."
             : fileFormat
               ? `この内容を ${fileFormat.toUpperCase()} で生成...`
-              : isMobile
-                ? "ChatGPT と作業する"
-                : "メッセージを入力...")
+              : "メッセージ")
         }
         className={cn(
           "max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-3 font-sans text-base leading-relaxed outline-none placeholder:text-muted-foreground/55 scrollbar-none",
@@ -1271,7 +1269,7 @@ function Composer({
               type="button"
               size="icon"
               onClick={onStop}
-              className="h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] border border-destructive/30 [background:var(--m3-error-container)] text-destructive hover:bg-destructive/20 active:scale-95"
+              className="h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] border border-destructive/30 [background:var(--m3-error-container)] text-destructive hover:bg-destructive/20"
               aria-label="生成を停止"
               data-testid="composer-stop"
             >
@@ -1284,9 +1282,9 @@ function Composer({
               onClick={handleSubmit}
               disabled={!canSend}
               className={cn(
-                "h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)] transition-[background-color,color,transform,box-shadow] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)] hover:scale-[1.04] active:scale-95",
+                "h-11 w-11 shrink-0 rounded-[var(--m3-shape-full)]",
                 canSend
-                  ? "bg-gradient-to-br from-primary to-primary/85 [color:var(--m3-on-primary)] shadow-[var(--m3-elevation-2)] hover:shadow-[var(--m3-elevation-3)]"
+                  ? "bg-primary [color:var(--m3-on-primary)]"
                   : "[background:var(--m3-surface-container-high)] text-muted-foreground shadow-none",
               )}
               aria-label={submitting ? "送信準備中" : "送信"}

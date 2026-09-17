@@ -45,7 +45,6 @@ import {
   type TranslationModeSetting,
 } from "@/lib/settings";
 import { shouldResetTranslationOnNavigation } from "@/lib/translation-route-policy";
-import { cn } from "@/lib/utils";
 import { applyClientPatch } from "@/lib/audit-patch";
 import { createCoalescedTextScheduler } from "@/lib/coalesced-text-scheduler";
 import {
@@ -56,7 +55,7 @@ import {
   compactAttachmentMessageForHistory,
   serializeAttachmentMessage,
 } from "@/lib/attachments";
-import { Sparkles, X, Shield } from "lucide-react";
+import { X } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -1490,55 +1489,25 @@ export function ChatPage() {
         (invalidConversationId ||
           (conversationLoadError && !optimisticUserMessage && !isStreaming)) ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <h2 className="text-xl font-serif font-medium mb-2">
+            <h2 className="text-xl font-semibold mb-2">
               会話が見つかりません
             </h2>
             <p className="text-muted-foreground text-sm">
-              URL
-              が正しくないか、この会話にアクセスできません。左の履歴から選び直してください。
+              この会話を開けません。履歴から選び直してください。
             </p>
           </div>
         ) : !conversationId &&
           !optimisticUserMessage &&
           privateMessages.length === 0 ? (
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10 text-center sm:px-8">
-            <div
-              className={cn(
-                "relative mb-7 flex h-20 w-20 items-center justify-center rounded-[var(--m3-shape-xl)] border shadow-[var(--m3-elevation-3)] before:absolute before:inset-0 before:-z-10 before:rounded-[var(--m3-shape-xl)] before:blur-2xl",
-                isPrivate
-                  ? "[background:var(--app-status-accent-container)] [border-color:var(--app-status-accent)] before:[background:var(--app-status-accent-container)]"
-                  : "[background:var(--m3-primary-container)] [border-color:var(--m3-primary)] before:[background:var(--m3-primary-container)]",
-              )}
-            >
-              {isPrivate ? (
-                <Shield className="w-9 h-9 [color:var(--app-status-accent)]" />
-              ) : (
-                <Sparkles className="w-9 h-9 text-primary" />
-              )}
-            </div>
-            <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/70">
-              {isPrivate ? "Ephemeral workspace" : "Ready when you are"}
-            </div>
-            <h2 className="text-balance mb-3 font-serif text-3xl font-medium tracking-[-0.025em] text-foreground sm:text-4xl">
-              {isPrivate ? "プライベートセッション" : greeting.title}
+          <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-6 py-10 text-center sm:px-8">
+            <h2 className="text-balance mb-2 text-2xl font-semibold tracking-[-0.02em] text-foreground">
+              {isPrivate ? "保存しない会話" : greeting.title}
             </h2>
-            <p className="text-balance mb-8 max-w-lg font-sans text-base font-light leading-7 text-muted-foreground sm:text-lg">
+            <p className="text-balance max-w-md text-base leading-7 text-muted-foreground">
               {isPrivate
-                ? "この会話はサーバーに保存されません。タブを閉じると履歴は消えます。"
+                ? "この会話はサーバーに残りません。タブを閉じると消えます。"
                 : greeting.subtitle}
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
-              {["Webリサーチ", "画像・文書解析", "資料生成", "複数モデル"].map(
-                (capability) => (
-                  <span
-                    key={capability}
-                    className="rounded-[var(--m3-shape-full)] border border-[var(--m3-outline-variant)] [background:var(--m3-surface-container-low)] px-3 py-1.5 shadow-[var(--m3-elevation-0)]"
-                  >
-                    {capability}
-                  </span>
-                ),
-              )}
-            </div>
           </div>
         ) : (
           <MessageFeed

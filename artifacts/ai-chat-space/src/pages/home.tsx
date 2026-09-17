@@ -51,21 +51,20 @@ export function HomePage() {
               </div>
               <div className="leading-none">
                 <div className="tracking-tight">AI Space</div>
-                <div className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-[var(--m3-on-surface-variant)]">
-                  Personal workspace
+                <div className="mt-1.5 text-[11px] text-[var(--m3-on-surface-variant)]">
+                  個人用ワークスペース
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <Link href="/sign-in">
-                <Button variant="ghost" className="h-9 px-3 sm:px-4">
+                <Button variant="ghost" className="h-11 px-3 sm:px-4">
                   サインイン
                 </Button>
               </Link>
               <Link href="/sign-up">
-                <Button variant="filled" className="h-9 px-4 sm:px-5">
-                  無料ではじめる
-                  <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                <Button variant="filled" className="h-11 px-4 sm:px-5">
+                  始める
                 </Button>
               </Link>
             </div>
@@ -76,40 +75,25 @@ export function HomePage() {
       <main>
         <section className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-16 sm:px-8 md:pt-24 lg:grid-cols-[1.02fr_0.98fr] lg:gap-16 lg:pb-28 lg:pt-28">
           <div className="animate-rise-in text-center lg:text-left">
-            <div className="mb-6 flex justify-center lg:justify-start">
-              <Chip asChild selected>
-                <span>
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--m3-primary)] opacity-40" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--m3-primary)]" />
-                  </span>
-                  調査・推論・成果物生成をひとつに
-                </span>
-              </Chip>
-            </div>
-            <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-[-0.045em] sm:text-5xl md:text-6xl lg:text-[4.15rem]">
-              考える仕事に、
-              <span className="text-[var(--m3-primary)]">静かに集中できる</span>
-              <br className="hidden sm:block" /> AIワークスペース。
+            <h1 className="text-balance text-4xl font-semibold leading-[1.12] tracking-[-0.03em] sm:text-5xl">
+              調査、推論、資料作成を一つの会話で。
             </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-balance text-base font-light leading-8 text-[var(--m3-on-surface-variant)] sm:text-lg lg:mx-0 lg:max-w-xl">
-              複数モデル、Webリサーチ、ファイル解析、資料生成。
-              高度なバックエンド機能を、迷わず使える一つのチャット画面にまとめました。
+            <p className="mx-auto mt-6 max-w-2xl text-balance text-base leading-7 text-[var(--m3-on-surface-variant)] sm:text-lg lg:mx-0 lg:max-w-xl">
+              モデル切替、Web調査、ファイル解析、資料の生成。必要な操作はチャット画面にあります。
             </p>
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
               <Link href="/sign-up">
-                <Button size="lg" variant="filled" className="w-full sm:w-auto">
-                  ワークスペースを開く
-                  <ArrowRight className="ml-2 h-4 w-4" />
+                <Button size="lg" variant="filled" className="h-11 w-full sm:w-auto">
+                  始める
                 </Button>
               </Link>
               <Link href="/sign-in">
                 <Button
                   size="lg"
-                  variant="elevated"
-                  className="w-full sm:w-auto"
+                  variant="ghost"
+                  className="h-11 w-full sm:w-auto"
                 >
-                  既存アカウントで続ける
+                  サインイン
                 </Button>
               </Link>
             </div>
@@ -134,7 +118,7 @@ export function HomePage() {
               <div className="flex items-center justify-between border-b border-[var(--m3-outline-variant)] px-4 py-3">
                 <div className="flex items-center gap-2">
                   <div className="h-2.5 w-2.5 rounded-[var(--m3-shape-full)] [background:var(--app-status-success)]" />
-                  <span className="text-xs font-medium">Research session</span>
+                  <span className="text-xs font-medium">会話</span>
                 </div>
                 <Chip asChild>
                   <span>GPT-5.6 Terra</span>
@@ -198,11 +182,8 @@ export function HomePage() {
           <section className="border-t border-[var(--m3-outline-variant)]">
             <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 lg:py-20">
               <div className="mb-10 max-w-2xl">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--m3-primary)]">
-                  One focused interface
-                </p>
                 <h2 className="text-balance text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">
-                  高度な機能ほど、操作はシンプルに。
+                  操作は会話ひとつ。
                 </h2>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
@@ -211,7 +192,7 @@ export function HomePage() {
                     key={title}
                     tone="container"
                     shape="extraLarge"
-                    className="group p-5 transition-[transform,background-color] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-expressive)] hover:-translate-y-1 hover:bg-[var(--m3-surface-container-high)] sm:p-6"
+                    className="p-5 sm:p-6"
                   >
                     <div className="mb-5 flex items-center justify-between">
                       <div className="flex h-11 w-11 items-center justify-center rounded-[var(--m3-shape-lg)] bg-[var(--m3-primary-container)] text-[var(--m3-on-primary-container)]">

@@ -1,40 +1,26 @@
-# Chat-Space Material 3 Expressive design system
+# Chat-Space Human Interface
 
-This directory is the styling boundary between product features and the visual language.
+Visual language follows Apple Human Interface Guidelines: Clarity, Deference, Depth. `--m3-*` names are compatibility aliases.
 
 ## Rules
 
-1. Feature components should use semantic color roles (`--m3-*`) rather than hard-coded palette colors for ordinary surfaces and actions.
-2. Use the shared `Button`, `Input`, `Textarea`, `Card`, `Surface`, `Chip`, menu, popover, and dialog primitives before adding local styling.
-3. New radii should come from the M3 shape scale. Avoid new arbitrary `rounded-*` values unless the shape communicates a unique product state.
-4. Motion uses the standard/emphasized/expressive curves in `tokens.css`. Respect `prefers-reduced-motion`.
-5. Prefer tonal surface separation over heavy shadows. Elevation 3 is reserved for transient/floating UI.
-6. Liquid glass is an accent, not the base language. It is intentionally retained for the composer and transient floating surfaces only.
-7. Navigation is adaptive: compact screens use a modal drawer; desktop can collapse to a navigation rail and expand to a permanent drawer.
-8. Preserve Radix primitives for keyboard behavior, focus management, and accessibility. M3E is the presentation/system layer above them.
-9. Reusable product states (success, info, warning, accent) use `--app-status-*` roles. Feature code must not introduce direct `emerald-*`, `sky-*`, `amber-*`, or `violet-*` palettes for shared states.
-10. Composer controls use shared `Chip`/button semantics and `data-testid` hooks only as a migration bridge. New controls should consume the design-system primitives directly.
+1. Content is the subject. Chrome (nav, composer, sheets) supports it and does not compete.
+2. Glass and blur belong on chrome only, never on message bodies or content cards.
+3. Primary controls are at least 44×44 pt (`--hig-touch`).
+4. Motion explains hierarchy. No overshoot, bounce, or decorative scale. Honor `prefers-reduced-motion`.
+5. Prefer hairline separators over elevation. Shadows do not replace structure.
+6. Copy is plain, active, and specific. Buttons are verbs. Errors say how to fix. Empty states say what to do next.
+7. Use `Button`, `Input`, `Surface`, `Chip`, and Radix primitives before adding local styling.
+8. Do not mix Material FAB, equal-weight card dashboards, or display-serif branding into product chrome.
+9. Accessibility is a requirement: Dynamic Type via relative units, focus rings, labels on icon buttons, Light/Dark contrast.
 
-## Stable semantic roles
+## Tokens
 
-- `--m3-surface*`: application and container surfaces
-- `--m3-primary*`: primary actions and selected states
-- `--m3-on-surface*`: text/icon roles
-- `--m3-outline*`: separators and outlines
-- `--m3-shape-*`: expressive shape scale
-- `--m3-motion-*` / `--m3-duration-*`: transition system
-- `--m3-elevation-*`: shared elevation scale
-- `--app-status-*`: reusable non-Material product statuses such as success/warning/info
+- `--m3-surface*`: grouped backgrounds
+- `--m3-primary*`: the one primary action
+- `--m3-outline*`: hairlines
+- `--m3-shape-*`: continuous corners
+- `--hig-touch`: 44pt minimum control size
+- `--app-status-*`: success / info / warning — never color alone
 
-When adding a new feature, extend a semantic role here only if the role is reusable across the product. Do not add one-off design tokens for a single component.
-
-## Migration order
-
-1. shared primitives and tokens
-2. adaptive navigation shell
-3. composer controls and transient tool surfaces
-4. message/status/artifact cards
-5. feature pages and empty states
-6. remove legacy glass/palette utilities that no longer have consumers
-
-The goal is not merely to resemble Material 3 Expressive. The goal is to make the visual language enforceable at component boundaries so future feature work does not reintroduce layout and styling drift.
+When proposing UI, name the purpose, the standard control, what you will not build, and how a person cancels.

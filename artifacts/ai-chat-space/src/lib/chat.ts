@@ -30,20 +30,17 @@ export function timeGreeting(now = new Date()): {
   if (hour >= 5 && hour < 11) {
     return {
       title: "おはようございます。",
-      subtitle:
-        "今日は何から始めますか？ドキュメントを添付するか、そのまま入力してください。",
+      subtitle: "用件を下の入力欄に書いてください。",
     };
   }
   if (hour >= 11 && hour < 18) {
     return {
       title: "こんにちは。",
-      subtitle:
-        "何を進めましょうか？ドキュメントを添付するか、そのまま入力してください。",
+      subtitle: "用件を下の入力欄に書いてください。",
     };
   }
   return {
     title: "こんばんは。",
-    subtitle:
-      "今夜は何を進めますか？ドキュメントを添付するか、そのまま入力してください。",
+      subtitle: "用件を下の入力欄に書いてください。",
   };
 }

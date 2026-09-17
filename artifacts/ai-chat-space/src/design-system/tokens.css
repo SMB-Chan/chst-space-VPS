@@ -1,14 +1,12 @@
 /*
- * Chat-Space Material 3 Expressive token layer.
+ * Chat-Space Apple HIG token layer.
  *
- * Feature code should consume these semantic roles instead of introducing
- * one-off colors, radii, shadows, or transition curves. The existing theme
- * variables remain the source of light/dark color values; this file gives
- * them stable Material-style names and interaction primitives.
+ * `--m3-*` names are compatibility aliases. Values follow Clarity, Deference,
+ * and Depth: content first, chrome as a thin layer, no overshoot motion,
+ * 44pt primary controls.
  */
 
 :root {
-  /* Color roles */
   --m3-surface: hsl(var(--background));
   --m3-on-surface: hsl(var(--foreground));
   --m3-surface-container-lowest: hsl(var(--card));
@@ -66,7 +64,6 @@
     hsl(var(--foreground))
   );
 
-  /* Product status roles. These are reusable states, not feature palettes. */
   --app-status-success: light-dark(oklch(0.47 0.12 155), oklch(0.76 0.13 155));
   --app-status-success-container: color-mix(
     in oklab,
@@ -92,39 +89,33 @@
     var(--m3-surface-container-low)
   );
 
-  /* Shape scale: intentionally non-linear for expressive hierarchy. */
-  --m3-shape-xs: 0.5rem;
-  --m3-shape-sm: 0.75rem;
-  --m3-shape-md: 1rem;
-  --m3-shape-lg: 1.25rem;
-  --m3-shape-xl: 1.75rem;
-  --m3-shape-xxl: 2.25rem;
+  --m3-shape-xs: 0.375rem;
+  --m3-shape-sm: 0.5rem;
+  --m3-shape-md: 0.75rem;
+  --m3-shape-lg: 0.875rem;
+  --m3-shape-xl: 1rem;
+  --m3-shape-xxl: 1.25rem;
   --m3-shape-full: 9999px;
+  --hig-touch: 2.75rem;
 
-  /* Motion */
-  --m3-motion-standard: cubic-bezier(0.2, 0, 0, 1);
-  --m3-motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
-  --m3-motion-expressive: cubic-bezier(0.34, 1.42, 0.64, 1);
-  --m3-duration-short: 120ms;
-  --m3-duration-medium: 220ms;
-  --m3-duration-long: 420ms;
+  --m3-motion-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --m3-motion-emphasized: cubic-bezier(0.42, 0, 0.58, 1);
+  --m3-motion-expressive: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --m3-duration-short: 80ms;
+  --m3-duration-medium: 180ms;
+  --m3-duration-long: 280ms;
 
-  /* Elevation. Prefer tonal separation first; shadows are deliberately soft. */
   --m3-elevation-0: none;
-  --m3-elevation-1: 0 1px 2px hsl(232 30% 2% / 0.14),
-    0 4px 14px -8px hsl(232 30% 2% / 0.28);
-  --m3-elevation-2: 0 2px 6px hsl(232 30% 2% / 0.16),
-    0 12px 32px -18px hsl(232 30% 2% / 0.4);
-  --m3-elevation-3: 0 8px 24px -12px hsl(232 30% 2% / 0.38),
-    0 24px 64px -34px hsl(232 30% 2% / 0.56);
+  --m3-elevation-1: 0 0.5px 0 hsl(232 30% 2% / 0.12);
+  --m3-elevation-2:
+    0 1px 2px hsl(232 30% 2% / 0.08), 0 8px 24px -16px hsl(232 30% 2% / 0.18);
+  --m3-elevation-3: 0 8px 28px -18px hsl(232 30% 2% / 0.28);
 
-  /* State layers */
   --m3-state-hover: 0.08;
   --m3-state-focus: 0.1;
   --m3-state-pressed: 0.12;
   --m3-state-disabled: 0.38;
 
-  /* Adaptive layout */
   --m3-navigation-drawer-width: 18rem;
   --m3-navigation-rail-width: 5rem;
   --m3-content-max-width: 72rem;
@@ -168,9 +159,9 @@
       transparent
     );
     color: var(--m3-on-surface);
-    box-shadow: var(--m3-elevation-3);
-    backdrop-filter: blur(18px) saturate(1.16);
-    -webkit-backdrop-filter: blur(18px) saturate(1.16);
+    box-shadow: var(--m3-elevation-2);
+    backdrop-filter: blur(18px) saturate(1.12);
+    -webkit-backdrop-filter: blur(18px) saturate(1.12);
   }
 
   .m3-chip {
@@ -183,7 +174,7 @@
       background-color var(--m3-duration-medium) var(--m3-motion-standard),
       color var(--m3-duration-medium) var(--m3-motion-standard),
       border-color var(--m3-duration-medium) var(--m3-motion-standard),
-      transform var(--m3-duration-short) var(--m3-motion-expressive);
+      opacity var(--m3-duration-short) var(--m3-motion-standard);
   }
 
   .m3-chip:hover {
@@ -192,7 +183,7 @@
   }
 
   .m3-chip:active {
-    transform: scale(0.97);
+    opacity: 0.72;
   }
 
   .m3-chip[data-selected="true"],
@@ -215,7 +206,7 @@
   }
 
   .m3-field {
-    min-height: 2.5rem;
+    min-height: var(--hig-touch);
     border: 1px solid var(--m3-outline-variant);
     border-radius: var(--m3-shape-sm);
     background: var(--m3-surface-container-low);
@@ -236,29 +227,27 @@
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--m3-primary) 12%, transparent);
   }
 
-  /* Composer is deliberately the main glass exception in the product. */
   [data-testid="composer"] {
     border: 1px solid var(--m3-outline-variant);
     border-radius: var(--m3-shape-xl);
     background: color-mix(
       in oklab,
-      var(--m3-surface-container-high) 90%,
+      var(--m3-surface-container-high) 88%,
       transparent
     );
-    box-shadow: var(--m3-elevation-3);
-    backdrop-filter: blur(20px) saturate(1.2);
-    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    box-shadow: var(--m3-elevation-2);
+    backdrop-filter: blur(20px) saturate(1.12);
+    -webkit-backdrop-filter: blur(20px) saturate(1.12);
     transition:
-      border-color var(--m3-duration-medium) var(--m3-motion-emphasized),
-      box-shadow var(--m3-duration-long) var(--m3-motion-emphasized),
-      transform var(--m3-duration-medium) var(--m3-motion-expressive);
+      border-color var(--m3-duration-medium) var(--m3-motion-standard),
+      box-shadow var(--m3-duration-medium) var(--m3-motion-standard);
   }
 
   [data-testid="composer"]:focus-within {
     border-color: color-mix(in oklab, var(--m3-primary) 52%, transparent);
     box-shadow:
       0 0 0 3px color-mix(in oklab, var(--m3-primary) 12%, transparent),
-      var(--m3-elevation-3);
+      var(--m3-elevation-2);
   }
 
   [data-testid="composer-textarea"] {
@@ -274,9 +263,9 @@
       var(--m3-surface-container-highest) 94%,
       transparent
     );
-    box-shadow: var(--m3-elevation-3);
-    backdrop-filter: blur(24px) saturate(1.18);
-    -webkit-backdrop-filter: blur(24px) saturate(1.18);
+    box-shadow: var(--m3-elevation-2);
+    backdrop-filter: blur(24px) saturate(1.12);
+    -webkit-backdrop-filter: blur(24px) saturate(1.12);
   }
 
   [data-testid="composer-tools-toggle"],
@@ -288,11 +277,11 @@
     background: var(--m3-surface-container-low);
     color: var(--m3-on-surface-variant);
     box-shadow: none;
+    min-height: var(--hig-touch);
     transition:
       background-color var(--m3-duration-medium) var(--m3-motion-standard),
       color var(--m3-duration-medium) var(--m3-motion-standard),
-      border-color var(--m3-duration-medium) var(--m3-motion-standard),
-      transform var(--m3-duration-short) var(--m3-motion-expressive);
+      border-color var(--m3-duration-medium) var(--m3-motion-standard);
   }
 
   [data-testid="composer-tools-toggle"]:hover,
@@ -310,24 +299,16 @@
   [data-testid="composer-video-toggle"]:active,
   [data-testid="composer-audit-toggle"]:active,
   [data-testid="button-model-selector"]:active {
-    transform: scale(0.96);
+    opacity: 0.72;
   }
 
   [data-testid="composer-send"] {
+    min-height: var(--hig-touch);
+    min-width: var(--hig-touch);
     border-radius: var(--m3-shape-full);
     transition:
       background-color var(--m3-duration-medium) var(--m3-motion-standard),
-      color var(--m3-duration-medium) var(--m3-motion-standard),
-      transform var(--m3-duration-short) var(--m3-motion-expressive),
-      box-shadow var(--m3-duration-medium) var(--m3-motion-standard);
-  }
-
-  [data-testid="composer-send"]:not(:disabled):hover {
-    transform: scale(1.06);
-  }
-
-  [data-testid="composer-send"]:not(:disabled):active {
-    transform: scale(0.94);
+      color var(--m3-duration-medium) var(--m3-motion-standard);
   }
 }
 
@@ -338,9 +319,7 @@
     --m3-duration-long: 0ms;
   }
 
-  [data-testid="composer-send"]:not(:disabled):hover,
-  [data-testid="composer-send"]:not(:disabled):active,
   .m3-chip:active {
-    transform: none;
+    opacity: 1;
   }
 }
