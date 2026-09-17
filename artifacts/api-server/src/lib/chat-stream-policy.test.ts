@@ -24,6 +24,26 @@ describe("prepareInitialChatMessages", () => {
     );
   });
 
+  it("injects coding policy and skips artifact/file-generation prompts", () => {
+    const result = prepareInitialChatMessages({
+      chatMessages: [{ role: "user", content: "app.ts を直して" }],
+      userText: "app.ts を直して",
+      codingFolder: "demo-app",
+      requestedFileFormat: "pdf",
+    });
+
+    expect(result.skills).toEqual([]);
+    expect(String(result.messages.at(-1)?.content)).toContain(
+      "【コーディングモード】",
+    );
+    expect(String(result.messages.at(-1)?.content)).toContain("demo-app/");
+    expect(
+      result.messages.some((message) =>
+        String(message.content).includes("システムが自動的にファイルを生成"),
+      ),
+    ).toBe(false);
+  });
+
   it("keeps translation mode isolated from artifact and specialist policies", () => {
     const result = prepareInitialChatMessages({
       chatMessages: [{ role: "user", content: "PDFで保存して" }],

@@ -15,7 +15,7 @@ import { requireAuth } from "./middleware";
 
 const router: Router = Router();
 
-function workspaceRoot(): string {
+export function workspaceRoot(): string {
   return (
     process.env.CODE_WORKSPACE_ROOT?.trim() || "/data/code-workspace"
   );

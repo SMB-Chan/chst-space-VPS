@@ -49,7 +49,18 @@ export interface PersistChatCompletionInput {
   generatedFiles?: GeneratedFile[];
   generatedAssets?: GeneratedAsset[];
   extractedArtifacts?: ExtractedArtifact[];
+  /** Wall-clock duration of this assistant turn. */
+  durationMs?: number;
+  /** Files touched this turn for the chat UI. */
+  filesMeta?: FileTouchMeta[];
 }
+
+export type FileTouchMeta = {
+  path: string;
+  kind: "edit" | "create" | "generate";
+  added?: number;
+  removed?: number;
+};
 
 export interface PersistInterruptedChatTurnInput {
   userId: string;
@@ -224,6 +235,14 @@ export async function persistChatCompletion(
           factuality: input.factuality
             ? JSON.stringify(input.factuality)
             : undefined,
+          durationMs:
+            input.durationMs != null && Number.isFinite(input.durationMs)
+              ? Math.max(0, Math.round(input.durationMs))
+              : undefined,
+          filesMeta:
+            input.filesMeta && input.filesMeta.length > 0
+              ? JSON.stringify(input.filesMeta)
+              : undefined,
         },
       ])
       .returning();

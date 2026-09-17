@@ -70,6 +70,44 @@ function stripArtifactBlocks(content: string): string {
     : "ファイルを作成しました。下のカードからダウンロードできます。";
 }
 
+type StreamFileTouch = {
+  path: string;
+  kind: string;
+  added?: number | null;
+  removed?: number | null;
+};
+
+const FILE_TOUCH_KINDS = new Set(["edit", "create", "generate"]);
+
+function parseFilesMeta(raw: unknown): StreamFileTouch[] | null {
+  if (!Array.isArray(raw)) return null;
+  const cleaned = raw.flatMap((item): StreamFileTouch[] => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.path !== "string" || !record.path) return [];
+    if (typeof record.kind !== "string" || !FILE_TOUCH_KINDS.has(record.kind)) {
+      return [];
+    }
+    const touch: StreamFileTouch = { path: record.path, kind: record.kind };
+    if (
+      typeof record.added === "number" &&
+      Number.isSafeInteger(record.added) &&
+      record.added >= 0
+    ) {
+      touch.added = record.added;
+    }
+    if (
+      typeof record.removed === "number" &&
+      Number.isSafeInteger(record.removed) &&
+      record.removed >= 0
+    ) {
+      touch.removed = record.removed;
+    }
+    return [touch];
+  });
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 async function streamMessage(
   conversationId: number,
   content: string,
@@ -110,6 +148,9 @@ async function streamMessage(
     fileFormat?: FileFormat;
     attachments?: OutgoingAttachment[];
     translationMode?: string;
+    codingMode?: boolean;
+    projectId?: number | null;
+    onFilesMeta?: (files: StreamFileTouch[]) => void;
   },
 ) {
   try {
@@ -131,6 +172,9 @@ async function streamMessage(
           content,
           modelId: model,
           ...(extra?.fileFormat ? { fileFormat: extra.fileFormat } : {}),
+          ...(extra?.codingMode
+            ? { codingMode: true, projectId: extra.projectId ?? null }
+            : {}),
           ...(extra?.attachments?.length
             ? {
                 attachments: extra.attachments.map((attachment) => ({
@@ -329,6 +373,10 @@ async function streamMessage(
         });
         if (artifacts.length > 0) onArtifacts(artifacts);
       }
+      if (Array.isArray(parsed.filesMeta) && extra?.onFilesMeta) {
+        const files = parseFilesMeta(parsed.filesMeta);
+        if (files) extra.onFilesMeta(files);
+      }
       if (typeof parsed.content === "string" && parsed.content) {
         receivedContent = true;
         if (parsed.status === "revising") {
@@ -467,6 +515,7 @@ export function ChatPage() {
     audit: "",
     factuality: null as FactualityReport | null,
     artifacts: [] as ChatArtifact[],
+    filesMeta: [] as StreamFileTouch[],
   });
   const artifactBlobUrlCache = useRef(new Map<string, string>());
   const [modelRestoredForConv, setModelRestoredForConv] = useState<
@@ -490,6 +539,9 @@ export function ChatPage() {
   );
   const [streamingFiles, setStreamingFiles] = useState<
     { id: number; filename: string; mimeType: string }[]
+  >([]);
+  const [streamingFilesMeta, setStreamingFilesMeta] = useState<
+    StreamFileTouch[]
   >([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -626,6 +678,10 @@ export function ChatPage() {
           content: stripArtifactBlocks(streamSnapshotRef.current.content),
           sources: streamingSources.length > 0 ? streamingSources : null,
           factuality: streamSnapshotRef.current.factuality,
+          filesMeta:
+            streamSnapshotRef.current.filesMeta.length > 0
+              ? streamSnapshotRef.current.filesMeta
+              : null,
           createdAt: now,
         } as OpenaiMessage);
       }
@@ -636,6 +692,7 @@ export function ChatPage() {
       setStreamingSources([]);
       setStreamingArtifacts([]);
       setStreamingFiles([]);
+      setStreamingFilesMeta([]);
       setStreamingFactuality(null);
       setOptimisticUserMessage(null);
       return;
@@ -652,6 +709,7 @@ export function ChatPage() {
             setStreamingSources([]);
             setStreamingArtifacts([]);
             setStreamingFiles([]);
+            setStreamingFilesMeta([]);
             setStreamingFactuality(null);
             setOptimisticUserMessage(null);
           });
@@ -682,6 +740,7 @@ export function ChatPage() {
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
+    setStreamingFilesMeta([]);
     setOptimisticUserMessage(null);
     setStreamError(null);
     setSearchStatus(null);
@@ -769,6 +828,7 @@ export function ChatPage() {
       setStreamingSources([]);
       setStreamingArtifacts([]);
       setStreamingFiles([]);
+      setStreamingFilesMeta([]);
       setStreamingAudit("");
       setStreamingFactuality(null);
       setSpecialistProgress(null);
@@ -779,6 +839,7 @@ export function ChatPage() {
         artifacts: [],
         audit: "",
         factuality: null,
+        filesMeta: [],
       };
       setStreamError(
         "応答がタイムアウトしました。入力を解放しましたので、もう一度お試しください。",
@@ -959,6 +1020,7 @@ export function ChatPage() {
     content: string,
     files?: OutgoingAttachment[],
     fileFormat?: FileFormat,
+    coding?: { codingMode?: boolean; projectId?: number | null },
   ): Promise<boolean> => {
     if (!selectedModel) {
       setStreamError("利用可能なモデルがありません。");
@@ -1027,6 +1089,7 @@ export function ChatPage() {
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setStreamingFiles([]);
+    setStreamingFilesMeta([]);
     setSearchStatus({ kind: "starting" });
     setSpecialistProgress(null);
     activityStepsRef.current = [];
@@ -1040,6 +1103,7 @@ export function ChatPage() {
       audit: "",
       factuality: null,
       artifacts: [],
+      filesMeta: [],
     };
 
     abortRef.current?.abort();
@@ -1114,6 +1178,10 @@ export function ChatPage() {
                   ? auditModel
                   : null,
                 factuality: streamSnapshotRef.current.factuality,
+                filesMeta:
+                  streamSnapshotRef.current.filesMeta.length > 0
+                    ? streamSnapshotRef.current.filesMeta
+                    : null,
                 createdAt: now,
               } as OpenaiMessage,
             ]);
@@ -1134,6 +1202,7 @@ export function ChatPage() {
           setStreamingSources([]);
           setStreamingArtifacts([]);
           setStreamingFiles([]);
+          setStreamingFilesMeta([]);
           setStreamingAudit("");
           setStreamingFactuality(null);
           setSpecialistProgress(null);
@@ -1200,6 +1269,7 @@ export function ChatPage() {
           setStreamingSources([]);
           setStreamingArtifacts([]);
           setStreamingFiles([]);
+          setStreamingFilesMeta([]);
           setStreamingAudit("");
           setStreamingFactuality(null);
           setOptimisticUserMessage(null);
@@ -1213,6 +1283,7 @@ export function ChatPage() {
               setStreamingSources([]);
               setStreamingArtifacts([]);
               setStreamingFiles([]);
+              setStreamingFilesMeta([]);
               setStreamingAudit("");
               setStreamingFactuality(null);
               setOptimisticUserMessage(null);
@@ -1280,7 +1351,14 @@ export function ChatPage() {
         ...(auditModel ? { auditModel } : {}),
         ...(translationMode !== "off" ? { translationMode } : {}),
         ...(fileFormat ? { fileFormat } : {}),
+        ...(coding?.codingMode
+          ? { codingMode: true, projectId: coding.projectId ?? null }
+          : {}),
         ...(files && files.length > 0 ? { attachments: files } : {}),
+        onFilesMeta: (filesMeta) => {
+          streamSnapshotRef.current.filesMeta = filesMeta;
+          setStreamingFilesMeta(filesMeta);
+        },
       },
     );
     return true;
@@ -1317,7 +1395,8 @@ export function ChatPage() {
     ...((isStreaming ||
       streamingContent ||
       streamingArtifacts.length > 0 ||
-      streamingFiles.length > 0) &&
+      streamingFiles.length > 0 ||
+      streamingFilesMeta.length > 0) &&
     !streamingAlreadyOnServer
       ? [
           {
@@ -1335,6 +1414,8 @@ export function ChatPage() {
               streamingFiles.length > 0
                 ? streamingFiles.map((f) => f.id)
                 : null,
+            filesMeta:
+              streamingFilesMeta.length > 0 ? streamingFilesMeta : null,
             createdAt: new Date().toISOString(),
           } as OpenaiMessage,
         ]
@@ -1503,6 +1584,7 @@ export function ChatPage() {
             auditModel={auditModel}
             activeSkills={activeSkills}
             fileGenerationEnabled={!isPrivate && translationMode === "off"}
+            codingEnabled={!isPrivate && translationMode === "off"}
             videoGenerationEnabled={!isPrivate}
             onGenerateVideo={handleGenerateVideo}
             placeholder={

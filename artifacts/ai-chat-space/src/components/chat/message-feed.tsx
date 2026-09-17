@@ -90,6 +90,8 @@ type DisplayMessage = OpenaiMessage & {
   factuality?: FactualityReport | string | null;
   artifacts?: ChatArtifact[] | null;
   assetIds?: number[] | null;
+  durationMs?: number | null;
+  filesMeta?: { path: string; kind: string; added?: number | null; removed?: number | null }[] | null;
   generatedAssets?:
     | {
         id: number;
@@ -970,6 +972,34 @@ const MessageRow = memo(function MessageRow({
                     streamingFiles.find((file) => file.id === assetId)?.mimeType
                   }
                 />
+              ))}
+            </div>
+          )}
+        {!isUser &&
+          ((display.filesMeta && display.filesMeta.length > 0) ||
+            (typeof display.durationMs === "number" &&
+              display.durationMs > 0)) && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
+              {typeof display.durationMs === "number" &&
+              display.durationMs > 0 ? (
+                <span className="tabular-nums">
+                  {formatActivityDuration(display.durationMs)}
+                </span>
+              ) : null}
+              {display.filesMeta?.map((file) => (
+                <span
+                  key={`${file.path}-${file.kind}`}
+                  className="inline-flex max-w-full items-center gap-1"
+                >
+                  <FileText className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{file.path}</span>
+                  {typeof file.added === "number" ||
+                  typeof file.removed === "number" ? (
+                    <span className="tabular-nums opacity-70">
+                      +{file.added ?? 0}/-{file.removed ?? 0}
+                    </span>
+                  ) : null}
+                </span>
               ))}
             </div>
           )}

@@ -797,6 +797,29 @@ components:
         - mimeType
         - size
         - downloadUrl
+    OpenaiFileTouch:
+      type: object
+      properties:
+        path:
+          type: string
+        kind:
+          type: string
+          enum: [edit, create, generate]
+        added:
+          type: integer
+          minimum: 0
+          nullable: true
+        removed:
+          type: integer
+          minimum: 0
+          nullable: true
+        patch:
+          type: string
+          nullable: true
+          description: Unified diff of this touch, capped server-side
+      required:
+        - path
+        - kind
     OpenaiFactualityClaim:
       type: object
       properties:
@@ -914,6 +937,15 @@ components:
           items:
             type: integer
           nullable: true
+        durationMs:
+          type: integer
+          minimum: 0
+          nullable: true
+        filesMeta:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpenaiFileTouch"
+          nullable: true
         generatedAssets:
           type: array
           items:
@@ -975,6 +1007,14 @@ components:
           type: string
           description: Optional target file format for generated downloads (pdf, docx, xlsx, pptx)
           enum: [pdf, docx, xlsx, pptx]
+        projectId:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Target project (workspace folder) for coding mode
+        codingMode:
+          type: boolean
+          description: Explicit coding mode; model may write project files via file fences
         history:
           type: array
           maxItems: 200

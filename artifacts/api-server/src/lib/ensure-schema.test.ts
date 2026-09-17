@@ -33,6 +33,12 @@ describe("ensureMessageSchema", () => {
     expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain(
       "ADD COLUMN IF NOT EXISTS asset_ids text",
     );
+    expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain(
+      "ADD COLUMN IF NOT EXISTS duration_ms integer",
+    );
+    expect(ENSURE_MESSAGES_SCHEMA_SQL).toContain(
+      "ADD COLUMN IF NOT EXISTS files_meta text",
+    );
   });
 
   it("runs the SQL through the provided query function", async () => {

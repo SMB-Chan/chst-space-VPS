@@ -5,6 +5,8 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS audit_content text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS audit_model_id text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS factuality text;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS asset_ids text;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS duration_ms integer;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS files_meta text;
 `.trim();
 
 export const ENSURE_RUNS_SCHEMA_SQL = `

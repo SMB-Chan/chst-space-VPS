@@ -315,6 +315,14 @@ export const GetOpenaiConversationParams = zod.object({
   "id": zod.coerce.number().int().min(1)
 })
 
+export const getOpenaiConversationResponseMessagesItemDurationMsMin = 0;
+
+export const getOpenaiConversationResponseMessagesItemFilesMetaItemAddedMin = 0;
+
+export const getOpenaiConversationResponseMessagesItemFilesMetaItemRemovedMin = 0;
+
+
+
 export const GetOpenaiConversationResponse = zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
@@ -365,6 +373,14 @@ export const GetOpenaiConversationResponse = zod.object({
 }).nullish()
 }).nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
+  "durationMs": zod.number().int().min(getOpenaiConversationResponseMessagesItemDurationMsMin).nullish(),
+  "filesMeta": zod.array(zod.object({
+  "path": zod.string(),
+  "kind": zod.enum(['edit', 'create', 'generate']),
+  "added": zod.number().int().min(getOpenaiConversationResponseMessagesItemFilesMetaItemAddedMin).nullish(),
+  "removed": zod.number().int().min(getOpenaiConversationResponseMessagesItemFilesMetaItemRemovedMin).nullish(),
+  "patch": zod.string().nullish().describe('Unified diff of this touch, capped server-side')
+})).nullish(),
   "generatedAssets": zod.array(zod.object({
   "id": zod.number().int(),
   "filename": zod.string(),
@@ -425,6 +441,14 @@ export const ListOpenaiMessagesParams = zod.object({
   "id": zod.coerce.number().int().min(1)
 })
 
+export const listOpenaiMessagesResponseDurationMsMin = 0;
+
+export const listOpenaiMessagesResponseFilesMetaItemAddedMin = 0;
+
+export const listOpenaiMessagesResponseFilesMetaItemRemovedMin = 0;
+
+
+
 export const ListOpenaiMessagesResponseItem = zod.object({
   "id": zod.number().int(),
   "conversationId": zod.number().int(),
@@ -471,6 +495,14 @@ export const ListOpenaiMessagesResponseItem = zod.object({
 }).nullish()
 }).nullish(),
   "assetIds": zod.array(zod.number().int()).nullish(),
+  "durationMs": zod.number().int().min(listOpenaiMessagesResponseDurationMsMin).nullish(),
+  "filesMeta": zod.array(zod.object({
+  "path": zod.string(),
+  "kind": zod.enum(['edit', 'create', 'generate']),
+  "added": zod.number().int().min(listOpenaiMessagesResponseFilesMetaItemAddedMin).nullish(),
+  "removed": zod.number().int().min(listOpenaiMessagesResponseFilesMetaItemRemovedMin).nullish(),
+  "patch": zod.string().nullish().describe('Unified diff of this touch, capped server-side')
+})).nullish(),
   "generatedAssets": zod.array(zod.object({
   "id": zod.number().int(),
   "filename": zod.string(),
@@ -505,6 +537,7 @@ export const sendOpenaiMessageBodyAttachmentsItemNameMax = 255;
 export const sendOpenaiMessageBodyAttachmentsMax = 5;
 
 
+
 export const sendOpenaiMessageBodyHistoryItemAttachmentsItemNameMax = 255;
 
 export const sendOpenaiMessageBodyHistoryItemAttachmentsMax = 5;
@@ -523,6 +556,8 @@ export const SendOpenaiMessageBody = zod.object({
   "isBase64": zod.boolean().optional().describe('Compatibility hint; kind is authoritative')
 })).max(sendOpenaiMessageBodyAttachmentsMax).optional(),
   "fileFormat": zod.enum(['pdf', 'docx', 'xlsx', 'pptx']).optional().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)'),
+  "projectId": zod.number().int().min(1).nullish().describe('Target project (workspace folder) for coding mode'),
+  "codingMode": zod.boolean().optional().describe('Explicit coding mode; model may write project files via file fences'),
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string().min(1),
@@ -553,6 +588,7 @@ export const sendOpenaiEphemeralMessageBodyAttachmentsItemNameMax = 255;
 export const sendOpenaiEphemeralMessageBodyAttachmentsMax = 5;
 
 
+
 export const sendOpenaiEphemeralMessageBodyHistoryItemAttachmentsItemNameMax = 255;
 
 export const sendOpenaiEphemeralMessageBodyHistoryItemAttachmentsMax = 5;
@@ -571,6 +607,8 @@ export const SendOpenaiEphemeralMessageBody = zod.object({
   "isBase64": zod.boolean().optional().describe('Compatibility hint; kind is authoritative')
 })).max(sendOpenaiEphemeralMessageBodyAttachmentsMax).optional(),
   "fileFormat": zod.enum(['pdf', 'docx', 'xlsx', 'pptx']).optional().describe('Optional target file format for generated downloads (pdf, docx, xlsx, pptx)'),
+  "projectId": zod.number().int().min(1).nullish().describe('Target project (workspace folder) for coding mode'),
+  "codingMode": zod.boolean().optional().describe('Explicit coding mode; model may write project files via file fences'),
   "history": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string().min(1),

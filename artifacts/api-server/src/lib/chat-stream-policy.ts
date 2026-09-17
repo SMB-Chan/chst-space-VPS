@@ -4,6 +4,7 @@ import { matchSkills } from "./skills";
 import { splitThinkTags } from "./stream-delta";
 import type { CapabilityToolPlan } from "./capability-broker";
 import type { SpecialistToolCall } from "./specialist-capabilities";
+import { codingModePrompt } from "./coding-mode";
 import {
   buildTranslationSystemPrompt,
   type TranslationMode,
@@ -58,6 +59,7 @@ export function prepareInitialChatMessages(args: {
   userText: string;
   translationMode?: TranslationMode;
   requestedFileFormat?: FileFormat | null;
+  codingFolder?: string | null;
 }): {
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   skills: ReturnType<typeof matchSkills>;
@@ -73,18 +75,26 @@ export function prepareInitialChatMessages(args: {
       role: "system",
       content: DEFAULT_CHAT_SYSTEM_PROMPT,
     });
-    if (wantsArtifact(args.userText)) {
-      messages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
-    }
-    if (wantsGeneratedFile(args.userText) || args.requestedFileFormat) {
+    if (args.codingFolder) {
       messages.push({
         role: "system",
-        content: FILE_GENERATION_SYSTEM_PROMPT,
+        content: codingModePrompt(args.codingFolder),
       });
+    } else {
+      if (wantsArtifact(args.userText)) {
+        messages.push({ role: "system", content: ARTIFACT_SYSTEM_PROMPT });
+      }
+      if (wantsGeneratedFile(args.userText) || args.requestedFileFormat) {
+        messages.push({
+          role: "system",
+          content: FILE_GENERATION_SYSTEM_PROMPT,
+        });
+      }
     }
   }
 
-  const skills = args.translationMode ? [] : matchSkills(args.userText);
+  const skills =
+    args.translationMode || args.codingFolder ? [] : matchSkills(args.userText);
   for (const skill of skills) {
     messages.push({ role: "system", content: skill.prompt });
   }
@@ -93,11 +103,15 @@ export function prepareInitialChatMessages(args: {
 
 export function shouldAttachSpecialistTools(args: {
   translationMode?: TranslationMode;
+  codingMode?: boolean;
   hasBrokerToolCall: boolean;
   hasWebContext: boolean;
 }): boolean {
   return (
-    !args.translationMode && !args.hasBrokerToolCall && !args.hasWebContext
+    !args.translationMode &&
+    !args.codingMode &&
+    !args.hasBrokerToolCall &&
+    !args.hasWebContext
   );
 }
 

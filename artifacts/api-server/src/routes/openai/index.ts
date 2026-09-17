@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { db } from "@workspace/db";
 import {
   conversations,
@@ -36,6 +37,7 @@ import {
 import {
   getAvailableChatModels,
   getCapabilityRegistryWithAvailability,
+  type GeneratedAsset,
 } from "../../lib/specialist-capabilities";
 import {
   createResponseCancellation,
@@ -49,7 +51,9 @@ import {
   type TranslationMode,
 } from "../../lib/translation";
 import { logger, safeFailureFields } from "../../lib/logger";
-import type { FileFormat } from "../../lib/file-generation";
+import type { FileFormat, GeneratedFile } from "../../lib/file-generation";
+import { getProject } from "../../lib/project-memory-store";
+import { createProjectFolder, workspaceRoot } from "../files";
 import {
   FILE_EXTRACTION_TIMEOUT_MS,
   FileExtractionError,
@@ -191,6 +195,88 @@ function parseStoredSources(
     );
     return null;
   }
+}
+
+type StoredFileTouch = {
+  path: string;
+  kind: "edit" | "create" | "generate";
+  added?: number;
+  removed?: number;
+};
+
+const FILE_TOUCH_KINDS = new Set(["edit", "create", "generate"]);
+
+function parseStoredFilesMeta(raw: string | null): StoredFileTouch[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const cleaned = parsed.flatMap((item): StoredFileTouch[] => {
+      if (!item || typeof item !== "object") return [];
+      const record = item as Record<string, unknown>;
+      if (typeof record.path !== "string" || !record.path) return [];
+      if (typeof record.kind !== "string" || !FILE_TOUCH_KINDS.has(record.kind))
+        return [];
+      const touch: StoredFileTouch = {
+        path: record.path,
+        kind: record.kind as StoredFileTouch["kind"],
+      };
+      if (
+        typeof record.added === "number" &&
+        Number.isSafeInteger(record.added) &&
+        record.added >= 0
+      ) {
+        touch.added = record.added;
+      }
+      if (
+        typeof record.removed === "number" &&
+        Number.isSafeInteger(record.removed) &&
+        record.removed >= 0
+      ) {
+        touch.removed = record.removed;
+      }
+      return [touch];
+    });
+    return cleaned.length > 0 ? cleaned : null;
+  } catch {
+    logger.warn(
+      { component: "openai-route", errorCode: "MALFORMED_FILES_META" },
+      "Ignoring malformed message filesMeta JSON",
+    );
+    return null;
+  }
+}
+
+/**
+ * Files the coding/file-generation path produced this turn, summarized for
+ * the chat UI. Message-column JSON only; the binaries themselves stay in
+ * assets/artifacts with their own quota and download routes.
+ */
+function persistedFileTouches(
+  generatedFiles: GeneratedFile[] | undefined,
+  generatedAssets: GeneratedAsset[] | undefined,
+): StoredFileTouch[] | null {
+  const touches: StoredFileTouch[] = [];
+  for (const file of generatedFiles ?? []) {
+    touches.push({ path: file.filename, kind: "generate" });
+  }
+  for (const asset of generatedAssets ?? []) {
+    touches.push({ path: asset.filename, kind: "generate" });
+  }
+  return touches.length > 0 ? touches : null;
+}
+
+function mergeFileTouches(
+  ...lists: (StoredFileTouch[] | null | undefined)[]
+): StoredFileTouch[] | undefined {
+  const byPath = new Map<string, StoredFileTouch>();
+  for (const list of lists) {
+    for (const touch of list ?? []) {
+      if (!touch.path) continue;
+      byPath.set(touch.path, touch);
+    }
+  }
+  return byPath.size > 0 ? [...byPath.values()] : undefined;
 }
 
 function contentDisposition(filename: string): string {
@@ -393,6 +479,7 @@ async function getHydratedMessages(conversationId: number, userId: string) {
         sources?.length ?? 0,
       ),
       assetIds: parseStoredAssetIds(message.assetIds),
+      filesMeta: parseStoredFilesMeta(message.filesMeta),
       generatedAssets: generatedAssetRows
         .filter((asset) => asset.messageId === message.id)
         .map((asset) => ({
@@ -728,54 +815,64 @@ router.delete("/openai/providers/:provider", requireAuth, async (req, res) => {
 });
 
 /** Validates a key against the provider without persisting it first. */
-router.post("/openai/providers/:provider/test", requireAuth, async (req, res) => {
-  const provider = req.params.provider;
-  if (!isProviderId(provider)) {
-    res.status(400).json({ error: "未対応のプロバイダーです。" });
-    return;
-  }
-  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-  const baseUrl =
-    typeof req.body?.baseUrl === "string" && req.body.baseUrl.trim()
-      ? req.body.baseUrl.trim()
-      : DEFAULT_PROVIDER_BASE_URLS[provider];
-  if (!apiKey) {
-    res.status(400).json({ error: "APIキーを入力してください。" });
-    return;
-  }
-
-  const url =
-    provider === "openai"
-      ? (baseUrl || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || "https://api.openai.com/v1") +
-        "/models"
-      : (baseUrl || "") + "/models";
-  if (!url.startsWith("http")) {
-    res.status(400).json({ error: "接続先URLが不正です。" });
-    return;
-  }
-
-  try {
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (response.ok) {
-      res.json({ ok: true, message: "接続に成功しました。" });
+router.post(
+  "/openai/providers/:provider/test",
+  requireAuth,
+  async (req, res) => {
+    const provider = req.params.provider;
+    if (!isProviderId(provider)) {
+      res.status(400).json({ error: "未対応のプロバイダーです。" });
       return;
     }
-    const detail = await response.text().catch(() => "");
-    res.status(response.status === 401 || response.status === 403 ? 400 : 502).json({
-      ok: false,
-      error:
-        response.status === 401 || response.status === 403
-          ? "APIキーが拒否されました。キーを確認してください。"
-          : `接続に失敗しました (HTTP ${response.status}).${detail ? ` ${detail.slice(0, 160)}` : ""}`,
-    });
-  } catch (err) {
-    logSafeHttpError(req, 502, err, "HTTP_PROVIDER");
-    res.status(502).json({ ok: false, error: "プロバイダーへの接続に失敗しました。" });
-  }
-});
+    const apiKey =
+      typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+    const baseUrl =
+      typeof req.body?.baseUrl === "string" && req.body.baseUrl.trim()
+        ? req.body.baseUrl.trim()
+        : DEFAULT_PROVIDER_BASE_URLS[provider];
+    if (!apiKey) {
+      res.status(400).json({ error: "APIキーを入力してください。" });
+      return;
+    }
+
+    const url =
+      provider === "openai"
+        ? (baseUrl ||
+            process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ||
+            "https://api.openai.com/v1") + "/models"
+        : (baseUrl || "") + "/models";
+    if (!url.startsWith("http")) {
+      res.status(400).json({ error: "接続先URLが不正です。" });
+      return;
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (response.ok) {
+        res.json({ ok: true, message: "接続に成功しました。" });
+        return;
+      }
+      const detail = await response.text().catch(() => "");
+      res
+        .status(response.status === 401 || response.status === 403 ? 400 : 502)
+        .json({
+          ok: false,
+          error:
+            response.status === 401 || response.status === 403
+              ? "APIキーが拒否されました。キーを確認してください。"
+              : `接続に失敗しました (HTTP ${response.status}).${detail ? ` ${detail.slice(0, 160)}` : ""}`,
+        });
+    } catch (err) {
+      logSafeHttpError(req, 502, err, "HTTP_PROVIDER");
+      res
+        .status(502)
+        .json({ ok: false, error: "プロバイダーへの接続に失敗しました。" });
+    }
+  },
+);
 
 router.get("/openai/capabilities", async (_req, res) => {
   res.json(await getCapabilityRegistryWithAvailability());
@@ -1445,6 +1542,46 @@ router.post(
 
       const requestedFileFormat = parsed.data.fileFormat as
         FileFormat | undefined;
+      const turnStartedAt = Date.now();
+
+      // Explicit coding mode: writes land in the project's workspace folder.
+      const codingMode = parsed.data.codingMode === true;
+      const requestedProjectId =
+        parsed.data.projectId ?? conversation.projectId ?? null;
+      let codingRoot: string | null = null;
+      let codingFolder: string | null = null;
+      if (codingMode && requestedProjectId != null) {
+        const project = await getProject(userId, requestedProjectId);
+        if (project) {
+          try {
+            codingFolder = createProjectFolder(project.name);
+            codingRoot = path.join(workspaceRoot(), codingFolder);
+          } catch (err) {
+            logger.warn(
+              safeFailureFields(
+                err,
+                "openai-route",
+                "CODING_WORKSPACE_UNAVAILABLE",
+              ),
+              "Coding mode workspace folder could not be resolved",
+            );
+            codingRoot = null;
+          }
+        }
+        try {
+          await db
+            .update(conversations)
+            .set({ projectId: requestedProjectId })
+            .where(
+              and(
+                eq(conversations.id, conversationId),
+                eq(conversations.userId, userId),
+              ),
+            );
+        } catch {
+          /* best-effort project binding */
+        }
+      }
 
       const shared = await resolveSharedChatParams(
         req,
@@ -1563,10 +1700,14 @@ router.post(
         conversationId,
         requestedFileFormat,
         cancellation,
+        coding:
+          codingMode && codingRoot && codingFolder
+            ? { root: codingRoot, folder: codingFolder }
+            : null,
         memory: {
           enabled: true,
           userId,
-          projectId: conversation.projectId,
+          projectId: requestedProjectId ?? conversation.projectId,
         },
         userRole: (req.userRole ?? "user") as UserRole,
         publicAiError,
@@ -1578,6 +1719,7 @@ router.post(
           artifacts: extractedArtifacts,
           generatedFiles,
           generatedAssets,
+          filesMeta: codingFilesMeta,
         }) => {
           if (cancellation.signal.aborted) return;
           const persisted = await persistChatCompletion({
@@ -1592,6 +1734,11 @@ router.post(
             generatedFiles,
             generatedAssets,
             extractedArtifacts,
+            durationMs: Math.max(0, Date.now() - turnStartedAt),
+            filesMeta: mergeFileTouches(
+              codingFilesMeta,
+              persistedFileTouches(generatedFiles, generatedAssets),
+            ),
           });
           return {
             assets: persisted.assets,

@@ -77,6 +77,10 @@ import {
   planCapabilityTool,
 } from "./capability-broker";
 import {
+  applyCompletedCodingWrites,
+  persistableCodingTouch,
+} from "./coding-mode";
+import {
   isResearchAnnouncementOnly,
   prepareInitialChatMessages,
   shouldAttachSpecialistTools,
@@ -285,6 +289,8 @@ export async function streamChatReply(args: {
   conversationId?: number;
   /** Explicit file format requested by the frontend. */
   requestedFileFormat?: FileFormat | null;
+  /** Explicit coding mode writes `file:` fences into this project folder. */
+  coding?: { root: string; folder: string } | null;
   /** Long-term memory is opt-in and must always be scoped to one user. */
   memory?: ChatMemoryContext;
   /** Shared response cancellation, created before attachment extraction. */
@@ -317,6 +323,7 @@ export async function streamChatReply(args: {
     includeArtifactContent = false,
     conversationId,
     requestedFileFormat,
+    coding = null,
     memory = { enabled: false },
     cancellation: providedCancellation,
     userRole,
@@ -412,11 +419,13 @@ export async function streamChatReply(args: {
     }
   };
   try {
+    const codingActive = Boolean(coding) && !translationMode;
     const { messages: workingMessages, skills } = prepareInitialChatMessages({
       chatMessages,
       userText,
       translationMode,
-      requestedFileFormat,
+      requestedFileFormat: codingActive ? null : requestedFileFormat,
+      codingFolder: codingActive ? coding?.folder : null,
     });
     if (skills.length > 0 && !clientGone()) {
       res.write(
@@ -486,29 +495,31 @@ export async function streamChatReply(args: {
     // Translation mode works from the conversation alone; web search would
     // only add latency and untrusted noise.
     const newsSearchBudget = { alternateUsed: false };
-    const webContext = translationMode
-      ? { searched: false, sources: [], contextText: "" }
-      : await buildWebContext(
-          client,
-          modelId,
-          provider,
-          userText,
-          (event) => {
-            if (!clientGone()) res.write(`data: ${JSON.stringify(event)}\n\n`);
-          },
-          {
-            forceQuery: composeSkillSearchQuery(userText, skills),
-            recentConversation: buildRecentSearchConversation(
-              chatMessages,
-              userText,
-            ),
-            signal: clientAbort.signal,
-            newsSearchBudget,
-            transcribeVisuals: isVisionBridgeAvailable()
-              ? (vArgs) => describeImagesForTextModel(vArgs)
-              : undefined,
-          },
-        );
+    const webContext =
+      translationMode || codingActive
+        ? { searched: false, sources: [], contextText: "" }
+        : await buildWebContext(
+            client,
+            modelId,
+            provider,
+            userText,
+            (event) => {
+              if (!clientGone())
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+            },
+            {
+              forceQuery: composeSkillSearchQuery(userText, skills),
+              recentConversation: buildRecentSearchConversation(
+                chatMessages,
+                userText,
+              ),
+              signal: clientAbort.signal,
+              newsSearchBudget,
+              transcribeVisuals: isVisionBridgeAvailable()
+                ? (vArgs) => describeImagesForTextModel(vArgs)
+                : undefined,
+            },
+          );
 
     failureSources = webContext.sources;
     let activeNewsQuality = webContext.newsQuality;
@@ -623,9 +634,8 @@ export async function streamChatReply(args: {
     // the operator switches models mid-project.
     if (!translationMode && memory.enabled && memory.projectId != null) {
       try {
-        const { loadProjectMemoryContext } = await import(
-          "./project-memory-store"
-        );
+        const { loadProjectMemoryContext } =
+          await import("./project-memory-store");
         const projectPrompt = await loadProjectMemoryContext(
           memory.userId,
           memory.projectId,
@@ -634,9 +644,8 @@ export async function streamChatReply(args: {
           workingMessages.push({ role: "system", content: projectPrompt });
         }
 
-        const { listToolBank, formatToolBankContext } = await import(
-          "./tool-bank-store"
-        );
+        const { listToolBank, formatToolBankContext } =
+          await import("./tool-bank-store");
         const bankTools = await listToolBank(memory.userId, {
           status: "active",
         });
@@ -657,6 +666,7 @@ export async function streamChatReply(args: {
     // plan would be discarded.
     if (
       !translationMode &&
+      !codingActive &&
       (!restrictSpecialist || couldNeedSpeechCapabilityTool(userText))
     ) {
       const plan = await planCapabilityTool({
@@ -699,6 +709,7 @@ export async function streamChatReply(args: {
     // providers to return an empty or malformed tool-only response.
     const specialistTools = shouldAttachSpecialistTools({
       translationMode,
+      codingMode: codingActive,
       hasBrokerToolCall: Boolean(brokerToolCall),
       hasWebContext:
         webContext.sources.length > 0 && Boolean(webContext.contextText),
@@ -1633,9 +1644,10 @@ export async function streamChatReply(args: {
           ? String((req as { id: string | number }).id)
           : undefined;
       const formatDetectionStartedAt = Date.now();
-      const fileFormat = translationMode
-        ? null
-        : detectFileFormat(userText, requestedFileFormat);
+      const fileFormat =
+        translationMode || codingActive
+          ? null
+          : detectFileFormat(userText, requestedFileFormat);
       if (fileFormat) {
         logger.info(
           {
@@ -1702,6 +1714,27 @@ export async function streamChatReply(args: {
         );
       }
 
+      let codingFilesMeta: ChatCompletionInput["filesMeta"];
+      if (codingActive && coding?.root) {
+        try {
+          const applied = applyCompletedCodingWrites(coding.root, fullResponse);
+          codingFilesMeta =
+            applied.touches.length > 0
+              ? applied.touches.map(persistableCodingTouch)
+              : undefined;
+          if (applied.touches.length > 0) {
+            const stripped = applied.stripped.trim();
+            fullResponse =
+              stripped || "ファイルをプロジェクトに書き込みました。";
+          }
+        } catch (error) {
+          logger.warn(
+            safeFailureFields(error, "chat-stream", "CODING_WRITE_FAILED"),
+            "Coding mode writes could not be applied",
+          );
+        }
+      }
+
       const completionEmitted = await persistAndEmitChatCompletion({
         res,
         clientGone,
@@ -1716,6 +1749,7 @@ export async function streamChatReply(args: {
           generatedFiles: generatedFile ? [generatedFile] : undefined,
           generatedAssets:
             generatedAssets.length > 0 ? generatedAssets : undefined,
+          filesMeta: codingFilesMeta,
         },
       });
       if (!completionEmitted) return;

@@ -19,6 +19,13 @@ export interface OpenaiMessageInput {
   /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
   fileFormat?: OpenaiMessageInputFileFormat;
   /**
+     * Target project (workspace folder) for coding mode
+     * @minimum 1
+     */
+  projectId?: number | null;
+  /** Explicit coding mode; model may write project files via file fences */
+  codingMode?: boolean;
+  /**
      * Conversation history for ephemeral/private mode
      * @maxItems 200
      */

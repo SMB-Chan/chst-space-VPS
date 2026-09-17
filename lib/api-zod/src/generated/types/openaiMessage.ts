@@ -7,6 +7,7 @@
  */
 import type { OpenaiArtifact } from './openaiArtifact';
 import type { OpenaiFactualityReport } from './openaiFactualityReport';
+import type { OpenaiFileTouch } from './openaiFileTouch';
 import type { OpenaiGeneratedAsset } from './openaiGeneratedAsset';
 import type { OpenaiSource } from './openaiSource';
 
@@ -22,6 +23,9 @@ export interface OpenaiMessage {
   auditModelId?: string | null;
   factuality?: OpenaiFactualityReport | null;
   assetIds?: number[] | null;
+  /** @minimum 0 */
+  durationMs?: number | null;
+  filesMeta?: OpenaiFileTouch[] | null;
   generatedAssets?: OpenaiGeneratedAsset[] | null;
   createdAt: Date;
 }

@@ -29,6 +29,10 @@ export const messages = pgTable(
     factuality: text("factuality"),
     /** JSON-encoded array of asset ids generated for this assistant message */
     assetIds: text("asset_ids"),
+    /** Wall-clock milliseconds for this assistant turn. */
+    durationMs: integer("duration_ms"),
+    /** JSON list of files touched this turn: {path, kind, added, removed} */
+    filesMeta: text("files_meta"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

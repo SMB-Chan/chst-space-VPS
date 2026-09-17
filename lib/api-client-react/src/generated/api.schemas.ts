@@ -209,6 +209,26 @@ export interface OpenaiGeneratedAsset {
   downloadUrl: string;
 }
 
+export type OpenaiFileTouchKind = typeof OpenaiFileTouchKind[keyof typeof OpenaiFileTouchKind];
+
+
+export const OpenaiFileTouchKind = {
+  edit: 'edit',
+  create: 'create',
+  generate: 'generate',
+} as const;
+
+export interface OpenaiFileTouch {
+  path: string;
+  kind: OpenaiFileTouchKind;
+  /** @minimum 0 */
+  added?: number | null;
+  /** @minimum 0 */
+  removed?: number | null;
+  /** Unified diff of this touch, capped server-side */
+  patch?: string | null;
+}
+
 export type OpenaiFactualityClaimVerdict = typeof OpenaiFactualityClaimVerdict[keyof typeof OpenaiFactualityClaimVerdict];
 
 
@@ -291,6 +311,9 @@ export interface OpenaiMessage {
   auditModelId?: string | null;
   factuality?: OpenaiFactualityReport | null;
   assetIds?: number[] | null;
+  /** @minimum 0 */
+  durationMs?: number | null;
+  filesMeta?: OpenaiFileTouch[] | null;
   generatedAssets?: OpenaiGeneratedAsset[] | null;
   createdAt: string;
 }
@@ -362,6 +385,13 @@ export interface OpenaiMessageInput {
   attachments?: OpenaiAttachment[];
   /** Optional target file format for generated downloads (pdf, docx, xlsx, pptx) */
   fileFormat?: OpenaiMessageInputFileFormat;
+  /**
+     * Target project (workspace folder) for coding mode
+     * @minimum 1
+     */
+  projectId?: number | null;
+  /** Explicit coding mode; model may write project files via file fences */
+  codingMode?: boolean;
   /**
      * Conversation history for ephemeral/private mode
      * @maxItems 200

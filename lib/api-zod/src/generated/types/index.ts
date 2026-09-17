@@ -25,6 +25,8 @@ export * from './openaiFactualityClaim';
 export * from './openaiFactualityClaimVerdict';
 export * from './openaiFactualityReport';
 export * from './openaiFactualityReportStatus';
+export * from './openaiFileTouch';
+export * from './openaiFileTouchKind';
 export * from './openaiGeneratedAsset';
 export * from './openaiMe';
 export * from './openaiMeRole';

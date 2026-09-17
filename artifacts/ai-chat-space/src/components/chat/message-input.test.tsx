@@ -33,6 +33,18 @@ describe("MessageInput (composer)", () => {
     expect(html).not.toContain('data-testid="composer-tools-toggle"');
   });
 
+  it("renders the tools toggle when coding mode is enabled", () => {
+    const html = renderToStaticMarkup(
+      <MessageInput
+        onSend={() => {}}
+        fileGenerationEnabled={false}
+        videoGenerationEnabled={false}
+        codingEnabled
+      />,
+    );
+    expect(html).toContain('data-testid="composer-tools-toggle"');
+  });
+
   it("renders the tools toggle for mobile model selection", () => {
     const html = renderToStaticMarkup(
       <MessageInput

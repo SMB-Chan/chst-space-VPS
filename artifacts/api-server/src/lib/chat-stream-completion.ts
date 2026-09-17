@@ -21,6 +21,12 @@ export interface ChatCompletionInput {
   artifacts?: ExtractedArtifact[];
   generatedFiles?: GeneratedFile[];
   generatedAssets?: GeneratedAsset[];
+  filesMeta?: {
+    path: string;
+    kind: "edit" | "create" | "generate";
+    added?: number;
+    removed?: number;
+  }[];
 }
 
 export interface ChatCompletionPersistenceResult {
@@ -144,6 +150,10 @@ export async function persistAndEmitChatCompletion(args: {
         content: `data:${asset.mimeType};base64,${asset.buffer.toString("base64")}`,
       })),
     });
+  }
+
+  if (input.filesMeta && input.filesMeta.length > 0 && !args.clientGone()) {
+    writeEvent(args.res, { filesMeta: input.filesMeta });
   }
 
   const artifacts = input.artifacts ?? [];

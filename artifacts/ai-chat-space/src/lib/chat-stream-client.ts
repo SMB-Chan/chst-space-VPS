@@ -54,6 +54,16 @@ export async function streamMessage(
     fileFormat?: FileFormat;
     attachments?: OutgoingAttachment[];
     translationMode?: string;
+    codingMode?: boolean;
+    projectId?: number | null;
+    onFilesMeta?: (
+      files: {
+        path: string;
+        kind: string;
+        added?: number | null;
+        removed?: number | null;
+      }[],
+    ) => void;
   },
 ) {
   try {
@@ -75,6 +85,9 @@ export async function streamMessage(
           content,
           modelId: model,
           ...(extra?.fileFormat ? { fileFormat: extra.fileFormat } : {}),
+          ...(extra?.codingMode
+            ? { codingMode: true, projectId: extra.projectId ?? null }
+            : {}),
           ...(extra?.attachments?.length
             ? {
                 attachments: extra.attachments.map((attachment) => ({
@@ -260,6 +273,33 @@ export async function streamMessage(
             return artifact.downloadUrl ? [artifact] : [];
           });
           if (artifacts.length > 0) onArtifacts(artifacts);
+        }
+        if (Array.isArray(parsed.filesMeta) && extra?.onFilesMeta) {
+          const files = parsed.filesMeta.flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const record = item as Record<string, unknown>;
+            if (typeof record.path !== "string" || !record.path) return [];
+            if (
+              record.kind !== "edit" &&
+              record.kind !== "create" &&
+              record.kind !== "generate"
+            ) {
+              return [];
+            }
+            return [
+              {
+                path: record.path,
+                kind: record.kind,
+                added:
+                  typeof record.added === "number" ? record.added : undefined,
+                removed:
+                  typeof record.removed === "number"
+                    ? record.removed
+                    : undefined,
+              },
+            ];
+          });
+          if (files.length > 0) extra.onFilesMeta(files);
         }
         if (typeof parsed.content === "string" && parsed.content) {
           if (parsed.status === "revising") {
