@@ -50,7 +50,7 @@ function CodeBlock({
   children: string;
 }) {
   return (
-    <div className="m3-outlined-surface my-4 overflow-hidden rounded-[var(--m3-shape-lg)] font-sans shadow-[var(--m3-elevation-1)]">
+    <div className="m3-outlined-surface my-4 rounded-[var(--m3-shape-lg)] font-sans shadow-[var(--m3-elevation-1)]">
       {language ? (
         <div className="bg-muted/60 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border/60 uppercase tracking-wider">
           {language}

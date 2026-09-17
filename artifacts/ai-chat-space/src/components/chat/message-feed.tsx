@@ -1213,7 +1213,7 @@ export function MessageFeed({
         stickToBottomRef.current = atBottom;
         setAwayFromBottom(!atBottom);
       }}
-      className="relative flex-1 overflow-y-auto px-3 py-5 sm:px-5 md:px-8 md:py-7 pb-[calc(6rem+env(safe-area-inset-bottom))]"
+      className="relative flex-1 overflow-auto px-3 py-5 sm:px-5 md:px-8 md:py-7 pb-[calc(6rem+env(safe-area-inset-bottom))]"
     >
       {awayFromBottom && (
         <button

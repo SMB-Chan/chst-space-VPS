@@ -365,6 +365,7 @@ export function getCapabilityRegistry(): {
 
 function formatDiscoveredLabel(id: string): string {
   return id
+    .replace(/^\w+\//, "")
     .split(/[-_.]/)
     .map((part) =>
       part.length <= 2
