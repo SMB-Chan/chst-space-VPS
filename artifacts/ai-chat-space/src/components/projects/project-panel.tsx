@@ -3,6 +3,7 @@ import { FolderKanban, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileBrowser } from "@/components/files/file-browser";
+import { cn } from "@/lib/utils";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -86,30 +87,53 @@ export function ProjectPanel({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <FolderKanban className="h-4 w-4" />
-          プロジェクト
-        </h3>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 gap-1 text-xs"
-          onClick={() => {
-            setShowFiles((v) => !v);
-            if (!showFiles && !filesPath) setFilesPath("");
-          }}
-        >
-          ファイル
-        </Button>
-      </div>
+      {compact ? (
+        <div className="flex items-center justify-between px-2 pb-2 pt-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--m3-on-surface-variant)]">
+            プロジェクト
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setShowFiles((v) => !v);
+              if (!showFiles && !filesPath) setFilesPath("");
+            }}
+            className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--m3-on-surface-variant)] transition-colors hover:text-foreground"
+            aria-expanded={showFiles}
+          >
+            ファイル
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <FolderKanban className="h-4 w-4" />
+            プロジェクト
+          </h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1 text-xs"
+            onClick={() => {
+              setShowFiles((v) => !v);
+              if (!showFiles && !filesPath) setFilesPath("");
+            }}
+          >
+            ファイル
+          </Button>
+        </div>
+      )}
 
-      <div className="flex gap-2">
+      <div className={compact ? "flex gap-1.5 px-2" : "flex gap-2"}>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="新しいプロジェクト名"
-          className={compact ? "h-9 text-sm" : ""}
+          className={
+            compact
+              ? "h-9 rounded-[var(--m3-shape-md)] border-[var(--m3-outline-variant)] bg-[var(--m3-surface-container)] text-sm"
+              : ""
+          }
           onKeyDown={(e) => {
             if (e.key === "Enter") void handleCreate();
           }}
@@ -117,38 +141,50 @@ export function ProjectPanel({
         <Button
           disabled={busy || !name.trim()}
           onClick={() => void handleCreate()}
-          className="gap-1"
+          className={
+            compact
+              ? "h-9 w-9 shrink-0 rounded-[var(--m3-shape-md)] p-0"
+              : "gap-1"
+          }
           size={compact ? "sm" : "default"}
+          aria-label="プロジェクトを作成"
         >
           {busy ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Plus className="h-4 w-4" />
           )}
-          作成
+          {compact ? null : "作成"}
         </Button>
       </div>
 
       {!projects ? (
-        <p className="text-xs text-[var(--m3-on-surface-variant)]">読み込み中...</p>
+        <p className="px-2 text-xs text-[var(--m3-on-surface-variant)]">
+          読み込み中...
+        </p>
       ) : projects.length === 0 ? (
-        <p className="text-xs text-[var(--m3-on-surface-variant)]">
+        <p className="px-2 text-xs text-[var(--m3-on-surface-variant)]">
           まだプロジェクトがありません。名前を付けて作成すると、ワークスペースにフォルダも作られます。
         </p>
       ) : (
-        <ul className="space-y-1">
+        <ul className={compact ? "space-y-0.5 px-1" : "space-y-1"}>
           {projects.map((project) => (
             <li key={project.id}>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-[var(--m3-shape-md)] px-2 py-1.5 text-left text-sm hover:bg-[var(--m3-surface-container)]"
+                className={cn(
+                  "flex w-full items-center gap-2.5 text-left text-sm text-[var(--m3-on-surface)] transition-[background-color,color] duration-[var(--m3-duration-medium)] ease-[var(--m3-motion-standard)]",
+                  compact
+                    ? "rounded-[var(--m3-shape-md)] px-3 py-2 hover:bg-[var(--m3-surface-container)]"
+                    : "rounded-[var(--m3-shape-md)] px-2 py-1.5 hover:bg-[var(--m3-surface-container)]",
+                )}
                 onClick={() => {
                   setFilesPath(project.slug || project.name);
                   setShowFiles(true);
                   onOpenFiles?.(project.slug || project.name);
                 }}
               >
-                <FolderKanban className="h-3.5 w-3.5 shrink-0 text-[var(--m3-primary)]" />
+                <FolderKanban className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />
                 <span className="truncate">{project.name}</span>
               </button>
             </li>
@@ -157,13 +193,19 @@ export function ProjectPanel({
       )}
 
       {showFiles && (
-        <div className="h-[min(50dvh,420px)]">
+        <div
+          className={
+            compact ? "mx-2 h-[min(50dvh,420px)]" : "h-[min(50dvh,420px)]"
+          }
+        >
           <FileBrowser initialPath={filesPath} />
         </div>
       )}
 
       {message && (
-        <p className="text-xs text-[var(--m3-on-surface-variant)]">{message}</p>
+        <p className="px-2 text-xs text-[var(--m3-on-surface-variant)]">
+          {message}
+        </p>
       )}
     </div>
   );
