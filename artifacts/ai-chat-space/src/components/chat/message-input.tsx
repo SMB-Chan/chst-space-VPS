@@ -9,6 +9,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   AlertTriangle,
   Paperclip,
   Send,
@@ -300,10 +310,15 @@ function Composer({
   const [videoRatio, setVideoRatio] =
     useState<VideoGenerationInput["ratio"]>("16:9");
   const [videoDuration, setVideoDuration] = useState(5);
+  const [confirmVideoOpen, setConfirmVideoOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isSendingRef = useRef(false);
+  // Apple HIG §6: when the user has already confirmed an expensive
+  // action (video generation) via the AlertDialog, the dialog's
+  // primary action sets this ref to bypass the second confirm check.
+  const videoConfirmedRef = useRef(false);
   const preparingRef = useRef(false);
   const composingRef = useRef(false);
   const mountedRef = useRef(false);
@@ -462,6 +477,9 @@ function Composer({
     setSubmitting(true);
     setFileError(null);
     setToolsOpen(false);
+    // Read-once acknowledgement of the dialog "Confirm" click.
+    const previouslyConfirmed = videoConfirmedRef.current;
+    videoConfirmedRef.current = false;
 
     const readAttachments = async (items: StagedFile[]) => {
       const results = await Promise.all(
@@ -527,29 +545,17 @@ function Composer({
           );
           return;
         }
-        const confirmed = window.confirm(
-          `${videoMode.toUpperCase()}動画（${videoDuration}秒・${videoResolution}）を生成します。\n高コストの処理です。実行しますか？`,
-        );
-        if (!confirmed) return;
-        const references = imageFiles.length
-          ? await readAttachments(imageFiles)
-          : undefined;
-        if (!mountedRef.current || references === null) return;
-        const result = await onGenerateVideo({
-          prompt: content.trim(),
-          mode: videoMode,
-          referenceImages: references,
-          resolution: videoResolution,
-          ratio: videoRatio,
-          duration: videoDuration,
-        });
-        if (!mountedRef.current || result === false) return;
-        setContent("");
-        setFiles([]);
-        setFileError(null);
-        setVideoMode(null);
-        return;
+        // Apple HIG §6 — destructive/expensive action requires
+        // explicit confirmation. We pop the AlertDialog at the
+        // bottom of the composer; the dialog's primary action will
+        // re-call handleSubmit() with videoConfirmedRef.current =
+        // true, which we honour here and then reset.
+        if (!previouslyConfirmed) {
+          setConfirmVideoOpen(true);
+          return;
+        }
       }
+
       if (files.length > 5) {
         setFileError(
           "通常のチャット添付は最大5件までです。動画生成では動画モードを選択してください。",
@@ -742,7 +748,39 @@ function Composer({
               <X className="h-3 w-3" />
             </button>
           </div>
-        </div>
+        
+        {videoMode && (
+          <AlertDialog
+            open={confirmVideoOpen}
+            onOpenChange={(open) => {
+              setConfirmVideoOpen(open);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  動画生成を実行しますか？
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {videoDuration} 秒・{videoResolution} の動画を高コストな API で生成します。続行すると中断できません。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>戻る</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setConfirmVideoOpen(false);
+                    videoConfirmedRef.current = true;
+                    void handleSubmit();
+                  }}
+                >
+                  生成する
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+</div>
       )}
 
       {compressing && (

@@ -100,7 +100,7 @@ export function HomePage() {
             <div className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-[var(--m3-on-surface-variant)] lg:justify-start">
               <span className="inline-flex items-center gap-1.5">
                 <ShieldCheck className="h-3.5 w-3.5 [color:var(--app-status-success)]" />
-                会話データを安全に保存
+                自分の会話のみ、本人のみがアクセス可能
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Globe2 className="h-3.5 w-3.5 [color:var(--app-status-info)]" />
