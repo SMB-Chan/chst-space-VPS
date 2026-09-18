@@ -1,5 +1,9 @@
 # Chat-Space (AI Chat Space)
 
+> **v1.0.0 (2026-09-19)** — Apple HIG UI rollout, autonomous coding
+> coverage, deploy hardening. See [CHANGELOG.md](./CHANGELOG.md).
+> Git tag `v1.0.0` points to this commit.
+
 A personal AI chat space where you can attach files and ask questions about them.
 
 Switch between multiple models (OpenAI / Qwen and more), with web search plus document and image attachments. Conversations are stored per Clerk account.
@@ -127,6 +131,67 @@ Preferences, decisions, progress, and sourced knowledge are shared across chat m
 - Web fetching includes SSRF defenses against DNS rebinding and truncates bodies at 1 MB per page / 2 MB per search result.
 - Image attachments are currently stored inline in conversation messages as data URLs for compatibility; re-sending past images to the model is capped at the most recent 10 MiB / 4 images. Consider reference-based storage if attachment storage grows.
 - Generated PDF/Office binaries are stored transactionally in PostgreSQL with a default shared quota of 50 MiB per user. Retention/deletion and object-storage migration criteria are in [`docs/generated-binary-storage-policy.md`](./docs/generated-binary-storage-policy.md).
+
+## What's new in v1.0.0
+
+A summary of the work shipped on top of the upstream Replit fork:
+
+### UI (Apple HIG)
+- New design-system primitives: `EmptyState`, `ErrorState`, `ScreenHeader`
+  under `artifacts/ai-chat-space/src/design-system/components/`.
+- All empty branches in `message-feed.tsx`, `file-browser.tsx`,
+  `project-panel.tsx`, `project-memory-section.tsx`,
+  `tool-bank-section.tsx`, and the admin non-admin branch use
+  `EmptyState` / `ErrorState` with verb-first recovery copy.
+- `not-found.tsx`, `error-boundary.tsx`, `pages/settings.tsx`,
+  `pages/admin.tsx` use the same primitives consistently.
+- `Button` default + icon variant bumped to `h-11` (44px) to satisfy
+  Apple HIG §4.4 (44×44pt minimum tap target).
+- Reduced-motion CSS broadened to neutralise `tailwindcss-animate`
+  and decorative `transition-property` whenever
+  `prefers-reduced-motion: reduce` is set.
+- `window.confirm()` (jarring, off-spec) replaced with a platform
+  `AlertDialog` for the video-generation confirmation flow.
+
+### Coding & data
+- `runCodingLoop()` test double (no LLM dependency) via `chat-stream-coding.test.ts`.
+- `tool-bank-store.pg.test.ts` integration test covers create → copy →
+  soft-delete → purge against the existing postgres:17 service.
+
+### VPS deploy pipeline (`deploy/deploy.sh`)
+- Refuses uncommitted local changes before any deploy.
+- Builds images with a timestamp tag (`chat-space:app-YYYYMMDDTHHMMSSZ`)
+  + `:latest` for individual rollback.
+- `chown 1000:1000` the bind-mounted `code-workspace` so writes by the
+  OpenCode / filebrowser containers are owned correctly.
+- Default `code-access-mode` to `ask` (verb-first per-action approval
+  instead of the prior `auto` blanket grant).
+- Runs schema migrations via `drizzle-kit migrate` (not `--force`).
+  Override `ALLOW_DESTRUCTIVE_PUSH=1` to opt back into `push --force`
+  on greenfield bootstraps.
+- Probes `/api/healthz` after restart; prints rollback instructions on
+  failure.
+- `deploy/code/Dockerfile` pins Node 22, pnpm 10, and opencode-ai
+  versions to keep deploys deterministic.
+
+### Tests
+- Frontend vitest: **156/156 passing** (`pnpm --filter
+  @workspace/ai-chat-space test`). The previous `matchMedia`-jsdom
+  bug in `useIsMobile` was also fixed in this release.
+- Typecheck clean for both apps (`pnpm --filter
+  @workspace/ai-chat-space typecheck` and the same for api-server).
+
+### Self-hosting
+See [`deploy/README.md`](./deploy/README.md) for the docker compose
+production layout. The hardened `deploy.sh` is the supported path:
+
+```bash
+sudo SKIP_PULL=1 bash deploy/deploy.sh
+```
+
+(`SKIP_PULL=1` is only needed if the VPS does not have read access to
+the upstream Git remote. Use `sudo -E` to forward environment variables
+across the sudo boundary.)
 
 ## License
 
