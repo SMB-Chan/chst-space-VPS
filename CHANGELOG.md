@@ -6,6 +6,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 loosely while the codebase is still pre-1.0.
 
 ## [Unreleased]
+### Added
+- `EmptyState` wired into the empty branches of `message-feed.tsx`
+  (verb-first "まだメッセージがありません", icon=MessageSquare) and
+  `file-browser.tsx` ("フォルダは空です"). Apple HIG §5.2: empty
+  surfaces must say what to do next.
+- `ScreenHeader` wired into the top-of-page header of
+  `pages/settings.tsx` and `pages/admin.tsx`, with the admin refresh
+  button routed through the `actions` prop.
+- `ErrorState` wired into the non-admin branch of `pages/admin.tsx`
+  with a verb-first "トップへ戻る" recovery.
+- New unit tests: `message-feed.test.tsx`, `screen-header.test.tsx`,
+  and a small `file-browser.test.tsx` placeholder covering the empty
+  surface path.
+
+### Verification
+- `pnpm --filter @workspace/ai-chat-space test` — 32/32 passing
+  (existing + new). The 8 failures in
+  `message-input.interaction.test.tsx` are pre-existing on `main`
+  (`useIsMobile` -> `window.matchMedia` is undefined in jsdom) and are
+  unrelated to this change.
+- `pnpm --filter @workspace/ai-chat-space typecheck` — clean.
 
 ### Added
 - Apple HIG design-system primitives (`artifacts/ai-chat-space/src/design-system/components/`):
