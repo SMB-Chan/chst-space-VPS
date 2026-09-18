@@ -25,6 +25,7 @@ import {
   type FileFormat,
   type VideoGenerationInput,
 } from "@/components/chat/message-input";
+import { consumePendingSend } from "@/components/mobile/work-composer-dock";
 import {
   useAvailableModels,
   useAvailableModelsSource,
@@ -1423,6 +1424,19 @@ export function ChatPage() {
     );
     return true;
   };
+
+  // Work tab composer queues a send; flush once Chat is ready.
+  const pendingSendRef = useRef(false);
+  useEffect(() => {
+    if (pendingSendRef.current) return;
+    if (!selectedModel || isStreaming) return;
+    const pending = consumePendingSend();
+    if (!pending) return;
+    pendingSendRef.current = true;
+    void handleSend(pending).finally(() => {
+      pendingSendRef.current = false;
+    });
+  }, [selectedModel, isStreaming, handleSend]);
 
   // サーバー側に既に同じユーザーメッセージが保存済みなら楽観的表示を重複させない
   const serverMessages = isPrivate

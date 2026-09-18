@@ -73,10 +73,14 @@ export function ProjectPanel({
           data.folder ? `（フォルダ: ${data.folder}/）` : ""
         }`,
       );
-      onProjectCreated?.(data.project);
       if (data.folder) {
         setFilesPath(data.folder);
-        setShowFiles(true);
+        onProjectCreated?.(data.project);
+        // Compact (Work tab) navigates; only the full panel embeds a browser.
+        if (!compact) setShowFiles(true);
+        else onOpenFiles?.(data.folder);
+      } else {
+        onProjectCreated?.(data.project);
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "作成に失敗しました。");
@@ -95,6 +99,10 @@ export function ProjectPanel({
           <button
             type="button"
             onClick={() => {
+              if (compact) {
+                onOpenFiles?.(filesPath || "");
+                return;
+              }
               setShowFiles((v) => !v);
               if (!showFiles && !filesPath) setFilesPath("");
             }}
@@ -179,9 +187,15 @@ export function ProjectPanel({
                     : "rounded-[var(--m3-shape-md)] px-2 py-1.5 hover:bg-[var(--m3-surface-container)]",
                 )}
                 onClick={() => {
-                  setFilesPath(project.slug || project.name);
+                  const folder = project.slug || project.name;
+                  if (compact) {
+                    // Never expand the inline browser inside Work — layout breaks.
+                    onOpenFiles?.(folder);
+                    return;
+                  }
+                  setFilesPath(folder);
                   setShowFiles(true);
-                  onOpenFiles?.(project.slug || project.name);
+                  onOpenFiles?.(folder);
                 }}
               >
                 <FolderKanban className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />

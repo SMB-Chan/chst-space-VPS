@@ -26,12 +26,12 @@ function iconFor(item: WorkItem): ReactNode {
         : "chat");
 
   if (kind === "github") {
-    return <GithubMark className="h-7 w-7" />;
+    return <GithubMark className="h-5 w-5" />;
   }
   if (kind === "device") {
-    return <MonitorSmartphone className="h-7 w-7" strokeWidth={1.6} />;
+    return <MonitorSmartphone className="h-5 w-5" strokeWidth={1.75} />;
   }
-  return <MessageSquareText className="h-7 w-7" strokeWidth={1.6} />;
+  return <MessageSquareText className="h-5 w-5" strokeWidth={1.75} />;
 }
 
 export function WorkList({

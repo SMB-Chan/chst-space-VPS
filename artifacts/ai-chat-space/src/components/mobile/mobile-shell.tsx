@@ -27,6 +27,7 @@ import { SegmentedControl, type MobileTab } from "./segmented-control";
 import { WorkList, type WorkItem } from "./work-list";
 import { GithubMark } from "./github-mark";
 import { ProjectPanel } from "@/components/projects/project-panel";
+import { WorkComposerDock } from "./work-composer-dock";
 import {
   ModelSettingsSheet,
   type SpeedPreference,
@@ -174,38 +175,44 @@ export function MobileShell({ children }: MobileShellProps) {
         <SegmentedControl value={tab} onChange={setTab} />
       </header>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        {tab === "work" && (
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        {tab === "work" ? (
+          /* Work tab owns the viewport — do not mount chat page underneath
+             (that produced the broken dual-composer layout). */
           <div
-            className="absolute inset-x-0 top-0 bottom-[140px] z-20 flex flex-col bg-[var(--mx-bg)]"
+            className="flex min-h-0 flex-1 flex-col"
             data-testid="mobile-work-panel"
           >
-            <div className="mobile-body flex-1 space-y-4 px-3 pt-4">
-              <div className="rounded-[20px] bg-[var(--mx-panel)] p-3">
-                <ProjectPanel
-                  compact
-                  onProjectCreated={() => {
-                    /* list refreshes internally */
-                  }}
-                />
+            <div className="mobile-body min-h-0 flex-1 px-3 pb-2 pt-3">
+              <ProjectPanel
+                compact
+                onOpenFiles={(folder) => {
+                  setLocation(
+                    `/files?path=${encodeURIComponent(folder)}`,
+                  );
+                }}
+              />
+              <div className="mt-3">
+                {isLoading ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="h-5 w-5 animate-spin text-[var(--mx-ink-muted)]" />
+                  </div>
+                ) : (
+                  <WorkList
+                    items={workItems}
+                    onSelect={handleSelectWork}
+                    emptyLabel="作業はまだありません。上の欄からプロジェクトを作成できます。"
+                  />
+                )}
               </div>
-              {isLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-[var(--mx-ink-muted)]" />
-                </div>
-              ) : (
-                <WorkList
-                  items={workItems}
-                  onSelect={handleSelectWork}
-                  emptyLabel="作業はまだありません。上の欄からプロジェクトを作成できます。"
-                />
-              )}
             </div>
+            <WorkComposerDock />
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mobile-body min-h-0 flex-1">{children}</div>
           </div>
         )}
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="mobile-body min-h-0 flex-1">{children}</div>
-        </div>
       </div>
 
       {/* Drawer */}
