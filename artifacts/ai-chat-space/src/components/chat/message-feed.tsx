@@ -8,6 +8,8 @@ import {
 import { cn } from "@/lib/utils";
 import { surfaceVariants } from "@/design-system/surface";
 import { SafeMarkdown } from "./safe-markdown";
+import { EmptyState } from "@/design-system/components";
+import { MessageSquare } from "lucide-react";
 import { SourceCards } from "./source-cards";
 import {
   FactualityCard,
@@ -1185,6 +1187,22 @@ export function MessageFeed({
     return (
       <div className="flex-1 flex items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-primary/50" />
+      </div>
+    );
+  }
+
+  // Apple HIG §5.2 ("空状態"): when there are no messages yet, tell the
+  // person what to do next. The composer is the natural call to action,
+  // so we focus the screen and add a visible hint pointing at it.
+  if (messages.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center px-6">
+        <EmptyState
+          compact
+          icon={<MessageSquare aria-hidden className="h-6 w-6" />}
+          title="まだメッセージがありません"
+          description="質問、ファイル、画像の解釈 — 下の入力欄から始めてください。"
+        />
       </div>
     );
   }

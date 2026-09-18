@@ -4,6 +4,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from "react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 
 export interface ErrorFallbackProps {
@@ -40,20 +41,25 @@ function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
     <div className="min-h-[100dvh] w-full flex items-center justify-center bg-background p-6">
       <div className="max-w-lg w-full text-center">
-        <h1 className="text-xl font-serif font-medium text-foreground">
-          問題が発生しました
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          表示できませんでした
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          この画面の表示中にエラーが起きました。もう一度試すか、ホームへ戻ってください。
+          もう一度読み込むと復旧する場合があります。同じ表示が続く場合はお問い合わせください。
         </p>
         {import.meta.env.DEV ? (
           <pre className="mt-4 overflow-x-auto rounded-[var(--m3-shape-sm)] bg-[var(--m3-surface-container)] p-3 text-left text-xs text-foreground">
             {error.message || String(error)}
           </pre>
         ) : null}
-        <Button variant="filled" className="mt-4" onClick={resetError}>
-          もう一度試す
-        </Button>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <Button variant="filled" onClick={resetError}>
+            もう一度試す
+          </Button>
+          <Link href="/">
+            <Button variant="ghost">ホームへ戻る</Button>
+          </Link>
+        </div>
       </div>
     </div>
   );

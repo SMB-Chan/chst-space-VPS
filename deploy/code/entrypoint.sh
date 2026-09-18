@@ -6,7 +6,7 @@
 #   full — allow everything (trusted single-operator)
 set -eu
 
-MODE="${OPENCODE_ACCESS_MODE:-auto}"
+MODE="${OPENCODE_ACCESS_MODE:-ask}"
 if [ -f /access-mode ]; then
   file_mode="$(tr -d '[:space:]' < /access-mode || true)"
   if [ -n "$file_mode" ]; then
@@ -17,7 +17,7 @@ fi
 case "$MODE" in
   ask|auto|full) ;;
   *)
-    echo "unknown OPENCODE_ACCESS_MODE='$MODE', falling back to auto" >&2
+    echo "unknown OPENCODE_ACCESS_MODE='$MODE', falling back to ask" >&2
     MODE=auto
     ;;
 esac

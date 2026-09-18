@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Surface } from "@/design-system/surface";
+import { EmptyState } from "@/design-system/components";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -218,9 +219,11 @@ export function ProjectMemorySection() {
           読み込み中...
         </div>
       ) : projects.length === 0 ? (
-        <p className="text-sm text-[var(--m3-on-surface-variant)]">
-          プロジェクトはまだありません。上の欄から作成してください。
-        </p>
+        <EmptyState
+          compact
+          title="プロジェクトがまだ登録されていません"
+          description="上の入力欄から名前を付けるだけで作成できます。"
+        />
       ) : (
         <>
           <div className="flex flex-wrap gap-2">

@@ -87,3 +87,6 @@ VPS chat-mobile-ui/
 
 # Local agent/config scratch (never commit)
 /.commandcode/
+
+# local-only bundles/patches (gitignored)
+/drop

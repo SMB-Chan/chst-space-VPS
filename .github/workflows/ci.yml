@@ -80,7 +80,8 @@ jobs:
         run: |
           pnpm --filter @workspace/api-server exec vitest run --config ./vitest.config.ts \
             src/middlewares/sharedAiUsageGuard.pg.test.ts \
-            src/lib/completion-persistence.pg.test.ts
+            src/lib/completion-persistence.pg.test.ts \
+            src/lib/tool-bank-store.pg.test.ts
       - run: pnpm --filter @workspace/api-server run build
       - name: Boot production bundle and probe readiness
         working-directory: artifacts/api-server

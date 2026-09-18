@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Surface } from "@/design-system/surface";
+import { EmptyState } from "@/design-system/components";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -293,10 +294,11 @@ export function ToolBankSection() {
           読み込み中...
         </div>
       ) : tools.length === 0 ? (
-        <p className="text-sm text-[var(--m3-on-surface-variant)]">
-          まだ bank されたツールはありません。チャットから
-          <code>tool_bank_save</code> でも登録できます。
-        </p>
+        <EmptyState
+          compact
+          title="まだツールが登録されていません"
+          description="チャット画面の tool_bank_save で、再利用価値のあるコード・スクリプトを bank できます。"
+        />
       ) : (
         <div className="space-y-2">
           {tools.map((tool) => (
