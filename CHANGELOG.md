@@ -5,7 +5,36 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 loosely while the codebase is still pre-1.0.
 
-## [Unreleased] - 2026-09
+## [Unreleased]
+
+### Added
+- Apple HIG design-system primitives (`artifacts/ai-chat-space/src/design-system/components/`):
+  `EmptyState` (role=status, verb-first empty copy), `ErrorState`
+  (role=alert, recovery verbs), `ScreenHeader` landmark. Barrel export.
+- `Button.test.tsx` and design-system unit tests verify the new Apple
+  HIG contracts (44px tap target default, no cuteness in error copy,
+  empty states announce next steps).
+- The new `EmptyState` is wired into the no-projects branch in
+  `project-panel.tsx` (compact variant for narrow widths).
+
+### Changed
+- `not-found.tsx` and `error-boundary.tsx` now use `ErrorState`,
+  drop the imperative command-style copy, and expose a verb-first
+  secondary action ("ホームへ戻る").
+- `home.tsx` privacy chip was rewritten from a vague "会話データを安全に保存"
+  (an exact example of the empty-privacy-rationale Apple HIG forbids)
+  to the concrete "自分の会話のみ、本人のみがアクセス可能".
+- `message-input.tsx` video-generation confirmation flow: replaces the
+  jarring `window.confirm()` with a platform `AlertDialog` (verb-first
+  actions, "戻る" / "生成する") wired into handleSubmit via a
+  one-shot `videoConfirmedRef`.
+- `Button` default size `h-10` (40px) -> `h-11` (44px) to satisfy the
+  Apple HIG 44pt minimum tap target. Icon variant likewise.
+- Reduced-motion CSS broadened to also neutralise `tailwindcss-animate`
+  `.animate-in` / `.fade-in` / `.slide-in-from-bottom-2` and
+  decorative `transition-property` so the entire UI respects the
+  `prefers-reduced-motion: reduce` setting.
+
 
 ### Added
 - Test coverage for the autonomous coding loop
