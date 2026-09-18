@@ -14,6 +14,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/design-system/components";
+import { FolderOpen } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -271,8 +273,13 @@ export function FileBrowser({ className, initialPath = "" }: FileBrowserProps) {
               </li>
             ))}
             {(data?.items.length ?? 0) === 0 && (
-              <li className="px-4 py-6 text-center text-sm text-[var(--m3-on-surface-variant)]">
-                このフォルダは空です
+              <li>
+                <EmptyState
+                  compact
+                  icon={<FolderOpen aria-hidden className="h-6 w-6" />}
+                  title="フォルダは空です"
+                  description="上の入力欄から、ファイルを作成・アップロードしてください。"
+                />
               </li>
             )}
           </ul>
