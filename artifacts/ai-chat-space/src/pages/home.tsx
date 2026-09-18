@@ -161,14 +161,14 @@ export function HomePage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      <Button variant="ghost" size="icon" className="h-9 w-9">
+                      <Button variant="ghost" size="icon">
                         <Paperclip className="h-4 w-4" />
                       </Button>
                       <Chip asChild>
                         <span>ツール</span>
                       </Chip>
                     </div>
-                    <Button size="icon" className="h-10 w-10">
+                    <Button size="icon">
                       <ArrowRight className="h-4 w-4" />
                     </Button>
                   </div>
