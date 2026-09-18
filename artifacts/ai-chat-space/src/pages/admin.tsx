@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { Users } from "lucide-react";
+import { EmptyState, ErrorState, ScreenHeader } from "@/design-system/components";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@clerk/react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -113,10 +116,14 @@ export default function AdminPage() {
 
   if (me?.role !== "admin") {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          このページは管理者のみアクセスできます。
-        </p>
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6">
+        <ErrorState
+          title="管理者ページにアクセスできません"
+          description="このページは管理者としてログインしたときだけ表示されます。"
+          primaryAction={
+            <a href="/"><Button>トップへ戻る</Button></a>
+          }
+        />
       </div>
     );
   }
@@ -126,26 +133,24 @@ export default function AdminPage() {
   return (
     <div className="min-h-[100dvh] bg-background">
       <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-serif text-foreground">
-              管理者コンソール
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              {overview
-                ? `${overview.month} の利用状況 ・ 一般ユーザーの既定上限 ${formatUsd(overview.defaultBudgetUsd)}／月`
-                : "読み込み中…"}
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void loadOverview()}
-            className="rounded-[var(--m3-shape-full)] border border-border/60 bg-card/50 px-4 py-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            更新
-          </button>
-        </div>
+        <ScreenHeader
+          title="管理者コンソール"
+          description={
+            overview
+              ? `${overview.month} の利用状況 ・ 一般ユーザーの既定上限 ${formatUsd(overview.defaultBudgetUsd)}／月`
+              : "読み込み中…"
+          }
+          actions={
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void loadOverview()}
+              className="rounded-[var(--m3-shape-full)] border border-border/60 bg-card/50 px-4 py-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              更新
+            </button>
+          }
+        />
 
         {error ? (
           <div className="rounded-[var(--m3-shape-sm)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
