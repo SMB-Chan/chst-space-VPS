@@ -412,5 +412,17 @@
       background-clip: initial;
       color: hsl(var(--muted-foreground));
     }
+    /* Catch-all: neutralize any tailwindcss-animate "animate-*" class
+       (e.g. fade-in, slide-in-from-bottom-2) and all decorative transitions
+       that are not strictly required for state changes. */
+    .animate-in,
+    .fade-in,
+    .slide-in-from-bottom-2,
+    [class*="animate-"] {
+      animation: none !important;
+    }
+    *:not(:disabled):not([data-no-motion]) {
+      transition-property: none !important;
+    }
   }
 }
