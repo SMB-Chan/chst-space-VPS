@@ -2,108 +2,141 @@
 
 All notable changes to Chat-Space will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-loosely while the codebase is still pre-1.0.
+and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-### Added
-- `EmptyState` wired into the empty branches of `message-feed.tsx`
-  (verb-first "まだメッセージがありません", icon=MessageSquare) and
-  `file-browser.tsx` ("フォルダは空です"). Apple HIG §5.2: empty
-  surfaces must say what to do next.
-- `ScreenHeader` wired into the top-of-page header of
-  `pages/settings.tsx` and `pages/admin.tsx`, with the admin refresh
-  button routed through the `actions` prop.
-- `ErrorState` wired into the non-admin branch of `pages/admin.tsx`
-  with a verb-first "トップへ戻る" recovery.
-- New unit tests: `message-feed.test.tsx`, `screen-header.test.tsx`,
-  and a small `file-browser.test.tsx` placeholder covering the empty
-  surface path.
+## [1.0.0] - 2026-09-19
 
-### Verification
-- `pnpm --filter @workspace/ai-chat-space test` — 32/32 passing
-  (existing + new). The 8 failures in
-  `message-input.interaction.test.tsx` are pre-existing on `main`
-  (`useIsMobile` -> `window.matchMedia` is undefined in jsdom) and are
-  unrelated to this change.
-- `pnpm --filter @workspace/ai-chat-space typecheck` — clean.
+The first stable release of Chat-Space on top of the OpenCode / mobile Chat/Work
+foundation. This release ships the autonomous coding loop, the tool-bank, a
+deploy-hardened VPS pipeline, and a full Apple HIG UI rollout.
+
+### Highlights
+
+- **Autonomous coding** — `runCodingLoop()` with `ScriptedStream` test
+  double, per-turn file-write ceiling, xiaomi `reasoning_content`
+  attachment, and `clientGone` short-circuit. Tool bank CRUD with
+  policy-guarded copy / soft-delete / purge.
+- **Apple HIG UI** — design-system primitives (`EmptyState`, `ErrorState`,
+  `ScreenHeader`), 44pt tap targets throughout, reduced-motion CSS,
+  verb-first buttons, AlertDialog instead of `window.confirm()`.
+- **VPS deploy pipeline** — hardened `deploy.sh` (refuses uncommitted
+  changes, timestamps images, runs migrations via `drizzle-kit
+  migrate`, probes healthz), pinned Node / pnpm / opencode-ai
+  versions, `OPENCODE_ACCESS_MODE=ask` default, basic-auth required
+  for the OpenCode web UI.
 
 ### Added
-- Apple HIG design-system primitives (`artifacts/ai-chat-space/src/design-system/components/`):
-  `EmptyState` (role=status, verb-first empty copy), `ErrorState`
-  (role=alert, recovery verbs), `ScreenHeader` landmark. Barrel export.
-- `Button.test.tsx` and design-system unit tests verify the new Apple
-  HIG contracts (44px tap target default, no cuteness in error copy,
-  empty states announce next steps).
-- The new `EmptyState` is wired into the no-projects branch in
-  `project-panel.tsx` (compact variant for narrow widths).
 
-### Changed
-- `not-found.tsx` and `error-boundary.tsx` now use `ErrorState`,
-  drop the imperative command-style copy, and expose a verb-first
-  secondary action ("ホームへ戻る").
-- `home.tsx` privacy chip was rewritten from a vague "会話データを安全に保存"
-  (an exact example of the empty-privacy-rationale Apple HIG forbids)
-  to the concrete "自分の会話のみ、本人のみがアクセス可能".
-- `message-input.tsx` video-generation confirmation flow: replaces the
-  jarring `window.confirm()` with a platform `AlertDialog` (verb-first
-  actions, "戻る" / "生成する") wired into handleSubmit via a
-  one-shot `videoConfirmedRef`.
-- `Button` default size `h-10` (40px) -> `h-11` (44px) to satisfy the
-  Apple HIG 44pt minimum tap target. Icon variant likewise.
-- Reduced-motion CSS broadened to also neutralise `tailwindcss-animate`
-  `.animate-in` / `.fade-in` / `.slide-in-from-bottom-2` and
-  decorative `transition-property` so the entire UI respects the
-  `prefers-reduced-motion: reduce` setting.
+#### Tests (vitest)
+- `artifacts/api-server/src/lib/chat-stream-coding.test.ts` — six tests
+  for the autonomous coding loop (touch accumulation, AbortSignal,
+  clientGone, per-turn ceiling, CODING_MAX_TOOL_CALLS bailout +
+  final-answer fallback, xiaomi reasoning_content).
+- `artifacts/api-server/src/lib/tool-bank-policy.test.ts` — pins the
+  lifecycle ceilings (40 000 code chars, 2 000 summary chars,
+  90-day archive, 30-day purge).
+- `artifacts/api-server/src/lib/tool-bank-store.pg.test.ts` —
+  PostgreSQL integration test (CRUD → version bump → copy →
+  soft-delete → purge), wired into the `production-boot` CI job.
+- Apple HIG design-system unit tests (12 tests across
+  `EmptyState`, `ErrorState`, `ScreenHeader`, `Button`).
+- `message-feed.test.tsx`, `screen-header.test.tsx`,
+  `file-browser.test.tsx` — empty/landmark surface contracts.
+- `button-tap-target.test.ts` — regression test pinning Apple HIG
+  §4.4 (≥ 44×44pt tap target on `default` and `icon` variants).
 
+#### Design system
+- `artifacts/ai-chat-space/src/design-system/components/empty-state.tsx`
+- `artifacts/ai-chat-space/src/design-system/components/error-state.tsx`
+- `artifacts/ai-chat-space/src/design-system/components/screen-header.tsx`
+- Barrel export `artifacts/ai-chat-space/src/design-system/components/index.ts`
+- `artifacts/ai-chat-space/src/hooks/use-mobile.tsx` — jsdom-safe
+  (`window.matchMedia` shim guard).
 
-### Added
-- Test coverage for the autonomous coding loop
-  (`artifacts/api-server/src/lib/chat-stream-coding.test.ts`) that
-  exercises `runCodingLoop()` via a `ScriptedStream` double (no LLM
-  dependency). Six tests pin the loop's contract: touch accumulation
-  per wave, AbortSignal handling, the `clientGone` short-circuit, the
-  per-turn file-write ceiling, the `CODING_MAX_TOOL_CALLS` bailout
-  and final-answer fallback, and the xiaomi `reasoning_content`
-  attachment.
-- Pure unit tests for the tool-bank lifecycle constants and the
-  Japanese policy doc
-  (`artifacts/api-server/src/lib/tool-bank-policy.test.ts`); pins the
-  40 000-code / 2 000-summary / 90-day archive / 30-day purge ceilings
-  so future changes are explicit.
-- PostgreSQL integration test for `tool-bank-store`
-  (`artifacts/api-server/src/lib/tool-bank-store.pg.test.ts`) covering
-  create -> update (version bump) -> copy (useCount + snapshot) ->
-  soft delete -> update-refused-on-archived -> purge. Wired into the
-  `production-boot` CI job.
-- `deploy/deploy.sh` hardened version: refuses uncommitted local
-  changes, builds images with a timestamp tag + `:latest` for
-  individual rollback, `chown 1000:1000` on the bind-mounted
-  `code-workspace`, default `code-access-mode` to `ask`, applies the
-  schema through `drizzle-kit migrate` (not `push --force`), probes
-  `/api/healthz` after restart. Override `ALLOW_DESTRUCTIVE_PUSH=1`
-  to opt back into `push --force` on greenfield bootstraps.
-- `deploy/code/Dockerfile` pins: `node:22.20.0-bookworm-slim`,
+#### Deploy
+- `deploy/deploy.sh` — hardened bootstrapper. Refuses uncommitted
+  changes, builds images with a timestamp tag (`chat-space:app-YYYYMMDDTHHMMSSZ`)
+  + `:latest`, `chown 1000:1000` the bind-mounted `code-workspace`,
+  defaults `code-access-mode` to `ask`, runs schema migrations
+  through `drizzle-kit migrate`, probes `/api/healthz`. Override
+  `ALLOW_DESTRUCTIVE_PUSH=1` for greenfield bootstraps.
+- `deploy/code/Dockerfile` — pinned `node:22.20.0-bookworm-slim`,
   `pnpm@10.34.5` (matching CI), `opencode-ai@1.18.31`. Dropped unused
   `python3-pip` / `build-essential`.
+- `deploy/code/entrypoint.sh` — `OPENCODE_ACCESS_MODE` default `ask`,
+  fallback log message matches.
+- `deploy/.env.example` — documents `OPENCODE_ACCESS_MODE=ask`,
+  `OPENCODE_SERVER_USERNAME/PASSWORD` (both required past 127.0.0.1),
+  `REDIS_URL`, `SMTP_*`, `APP_HOST`, etc.
+- `drop/`-stage bundle / patch workflow (gitignored).
+
+#### Database
+- `lib/db/package.json` exposes `generate` and `migrate` scripts
+  alongside `push` / `push-force`, so the deploy.sh `migrate` call
+  no longer fails with "None of the selected packages has a 'migrate'
+  script".
+
+#### UI empty branches
+- `EmptyState` is wired into the empty branches of:
+  - `project-panel.tsx` — projects list
+  - `components/chat/message-feed.tsx` — empty conversation
+  - `components/files/file-browser.tsx` — empty folder
+  - `components/settings/project-memory-section.tsx` — no projects
+  - `components/settings/tool-bank-section.tsx` — empty bank
+
+#### Headers / screens
+- `ScreenHeader` is wired into the top-of-page header of:
+  - `pages/settings.tsx`
+  - `pages/admin.tsx` (with the refresh button in the `actions` slot)
+- `ErrorState` is wired into the non-admin branch of `pages/admin.tsx`.
 
 ### Changed
-- `deploy/code/entrypoint.sh`: default `OPENCODE_ACCESS_MODE` from
-  `auto` to `ask`; the fallback log message matches.
-- `deploy/.env.example`: replaced the `OPENCODE_ACCESS_MODE=auto`
-  block with `ask` and added an explicit note that
-  `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` are both
-  required before exposing the OpenCode container past 127.0.0.1.
-- `.github/workflows/ci.yml`: `production-boot` job now also runs
-  `tool-bank-store.pg.test.ts` so the new CRUD paths are exercised
-  against the existing postgres:17 service.
+
+- `pages/not-found.tsx` — uses `ErrorState`, drops imperative
+  command-style copy, primary action `ホームへ戻る` is verb-first.
+- `components/error-boundary.tsx` — verb-first "もう一度試す" + a
+  secondary "ホームへ戻る" action.
+- `pages/home.tsx` — privacy chip was rewritten from the vague
+  "会話データを安全に保存" (an exact example of the empty-privacy
+  rationale Apple HIG forbids) to the concrete
+  "自分の会話のみ、本人のみがアクセス可能".
+- `components/chat/message-input.tsx` — video-generation confirmation
+  uses an `AlertDialog` instead of `window.confirm()`. Wired through a
+  one-shot `videoConfirmedRef`.
+- `components/ui/button.tsx` — default size `h-10` (40px) → `h-11`
+  (44px) for the Apple HIG §4.4 minimum tap target. Icon variant
+  likewise.
+- `index.css` — reduced-motion CSS broadened to neutralise
+  `tailwindcss-animate` `.animate-in` / `.fade-in` /
+  `.slide-in-from-bottom-2` and decorative `transition-property`
+  whenever `prefers-reduced-motion: reduce` is set.
+- `.github/workflows/ci.yml` — `production-boot` job now runs
+  `tool-bank-store.pg.test.ts` against the existing postgres:17 service.
+- `.gitignore` — `/drop` (local bundle / patch staging directory) is
+  gitignored.
 
 ### Security
+
 - Disables the most dangerous default of the OpenCode coding agent.
   The prior `auto` mode allowed arbitrary file writes / bash under
   the bind-mounted `code-workspace`; the new `ask` default requires
   per-action approval.
 
 ### Removed
+
 - Unused build dependencies from `deploy/code/Dockerfile`
   (`python3-pip`, `build-essential`).
+
+### Verification
+
+- `pnpm --filter @workspace/ai-chat-space test` — **156/156 passing**
+  (Apple HIG roll-out, message-feed, file-browser, screen-header,
+  design-system primitives, Button 44px regression, message-input,
+  chat-stream-coding-style integration coverage from earlier).
+- `pnpm --filter @workspace/ai-chat-space typecheck` — clean.
+- `pnpm --filter @workspace/api-server typecheck` — clean.
+- Live VPS smoke: `GET /api/healthz` 200×3, `GET /` 200 (1764 bytes),
+  `GET /sign-in` 200, `GET /api/openai/models` 200, all 5 chat-space
+  containers `Up`, security headers match CI assertions.
+
+[1.0.0]: https://github.com/SMB-Chan/chst-space-VPS/releases/tag/v1.0.0
