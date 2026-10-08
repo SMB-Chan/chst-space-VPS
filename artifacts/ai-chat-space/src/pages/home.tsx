@@ -83,7 +83,11 @@ export function HomePage() {
             </p>
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
               <Link href="/sign-up">
-                <Button size="lg" variant="filled" className="h-11 w-full sm:w-auto">
+                <Button
+                  size="lg"
+                  variant="filled"
+                  className="h-11 w-full sm:w-auto"
+                >
                   始める
                 </Button>
               </Link>

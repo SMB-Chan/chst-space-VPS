@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -7,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { resolveInsideRoot } from "./workspace-folders";
 
 /**
  * Explicit coding mode: the model inspects the project with tools, then
@@ -146,12 +148,11 @@ export function normalizeCodingPath(raw: string): string | null {
 }
 
 export function resolveCodingPath(rootDir: string, relPath: string): string {
-  const root = path.resolve(rootDir);
-  const abs = path.resolve(root, relPath);
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
-    throw new Error("プロジェクト外のパスへは書き込めません。");
-  }
-  return abs;
+  return resolveInsideRoot(
+    rootDir,
+    relPath,
+    "プロジェクト外のパスへは書き込めません。",
+  );
 }
 
 export interface CodingWriteResult {
@@ -245,7 +246,10 @@ export function formatCodingTree(
       const childRel = rel ? `${rel}/${name}` : name;
       let isDir = false;
       try {
-        isDir = statSync(abs).isDirectory();
+        const st = lstatSync(abs);
+        // Never follow symlinks out of the project.
+        if (st.isSymbolicLink()) continue;
+        isDir = st.isDirectory();
       } catch {
         continue;
       }
@@ -350,10 +354,12 @@ export function searchCodingFiles(
       const childRel = rel ? `${rel}/${name}` : name;
       let st;
       try {
-        st = statSync(abs);
+        st = lstatSync(abs);
       } catch {
         continue;
       }
+      // Never follow symlinks out of the project.
+      if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) {
         walk(abs, childRel);
         continue;

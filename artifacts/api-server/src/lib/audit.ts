@@ -35,7 +35,11 @@ export const AUDIT_INPUT_LIMITS = {
 } as const;
 
 function boundedHeadTail(text: string, maxChars: number): string {
-  return clipHeadTailUtf8Safe(text.trim(), maxChars, "\n…（監査入力を省略）…\n");
+  return clipHeadTailUtf8Safe(
+    text.trim(),
+    maxChars,
+    "\n…（監査入力を省略）…\n",
+  );
 }
 
 /** Keep only snippets/pages cited by the draft, then apply a hard input cap. */

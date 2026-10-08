@@ -128,11 +128,7 @@ function parseStreamReceipt(raw: unknown): StreamReceipt | null {
     "omittedWebSections",
   ] as const) {
     const value = record[key];
-    if (
-      typeof value === "number" &&
-      Number.isSafeInteger(value) &&
-      value > 0
-    ) {
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
       receipt[key] = value;
     }
   }
@@ -1503,9 +1499,7 @@ export function ChatPage() {
         (invalidConversationId ||
           (conversationLoadError && !optimisticUserMessage && !isStreaming)) ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <h2 className="text-xl font-semibold mb-2">
-              会話が見つかりません
-            </h2>
+            <h2 className="text-xl font-semibold mb-2">会話が見つかりません</h2>
             <p className="text-muted-foreground text-sm">
               この会話を開けません。履歴から選び直してください。
             </p>

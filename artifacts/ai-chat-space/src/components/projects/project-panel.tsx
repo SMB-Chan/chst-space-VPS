@@ -97,21 +97,25 @@ export function ProjectPanel({
           <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--m3-on-surface-variant)]">
             プロジェクト
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              if (compact) {
-                onOpenFiles?.(filesPath || "");
-                return;
-              }
-              setShowFiles((v) => !v);
-              if (!showFiles && !filesPath) setFilesPath("");
-            }}
-            className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--m3-on-surface-variant)] transition-colors hover:text-foreground"
-            aria-expanded={showFiles}
-          >
-            ファイル
-          </button>
+          {/* The workspace file browser is admin-only; callers omit
+              onOpenFiles for general users. */}
+          {onOpenFiles ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (compact) {
+                  onOpenFiles?.(filesPath || "");
+                  return;
+                }
+                setShowFiles((v) => !v);
+                if (!showFiles && !filesPath) setFilesPath("");
+              }}
+              className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--m3-on-surface-variant)] transition-colors hover:text-foreground"
+              aria-expanded={showFiles}
+            >
+              ファイル
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2">

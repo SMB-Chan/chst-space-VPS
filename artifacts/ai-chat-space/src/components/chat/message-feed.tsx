@@ -1263,9 +1263,7 @@ export function MessageFeed({
               streamingAudit={streamingAudit}
               streamingFactuality={streamingFactuality}
               streamingReceipt={
-                message.id === STREAMING_ASSISTANT_ID
-                  ? streamingReceipt
-                  : null
+                message.id === STREAMING_ASSISTANT_ID ? streamingReceipt : null
               }
               isStreaming={isStreaming}
               onStop={onStop}

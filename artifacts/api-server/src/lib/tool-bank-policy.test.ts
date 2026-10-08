@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  TOOL_BANK_POLICY,
-  TOOL_BANK_POLICY_DOC_JA,
-} from "./tool-bank-policy";
+import { TOOL_BANK_POLICY, TOOL_BANK_POLICY_DOC_JA } from "./tool-bank-policy";
 
 describe("TOOL_BANK_POLICY", () => {
   it("documents the lifecycle in numeric constants", () => {
@@ -34,7 +31,11 @@ describe("TOOL_BANK_POLICY_DOC_JA", () => {
   });
 
   it("matches the live numeric constants", () => {
-    expect(TOOL_BANK_POLICY_DOC_JA).toContain(String(TOOL_BANK_POLICY.ARCHIVE_IDLE_DAYS));
-    expect(TOOL_BANK_POLICY_DOC_JA).toContain(String(TOOL_BANK_POLICY.PURGE_SOFT_DELETE_DAYS));
+    expect(TOOL_BANK_POLICY_DOC_JA).toContain(
+      String(TOOL_BANK_POLICY.ARCHIVE_IDLE_DAYS),
+    );
+    expect(TOOL_BANK_POLICY_DOC_JA).toContain(
+      String(TOOL_BANK_POLICY.PURGE_SOFT_DELETE_DAYS),
+    );
   });
 });

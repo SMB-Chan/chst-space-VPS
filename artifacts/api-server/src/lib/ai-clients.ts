@@ -14,6 +14,7 @@ import { resolveOpenRouterApiKey } from "./openrouter-config";
 import { isProviderFrozen } from "./provider-policy";
 import { getRequestUserId } from "../middlewares/requireAuth";
 import { resolveUserProviderApiKey } from "./provider-credentials";
+import { guardUserProviderFetch } from "./provider-base-url";
 import {
   findCatalogModel,
   findCatalogProvider,
@@ -592,13 +593,16 @@ function buildUserOverrideClient(
 
   if (!baseURL) return null;
 
+  // A per-user base URL is user input that the server fetches: re-check it
+  // on every request for general users (see provider-base-url.ts).
+  const transport = baseUrl ? guardUserProviderFetch(llmFetch) : llmFetch;
   return new OpenAI({
     apiKey,
     baseURL,
     fetch:
       provider === "dashscope"
-        ? createAlibabaTokenPlanQuotaGuardedFetch(llmFetch)
-        : llmFetch,
+        ? createAlibabaTokenPlanQuotaGuardedFetch(transport)
+        : transport,
     ...(provider === "openrouter"
       ? {
           defaultHeaders: {

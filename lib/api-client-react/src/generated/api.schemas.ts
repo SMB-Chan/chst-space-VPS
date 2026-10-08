@@ -5,6 +5,58 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type ProviderId = typeof ProviderId[keyof typeof ProviderId];
+
+
+export const ProviderId = {
+  openai: 'openai',
+  dashscope: 'dashscope',
+  openrouter: 'openrouter',
+  xiaomi: 'xiaomi',
+} as const;
+
+export type ProviderCredentialSource = typeof ProviderCredentialSource[keyof typeof ProviderCredentialSource];
+
+
+export const ProviderCredentialSource = {
+  user: 'user',
+  env: 'env',
+  none: 'none',
+} as const;
+
+export interface ProviderCredential {
+  provider: ProviderId;
+  label: string;
+  configured: boolean;
+  source: ProviderCredentialSource;
+  /** @nullable */
+  keyHint: string | null;
+  /** @nullable */
+  baseUrl: string | null;
+  /** @nullable */
+  updatedAt: string | null;
+}
+
+export interface ProviderCredentialList {
+  providers: ProviderCredential[];
+}
+
+export interface ProviderCredentialEnvelope {
+  provider: ProviderCredential;
+}
+
+export interface ProviderCredentialInput {
+  apiKey: string;
+  /** @nullable */
+  baseUrl?: string | null;
+}
+
+export interface ProviderCredentialTestResult {
+  ok: boolean;
+  message?: string;
+  error?: string;
+}
+
 export type OpenaiSettingsDefaultReasoning = typeof OpenaiSettingsDefaultReasoning[keyof typeof OpenaiSettingsDefaultReasoning];
 
 

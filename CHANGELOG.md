@@ -6,8 +6,29 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Security
+
+- Coding workspace (`/api/files*`, `/api/dev/access-mode`, project folders,
+  coding-mode writes) is admin-only; general users can no longer read, write
+  or delete the shared VPS workspace or switch OpenCode to `full`.
+- Workspace and coding-mode paths are checked after resolving symlinks, and
+  the coding tree/search walkers no longer follow symlinks out of a project.
+- Deleting a project no longer removes a workspace folder that another
+  project (possibly another user's) still maps to.
+- BYOK provider base URLs: private/loopback/link-local targets are admin-only
+  (save, key test without redirects, and every chat request) to close an SSRF.
+- Google connect: OAuth `state` is HMAC-signed, expires after 10 minutes and
+  is bound to the starting browser by an HttpOnly cookie (multi-user modes).
+- Conversations and tool-bank copies can only be linked to the caller's own
+  projects.
+- Sign-out clears the pending mobile message and the cached role.
+
 ### Fixed
 
+- Stale tests after the c6a8351 catalog change (`o4-mini` removed,
+  `deepseek/deepseek-v4-pro` added) and the tool-bank store test (TDZ and a
+  nonexistent column); the BYOK `/openai/providers` routes are now in the
+  OpenAPI spec, so `check:api-routes` passes again.
 - `deploy.sh` no longer aborts at the schema step: `drizzle-kit migrate`
   only runs when `lib/db/drizzle/meta/_journal.json` exists (there are no
   authored migrations yet); otherwise the app's boot-time ensure-schema

@@ -1,5 +1,12 @@
 import { Router, type RequestHandler } from "express";
-import { requireAuth } from "../middlewares/requireAuth";
+import { requireAuth, resolveAuthMode } from "../middlewares/requireAuth";
+import {
+  createGoogleOAuthState,
+  GOOGLE_OAUTH_COOKIE,
+  googleOAuthCookie,
+  readCookie,
+  verifyGoogleOAuthState,
+} from "../lib/google-oauth-state";
 import {
   buildGoogleAuthUrl,
   deleteGoogleAuth,
@@ -29,7 +36,9 @@ function resolveUserId(req: { userId?: string }): string {
 
 // The OAuth callback runs in the user's browser right after the Google
 // consent screen and is therefore unauthenticated; the signed-in sub-paths
-// below are guarded via requireAuth. The state parameter carries the user id.
+// below are guarded via requireAuth. The state parameter carries the user id,
+// signed by the server and bound to the starting browser by a cookie (see
+// lib/google-oauth-state.ts).
 router.get(
   "/google/callback",
   handle(async (req, res) => {
@@ -46,11 +55,14 @@ router.get(
       res.redirect(`${frontend}/settings?google=error`);
       return;
     }
-    let userId = process.env.LOCAL_USER_ID || "local-user";
-    try {
-      const state = JSON.parse(Buffer.from(stateRaw, "base64url").toString());
-      if (typeof state.userId === "string") userId = state.userId;
-    } catch {
+    // AUTH_MODE=local has a single operator account, so there is no other
+    // user to confuse; multi-user modes also require the browser cookie.
+    const userId = verifyGoogleOAuthState(stateRaw, {
+      cookieNonce: readCookie(req.headers.cookie, GOOGLE_OAUTH_COOKIE),
+      requireCookie: resolveAuthMode() !== "local",
+    });
+    res.setHeader("Set-Cookie", googleOAuthCookie(null));
+    if (!userId) {
       res.redirect(`${frontend}/settings?google=error`);
       return;
     }
@@ -102,9 +114,8 @@ router.get(
     }
     const userId = resolveUserId(req);
     const redirectUri = getGoogleRedirectUri(req.headers.origin as string);
-    const state = Buffer.from(
-      JSON.stringify({ userId, nonce: Math.random().toString(36).slice(2) }),
-    ).toString("base64url");
+    const { state, nonce } = createGoogleOAuthState(userId);
+    res.setHeader("Set-Cookie", googleOAuthCookie(nonce));
     res.redirect(buildGoogleAuthUrl(state, redirectUri));
   }),
 );

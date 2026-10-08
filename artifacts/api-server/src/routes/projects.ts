@@ -11,7 +11,20 @@ import {
   upsertProjectMemorySection,
   type ProjectMemorySection,
 } from "../lib/project-memory-store";
+import { db, projects } from "@workspace/db";
 import { createProjectFolder, removeProjectFolder } from "./files";
+import { projectNameToFolder } from "../lib/workspace-folders";
+
+/**
+ * Project folders live in the operator's shared coding workspace, and two
+ * projects (possibly of different users) with the same name share a folder.
+ * Only admins get folders, and a folder is removed only once no remaining
+ * project maps to it, so deleting one project never wipes another's files.
+ */
+async function folderStillReferenced(folder: string): Promise<boolean> {
+  const rows = await db.select({ name: projects.name }).from(projects);
+  return rows.some((row) => projectNameToFolder(row.name) === folder);
+}
 
 const router: Router = Router();
 
@@ -66,6 +79,7 @@ router.post("/projects", requireAuth, async (req: Request, res: Response) => {
     const project = await createProject(getUserId(req), parsed.data);
     let folder: string | null = null;
     try {
+      if (req.userRole !== "admin") throw new Error("workspace is admin-only");
       folder = createProjectFolder(project.name);
       await upsertProjectMemorySection(
         getUserId(req),
@@ -164,7 +178,11 @@ router.delete(
         return;
       }
       let folderDeleted = false;
-      if (project) {
+      if (
+        project &&
+        req.userRole === "admin" &&
+        !(await folderStillReferenced(projectNameToFolder(project.name)))
+      ) {
         try {
           removeProjectFolder(project.name);
           folderDeleted = true;

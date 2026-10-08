@@ -551,11 +551,9 @@ router.patch("/admin/accounts/:id", async (req, res) => {
     }
     if (user.role === "admin" && role === "user") {
       if (user.id === req.userId) {
-        res
-          .status(400)
-          .json({
-            error: "自分自身を一般ユーザーに変更することはできません。",
-          });
+        res.status(400).json({
+          error: "自分自身を一般ユーザーに変更することはできません。",
+        });
         return;
       }
       if ((await countAdmins()) <= 1) {

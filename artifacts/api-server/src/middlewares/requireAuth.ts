@@ -49,7 +49,6 @@ export function resolveAuthMode(
   return "clerk";
 }
 
-
 /** Raw `cs_session` token from the Cookie header (password mode). */
 export function readSessionCookie(req: Request): string | null {
   const header = req.headers?.cookie;

@@ -63,7 +63,9 @@ export function ToolBankSection() {
   const [copyProjectId, setCopyProjectId] = useState<number | "">("");
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`${BASE}/api/tool-bank`, { credentials: "include" });
+    const res = await fetch(`${BASE}/api/tool-bank`, {
+      credentials: "include",
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { tools: ToolItem[] };
     setTools(data.tools);
@@ -71,7 +73,9 @@ export function ToolBankSection() {
   }, []);
 
   useEffect(() => {
-    void refresh().catch(() => setMessage("ツールバンクを読み込めませんでした。"));
+    void refresh().catch(() =>
+      setMessage("ツールバンクを読み込めませんでした。"),
+    );
     void fetch(`${BASE}/api/projects`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { projects?: ProjectOption[] } | null) => {
@@ -258,7 +262,9 @@ export function ToolBankSection() {
           <Textarea
             placeholder="summary — 何が・どこで使えるか"
             value={draft.summary}
-            onChange={(e) => setDraft((d) => ({ ...d, summary: e.target.value }))}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, summary: e.target.value }))
+            }
             rows={2}
           />
           <Textarea

@@ -20,7 +20,10 @@ export function useIsMobile(): boolean | undefined {
   );
 
   React.useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
       // SSR or test environment — assume desktop so the desktop layout is
       // the canonical render and tests don't crash.
       setIsMobile(false);

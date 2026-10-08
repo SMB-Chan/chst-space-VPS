@@ -34,6 +34,7 @@ import { ToolBankSection } from "@/components/settings/tool-bank-section";
 import { PasswordChangeSection } from "@/components/settings/password-change-section";
 import { EmptyState, ScreenHeader } from "@/design-system/components";
 import { Inbox } from "lucide-react";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -74,6 +75,7 @@ function SettingsSection({
 }
 
 export function SettingsPage() {
+  const isAdmin = useIsAdmin();
   const models = useAvailableModels();
   const modelSource = useAvailableModelsSource();
   const queryClient = useQueryClient();
@@ -118,9 +120,7 @@ export function SettingsPage() {
     };
   }, []);
 
-  const handleAccessModeChange = async (
-    mode: "ask" | "auto" | "full",
-  ) => {
+  const handleAccessModeChange = async (mode: "ask" | "auto" | "full") => {
     setAccessModeBusy(true);
     setAccessModeMessage(null);
     try {
@@ -416,81 +416,85 @@ export function SettingsPage() {
           )}
         </SettingsSection>
 
-        <SettingsSection
-          title="開発環境"
-          description="VPS上のコーディング用ワークスペースです。Tailnet内から開きます（ポートはホスト側に公開）。Markdownはチャット画面で描画済みです。"
-        >
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="tonal"
-              onClick={() => {
-                window.open(
-                  `${window.location.protocol}//${window.location.hostname}:8091/`,
-                  "_blank",
-                  "noopener,noreferrer",
-                );
-              }}
-            >
-              ファイルブラウザ
-            </Button>
-            <Button
-              variant="tonal"
-              onClick={() => {
-                window.open(
-                  `${window.location.protocol}//${window.location.hostname}:4096/`,
-                  "_blank",
-                  "noopener,noreferrer",
-                );
-              }}
-            >
-              コーディング (OpenCode)
-            </Button>
-          </div>
+        {isAdmin ? (
+          <SettingsSection
+            title="開発環境"
+            description="VPS上のコーディング用ワークスペースです。Tailnet内から開きます（ポートはホスト側に公開）。Markdownはチャット画面で描画済みです。"
+          >
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="tonal"
+                onClick={() => {
+                  window.open(
+                    `${window.location.protocol}//${window.location.hostname}:8091/`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
+              >
+                ファイルブラウザ
+              </Button>
+              <Button
+                variant="tonal"
+                onClick={() => {
+                  window.open(
+                    `${window.location.protocol}//${window.location.hostname}:4096/`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
+              >
+                コーディング (OpenCode)
+              </Button>
+            </div>
 
-          <div className="space-y-2 pt-2">
-            <div className="text-sm font-medium">自律コーディングのアクセスモード</div>
-            {accessModeLoading ? (
-              <p className="text-sm text-[var(--m3-on-surface-variant)]">
-                読み込み中...
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {(["ask", "auto", "full"] as const).map((mode) => (
-                  <Button
-                    key={mode}
-                    variant={accessMode === mode ? "filled" : "outline"}
-                    disabled={accessModeBusy}
-                    onClick={() => void handleAccessModeChange(mode)}
-                  >
-                    {mode === "ask"
-                      ? "確認モード"
-                      : mode === "auto"
-                        ? "自動承認"
-                        : "フルアクセス"}
-                  </Button>
-                ))}
+            <div className="space-y-2 pt-2">
+              <div className="text-sm font-medium">
+                自律コーディングのアクセスモード
               </div>
-            )}
-            <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
-              <strong>自動承認</strong>
-              は編集・シェルを自動許可し、破壊的なコマンドのみ拒否します（自律コーディング向け）。
-              <strong>フルアクセス</strong> はすべて許可します。
-              変更は次回の code コンテナ起動時に反映されます
-              （<code>docker compose restart code</code>）。
-            </p>
-            {accessModeMessage && (
-              <p className="text-xs text-[var(--m3-on-surface-variant)]">
-                {accessModeMessage}
+              {accessModeLoading ? (
+                <p className="text-sm text-[var(--m3-on-surface-variant)]">
+                  読み込み中...
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {(["ask", "auto", "full"] as const).map((mode) => (
+                    <Button
+                      key={mode}
+                      variant={accessMode === mode ? "filled" : "outline"}
+                      disabled={accessModeBusy}
+                      onClick={() => void handleAccessModeChange(mode)}
+                    >
+                      {mode === "ask"
+                        ? "確認モード"
+                        : mode === "auto"
+                          ? "自動承認"
+                          : "フルアクセス"}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
+                <strong>自動承認</strong>
+                は編集・シェルを自動許可し、破壊的なコマンドのみ拒否します（自律コーディング向け）。
+                <strong>フルアクセス</strong> はすべて許可します。 変更は次回の
+                code コンテナ起動時に反映されます （
+                <code>docker compose restart code</code>）。
               </p>
-            )}
-          </div>
+              {accessModeMessage && (
+                <p className="text-xs text-[var(--m3-on-surface-variant)]">
+                  {accessModeMessage}
+                </p>
+              )}
+            </div>
 
-          <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
-            ワークスペースは <code>code-workspace/</code>{" "}
-            配下のプロジェクト一覧です。Basic
-            auth（OpenCode）とfilebrowserのログイン情報はサーバー側の設定に従います。
-          </p>
-        </SettingsSection>
+            <p className="text-xs leading-relaxed text-[var(--m3-on-surface-variant)]">
+              ワークスペースは <code>code-workspace/</code>{" "}
+              配下のプロジェクト一覧です。Basic
+              auth（OpenCode）とfilebrowserのログイン情報はサーバー側の設定に従います。
+            </p>
+          </SettingsSection>
+        ) : null}
 
         <SettingsSection
           title="プライベートセッション"

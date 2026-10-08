@@ -44,8 +44,7 @@ export function clipHeadTailUtf8Safe(
   const tail =
     tailChars > 0 ? chars.slice(chars.length - tailChars).join("") : "";
   const headCut = head.lastIndexOf("\n");
-  const cleanHead =
-    headCut > headChars * 0.4 ? head.slice(0, headCut) : head;
+  const cleanHead = headCut > headChars * 0.4 ? head.slice(0, headCut) : head;
   const tailCut = tail.indexOf("\n");
   const cleanTail =
     tailCut >= 0 && tailCut < tail.length * 0.5

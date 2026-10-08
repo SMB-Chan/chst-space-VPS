@@ -50,6 +50,7 @@ import { FolderOpen } from "lucide-react";
 import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { clearUserBrowserState } from "@/lib/session-cleanup";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -353,7 +354,10 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                 className="h-12 w-12 rounded-[var(--m3-shape-xl)]"
                 title="ログアウト"
                 aria-label="ログアウト"
-                onClick={() => signOut({ redirectUrl: basePath || "/" })}
+                onClick={() => {
+                  clearUserBrowserState();
+                  void signOut({ redirectUrl: basePath || "/" });
+                }}
               >
                 <LogOut className="h-5 w-5" />
               </Button>
@@ -377,14 +381,16 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                   <Shield className="h-4 w-4" />
                   プライベート
                 </Button>
-                <Button
-                  onClick={handleFiles}
-                  className="h-10 w-full justify-start rounded-[var(--m3-shape-md)]"
-                  variant={location === "/files" ? "tonal" : "ghost"}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  ファイル
-                </Button>
+                {isAdmin ? (
+                  <Button
+                    onClick={handleFiles}
+                    className="h-10 w-full justify-start rounded-[var(--m3-shape-md)]"
+                    variant={location === "/files" ? "tonal" : "ghost"}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    ファイル
+                  </Button>
+                ) : null}
                 {isAdmin ? (
                   <Button
                     onClick={handleAdmin}
@@ -399,7 +405,10 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               </div>
 
               <div className="px-1 pb-2">
-                <ProjectPanel compact onOpenFiles={() => handleFiles()} />
+                <ProjectPanel
+                  compact
+                  onOpenFiles={isAdmin ? () => handleFiles() : undefined}
+                />
               </div>
 
               <div className="flex-1 space-y-1 overflow-y-auto px-3 pb-3">
@@ -553,7 +562,10 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                   size="icon"
                   title="ログアウト"
                   className="h-9 w-9"
-                  onClick={() => signOut({ redirectUrl: basePath || "/" })}
+                  onClick={() => {
+                    clearUserBrowserState();
+                    void signOut({ redirectUrl: basePath || "/" });
+                  }}
                 >
                   <LogOut className="h-4 w-4" />
                 </Button>

@@ -11,24 +11,35 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { requireAuth, getUserId } from "./middleware";
-import { projectNameToFolder } from "../lib/workspace-folders";
+import { requireAuth, requireAdmin, getUserId } from "./middleware";
+import {
+  projectNameToFolder,
+  resolveInsideRoot,
+} from "../lib/workspace-folders";
 
 const router: Router = Router();
+
+// The coding workspace is one shared folder on the VPS (also mounted into the
+// OpenCode and filebrowser containers). It belongs to the operator, so only
+// admins may browse or change it; in AUTH_MODE=local the operator is admin.
+const adminOnly = [requireAuth, requireAdmin];
 
 export function workspaceRoot(): string {
   return process.env.CODE_WORKSPACE_ROOT?.trim() || "/data/code-workspace";
 }
 
-/** Resolve a user-supplied relative path inside the workspace (no escape). */
+/** Resolve a user-supplied relative path inside the workspace (no escape,
+ * including through symlinks that point outside it). */
 function resolveSafe(relPath: string): string {
-  const root = path.resolve(workspaceRoot());
   const cleaned = (relPath || "").replace(/^\/+/, "");
-  const abs = path.resolve(root, cleaned);
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
+  if (cleaned.includes("\0")) {
     throw new Error("ワークスペース外のパスは指定できません。");
   }
-  return abs;
+  return resolveInsideRoot(
+    workspaceRoot(),
+    cleaned,
+    "ワークスペース外のパスは指定できません。",
+  );
 }
 
 function ensureRoot(): string {
@@ -39,7 +50,7 @@ function ensureRoot(): string {
   return root;
 }
 
-router.get("/files", requireAuth, async (req: Request, res: Response) => {
+router.get("/files", adminOnly, async (req: Request, res: Response) => {
   try {
     const rel = typeof req.query.path === "string" ? req.query.path : "";
     const abs = resolveSafe(rel);
@@ -100,7 +111,7 @@ router.get("/files", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-router.get("/files/content", requireAuth, (req: Request, res: Response) => {
+router.get("/files/content", adminOnly, (req: Request, res: Response) => {
   try {
     const rel = typeof req.query.path === "string" ? req.query.path : "";
     const abs = resolveSafe(rel);
@@ -122,7 +133,7 @@ router.get("/files/content", requireAuth, (req: Request, res: Response) => {
   }
 });
 
-router.get("/files/download", requireAuth, (req: Request, res: Response) => {
+router.get("/files/download", adminOnly, (req: Request, res: Response) => {
   try {
     const rel = typeof req.query.path === "string" ? req.query.path : "";
     const abs = resolveSafe(rel);
@@ -139,7 +150,7 @@ router.get("/files/download", requireAuth, (req: Request, res: Response) => {
   }
 });
 
-router.post("/files/mkdir", requireAuth, (req: Request, res: Response) => {
+router.post("/files/mkdir", adminOnly, (req: Request, res: Response) => {
   try {
     const rel = typeof req.body?.path === "string" ? req.body.path : "";
     if (!rel) {
@@ -157,7 +168,7 @@ router.post("/files/mkdir", requireAuth, (req: Request, res: Response) => {
   }
 });
 
-router.put("/files/content", requireAuth, (req: Request, res: Response) => {
+router.put("/files/content", adminOnly, (req: Request, res: Response) => {
   try {
     const rel = typeof req.body?.path === "string" ? req.body.path : "";
     const content =
@@ -178,7 +189,7 @@ router.put("/files/content", requireAuth, (req: Request, res: Response) => {
   }
 });
 
-router.post("/files/rename", requireAuth, (req: Request, res: Response) => {
+router.post("/files/rename", adminOnly, (req: Request, res: Response) => {
   try {
     const from = typeof req.body?.from === "string" ? req.body.from : "";
     const to = typeof req.body?.to === "string" ? req.body.to : "";
@@ -202,7 +213,7 @@ router.post("/files/rename", requireAuth, (req: Request, res: Response) => {
   }
 });
 
-router.delete("/files", requireAuth, async (req: Request, res: Response) => {
+router.delete("/files", adminOnly, async (req: Request, res: Response) => {
   try {
     const rel = typeof req.query.path === "string" ? req.query.path : "";
     if (!rel) {
