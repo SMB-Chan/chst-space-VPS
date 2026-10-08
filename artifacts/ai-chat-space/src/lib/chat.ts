@@ -41,6 +41,6 @@ export function timeGreeting(now = new Date()): {
   }
   return {
     title: "こんばんは。",
-      subtitle: "用件を下の入力欄に書いてください。",
+    subtitle: "用件を下の入力欄に書いてください。",
   };
 }

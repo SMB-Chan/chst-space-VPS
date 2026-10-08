@@ -104,7 +104,10 @@ export function getToolBankToolDefinitions(): SpecialistToolDefinition[] {
             name: { type: "string", description: "ツール名" },
             code: { type: "string", description: "再利用するコード本文" },
             summary: { type: "string", description: "用途の要約" },
-            language: { type: "string", description: "例: typescript / python / bash" },
+            language: {
+              type: "string",
+              description: "例: typescript / python / bash",
+            },
             usage: { type: "string", description: "使い方・引数・前提" },
             tags: { type: "array", items: { type: "string" } },
             source_project_id: {
@@ -140,7 +143,8 @@ export function getToolBankToolDefinitions(): SpecialistToolDefinition[] {
       type: "function",
       function: {
         name: "tool_bank_get",
-        description: "ツールバンクから1件の詳細（コード本文含む）を取得します。",
+        description:
+          "ツールバンクから1件の詳細（コード本文含む）を取得します。",
         parameters: {
           type: "object",
           properties: { id: { type: "number" } },

@@ -149,7 +149,9 @@ export async function createToolBankItem(
   const name = input.name.trim();
   if (!name) throw new ToolBankPolicyError("名前を入力してください。");
   const code = validateCode(input.code);
-  const summary = (input.summary ?? "").trim().slice(0, TOOL_BANK_POLICY.MAX_SUMMARY_CHARS);
+  const summary = (input.summary ?? "")
+    .trim()
+    .slice(0, TOOL_BANK_POLICY.MAX_SUMMARY_CHARS);
   const slugBase = (input.slug?.trim() || slugifyToolName(name)).toLowerCase();
   let slug = slugBase;
   for (let i = 2; i < 50; i += 1) {
@@ -215,7 +217,8 @@ export async function updateToolBankItem(
     );
   }
 
-  const codeChanged = input.code != null && validateCode(input.code) !== existing.code;
+  const codeChanged =
+    input.code != null && validateCode(input.code) !== existing.code;
   const statusChanged =
     input.status != null &&
     TOOL_BANK_STATUSES.includes(input.status) &&
@@ -308,10 +311,10 @@ export async function purgeToolBankItem(
     );
   }
 
+  await db.delete(projectToolCopies).where(eq(projectToolCopies.toolId, id));
   await db
-    .delete(projectToolCopies)
-    .where(eq(projectToolCopies.toolId, id));
-  await db.delete(toolBank).where(and(eq(toolBank.userId, userId), eq(toolBank.id, id)));
+    .delete(toolBank)
+    .where(and(eq(toolBank.userId, userId), eq(toolBank.id, id)));
   return true;
 }
 

@@ -100,20 +100,25 @@ export function ProviderCredentialsSection() {
     setBusyProvider(provider);
     setMessage(null);
     try {
-      const testRes = await fetch(`${BASE}/api/openai/providers/${provider}/test`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey: draftKey,
-          baseUrl: draftBaseUrl || null,
-        }),
-      });
+      const testRes = await fetch(
+        `${BASE}/api/openai/providers/${provider}/test`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: draftKey,
+            baseUrl: draftBaseUrl || null,
+          }),
+        },
+      );
       if (!testRes.ok) {
         const data = (await testRes.json().catch(() => ({}))) as {
           error?: string;
         };
-        throw new Error(data.error || `接続確認に失敗しました (HTTP ${testRes.status})`);
+        throw new Error(
+          data.error || `接続確認に失敗しました (HTTP ${testRes.status})`,
+        );
       }
 
       const putRes = await fetch(`${BASE}/api/openai/providers/${provider}`, {
@@ -262,12 +267,18 @@ export function ProviderCredentialsSection() {
                       size="sm"
                       disabled={busy}
                       onClick={() =>
-                        isEditing ? setEditing(null) : startEdit(item.provider, item)
+                        isEditing
+                          ? setEditing(null)
+                          : startEdit(item.provider, item)
                       }
                       className="gap-1.5"
                     >
                       <Plug className="h-3.5 w-3.5" />
-                      {isEditing ? "閉じる" : item.source === "user" ? "更新" : "接続"}
+                      {isEditing
+                        ? "閉じる"
+                        : item.source === "user"
+                          ? "更新"
+                          : "接続"}
                     </Button>
                   </div>
                 </div>

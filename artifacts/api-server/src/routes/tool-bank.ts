@@ -74,7 +74,8 @@ router.get("/tool-bank", requireAuth, async (req: Request, res: Response) => {
     res.json({ tools: items, policy: TOOL_BANK_POLICY });
   } catch (err) {
     res.status(500).json({
-      error: err instanceof Error ? err.message : "一覧を取得できませんでした。",
+      error:
+        err instanceof Error ? err.message : "一覧を取得できませんでした。",
     });
   }
 });
@@ -91,7 +92,8 @@ router.get(
       });
     } catch (err) {
       res.status(500).json({
-        error: err instanceof Error ? err.message : "候補を取得できませんでした。",
+        error:
+          err instanceof Error ? err.message : "候補を取得できませんでした。",
       });
     }
   },
@@ -114,25 +116,29 @@ router.post("/tool-bank", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-router.get("/tool-bank/:id", requireAuth, async (req: Request, res: Response) => {
-  const id = parseId(req.params.id);
-  if (id == null) {
-    res.status(400).json({ error: "不正なIDです。" });
-    return;
-  }
-  try {
-    const tool = await getToolBankItem(getUserId(req), id);
-    if (!tool) {
-      res.status(404).json({ error: "ツールが見つかりません。" });
+router.get(
+  "/tool-bank/:id",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const id = parseId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: "不正なIDです。" });
       return;
     }
-    res.json({ tool });
-  } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : "取得できませんでした。",
-    });
-  }
-});
+    try {
+      const tool = await getToolBankItem(getUserId(req), id);
+      if (!tool) {
+        res.status(404).json({ error: "ツールが見つかりません。" });
+        return;
+      }
+      res.json({ tool });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "取得できませんでした。",
+      });
+    }
+  },
+);
 
 router.patch(
   "/tool-bank/:id",

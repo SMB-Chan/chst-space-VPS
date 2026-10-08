@@ -1,7 +1,4 @@
-import {
-  mkdtempSync,
-  rmSync,
-} from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -115,8 +112,9 @@ describe("runCodingLoop", () => {
     const assistants = messages.filter((m) => m.role === "assistant");
     expect(assistants).toHaveLength(2);
     const firstToolCalls =
-      (assistants[0] as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam)
-        .tool_calls ?? [];
+      (
+        assistants[0] as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam
+      ).tool_calls ?? [];
     expect(firstToolCalls).toHaveLength(1);
     expect(firstToolCalls[0]?.function.name).toBe("code_write");
 
@@ -143,9 +141,7 @@ describe("runCodingLoop", () => {
       reasoningLevel: "none",
       messages,
       tools: [],
-      initialCalls: [
-        makeCall("a1", "code_read", { path: "src/app.ts" }),
-      ],
+      initialCalls: [makeCall("a1", "code_read", { path: "src/app.ts" })],
       rootDir: root,
       signal: signal.signal,
       clientGone: () => false,
@@ -262,10 +258,9 @@ describe("runCodingLoop", () => {
       messages,
       tools: [],
       initialCalls: [
-        Object.assign(
-          makeCall("a1", "code_read", { path: "src/app.ts" }),
-          { reasoningContent: "model-thought-process" },
-        ) as SpecialistToolCall,
+        Object.assign(makeCall("a1", "code_read", { path: "src/app.ts" }), {
+          reasoningContent: "model-thought-process",
+        }) as SpecialistToolCall,
       ],
       rootDir: root,
       signal: signal.signal,
@@ -275,9 +270,8 @@ describe("runCodingLoop", () => {
       withTimeout: async (fn) => fn(signal.signal),
     });
 
-    const firstAssistant = messages.find(
-      (m) => m.role === "assistant",
-    ) as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam | undefined;
+    const firstAssistant = messages.find((m) => m.role === "assistant") as
+      OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam | undefined;
     expect(firstAssistant).toBeDefined();
     expect(firstAssistant).toMatchObject({
       reasoning_content: "model-thought-process",

@@ -748,39 +748,38 @@ function Composer({
               <X className="h-3 w-3" />
             </button>
           </div>
-        
-        {videoMode && (
-          <AlertDialog
-            open={confirmVideoOpen}
-            onOpenChange={(open) => {
-              setConfirmVideoOpen(open);
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  動画生成を実行しますか？
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {videoDuration} 秒・{videoResolution} の動画を高コストな API で生成します。続行すると中断できません。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>戻る</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    setConfirmVideoOpen(false);
-                    videoConfirmedRef.current = true;
-                    void handleSubmit();
-                  }}
-                >
-                  生成する
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-</div>
+
+          {videoMode && (
+            <AlertDialog
+              open={confirmVideoOpen}
+              onOpenChange={(open) => {
+                setConfirmVideoOpen(open);
+              }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>動画生成を実行しますか？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {videoDuration} 秒・{videoResolution} の動画を高コストな API
+                    で生成します。続行すると中断できません。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>戻る</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      setConfirmVideoOpen(false);
+                      videoConfirmedRef.current = true;
+                      void handleSubmit();
+                    }}
+                  >
+                    生成する
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
       )}
 
       {compressing && (

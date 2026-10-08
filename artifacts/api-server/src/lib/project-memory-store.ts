@@ -55,7 +55,9 @@ export function slugifyProjectName(name: string): string {
   );
 }
 
-function toMemorySections(row: ProjectMemoryRow | undefined): ProjectMemorySections {
+function toMemorySections(
+  row: ProjectMemoryRow | undefined,
+): ProjectMemorySections {
   if (!row) return { ...EMPTY_MEMORY };
   return {
     todo: row.todo ?? "",

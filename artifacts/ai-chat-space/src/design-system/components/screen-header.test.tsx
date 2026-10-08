@@ -21,10 +21,7 @@ describe("ScreenHeader (Apple HIG §3.6 Simplicity)", () => {
 
   it("renders actions slot when provided", () => {
     const html = render(
-      <ScreenHeader
-        title="設定"
-        actions={<button>保存</button>}
-      />,
+      <ScreenHeader title="設定" actions={<button>保存</button>} />,
     );
     expect(html).toContain("<button");
     expect(html).toContain("保存");

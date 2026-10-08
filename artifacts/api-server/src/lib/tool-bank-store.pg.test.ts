@@ -38,11 +38,18 @@ async function freshProject(userId: string, label: string): Promise<number> {
 afterAll(async () => {
   if (!pool) return;
   if (createdToolIds.length > 0) {
-    await pool.query("DELETE FROM project_tool_copies WHERE tool_id = ANY($1::int[])", [createdToolIds]);
-    await pool.query("DELETE FROM tool_bank WHERE id = ANY($1::int[])", [createdToolIds]);
+    await pool.query(
+      "DELETE FROM project_tool_copies WHERE tool_id = ANY($1::int[])",
+      [createdToolIds],
+    );
+    await pool.query("DELETE FROM tool_bank WHERE id = ANY($1::int[])", [
+      createdToolIds,
+    ]);
   }
   if (createdProjectIds.length > 0) {
-    await pool.query("DELETE FROM projects WHERE id = ANY($1::int[])", [createdProjectIds]);
+    await pool.query("DELETE FROM projects WHERE id = ANY($1::int[])", [
+      createdProjectIds,
+    ]);
   }
 });
 
@@ -105,7 +112,11 @@ describePostgres("tool-bank-store", () => {
     expect(codeOnly?.version).toBe(2);
 
     // Copying increments use_count and stores a snapshot in project_tool_copies.
-    const { toolVersion } = await copyToolToProject(userId, created.id, projectId);
+    const { toolVersion } = await copyToolToProject(
+      userId,
+      created.id,
+      projectId,
+    );
     expect(toolVersion).toBe(2);
 
     const copies = await listProjectToolCopies(userId, projectId);

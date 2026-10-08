@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  clipHeadTailUtf8Safe,
-  clipHeadUtf8Safe,
-} from "./text-truncation";
+import { clipHeadTailUtf8Safe, clipHeadUtf8Safe } from "./text-truncation";
 
 describe("clipHeadUtf8Safe", () => {
   it("returns short text unchanged", () => {

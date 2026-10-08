@@ -83,7 +83,11 @@ export function ModelSettingsSheet({
         </DrawerHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="mobile-sheet-section" role="listbox" aria-label="モデル">
+          <div
+            className="mobile-sheet-section"
+            role="listbox"
+            aria-label="モデル"
+          >
             {rows.map((row) => {
               const selected =
                 row.id === "default"
@@ -96,7 +100,13 @@ export function ModelSettingsSheet({
                   role="option"
                   aria-selected={selected}
                   className="mobile-option-row"
-                  onClick={() => onSelectModel(row.id === "default" ? models[0]?.id ?? selectedModel : row.id)}
+                  onClick={() =>
+                    onSelectModel(
+                      row.id === "default"
+                        ? (models[0]?.id ?? selectedModel)
+                        : row.id,
+                    )
+                  }
                   data-testid={`mobile-model-option-${row.id}`}
                 >
                   <span className="min-w-0">
@@ -153,7 +163,9 @@ export function ModelSettingsSheet({
                     }}
                   >
                     <span className="min-w-0">
-                      <span className="block">{REASONING_DISPLAY[level.id]}</span>
+                      <span className="block">
+                        {REASONING_DISPLAY[level.id]}
+                      </span>
                       <span className="sub">{level.hint}</span>
                     </span>
                     {reasoningLevel === level.id ? (

@@ -103,7 +103,13 @@ export function WorkComposerDock() {
           disabled={!text.trim()}
           aria-label="チャットで送信"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
             <path
               d="M12 19V5M12 5l-6 6M12 5l6 6"
               stroke="currentColor"
