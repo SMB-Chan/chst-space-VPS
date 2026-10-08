@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  FolderKanban,
   FolderOpen,
   Loader2,
   LogOut,
@@ -275,6 +276,22 @@ export function MobileShell({ children }: MobileShellProps) {
           >
             <Shield className="h-4 w-4" />
             プライベート
+          </button>
+          <button
+            type="button"
+            className="mobile-drawer-item"
+            data-active={
+              location === "/projects" || location.startsWith("/projects/")
+            }
+            onClick={() => {
+              setLocation("/projects");
+              setTab("chat");
+              setDrawerOpen(false);
+            }}
+            data-testid="nav-projects"
+          >
+            <FolderKanban className="h-4 w-4" />
+            プロジェクト
           </button>
           {isAdmin ? (
             <button

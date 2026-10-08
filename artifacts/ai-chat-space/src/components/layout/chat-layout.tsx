@@ -22,6 +22,7 @@ import {
   LockKeyhole,
   MessageSquareText,
   LogOut,
+  FolderKanban,
 } from "lucide-react";
 import { isToday, isYesterday, isThisWeek } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -123,6 +124,11 @@ export function ChatLayout({ children }: ChatLayoutProps) {
     if (isMobile) setSidebarOpen(false);
   }, [setLocation, isMobile]);
 
+  const handleProjects = useCallback(() => {
+    setLocation("/projects");
+    if (isMobile) setSidebarOpen(false);
+  }, [setLocation, isMobile]);
+
   const commitRename = useCallback(() => {
     if (renamingId == null) return;
     const title = normalizeConversationTitle(renameDraft);
@@ -194,15 +200,19 @@ export function ChatLayout({ children }: ChatLayoutProps) {
       ? "プライベートセッション"
       : location === "/settings"
         ? "設定"
-        : activeConversation?.title || "新しい会話";
+        : location === "/projects" || location.startsWith("/projects/")
+          ? "プロジェクト"
+          : activeConversation?.title || "新しい会話";
   const pageContext =
     location === "/private"
       ? "履歴を保存しない一時的な会話"
       : location === "/settings"
         ? "モデルと応答の環境設定"
-        : activeConversation
-          ? "AI workspace"
-          : "新しいアイデアを始める";
+        : location === "/projects" || location.startsWith("/projects/")
+          ? "会話とカスタム指示、参考ファイルをまとめて管理"
+          : activeConversation
+            ? "AI workspace"
+            : "新しいアイデアを始める";
 
   // <768px: ChatGPT-style shell (menu + Chat/Work). Desktop keeps the existing layout.
   if (isMobile === true) {
@@ -324,6 +334,21 @@ export function ChatLayout({ children }: ChatLayoutProps) {
               >
                 <Shield className="h-5 w-5" />
               </Button>
+              <Button
+                variant={
+                  location === "/projects" || location.startsWith("/projects/")
+                    ? "tonal"
+                    : "ghost"
+                }
+                size="icon"
+                className="h-12 w-12 rounded-[var(--m3-shape-xl)]"
+                onClick={handleProjects}
+                title="プロジェクト"
+                aria-label="プロジェクト"
+                data-testid="nav-projects"
+              >
+                <FolderKanban className="h-5 w-5" />
+              </Button>
               <div className="flex-1" />
               {isAdmin ? (
                 <Button
@@ -380,6 +405,20 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                 >
                   <Shield className="h-4 w-4" />
                   プライベート
+                </Button>
+                <Button
+                  onClick={handleProjects}
+                  className="h-10 w-full justify-start rounded-[var(--m3-shape-md)]"
+                  variant={
+                    location === "/projects" ||
+                    location.startsWith("/projects/")
+                      ? "tonal"
+                      : "ghost"
+                  }
+                  data-testid="nav-projects"
+                >
+                  <FolderKanban className="h-4 w-4" />
+                  プロジェクト
                 </Button>
                 {isAdmin ? (
                   <Button
@@ -475,6 +514,15 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                             >
                               <div className="min-w-0 flex-1 truncate pr-6 font-medium">
                                 {conv.title || "無題"}
+                                {conv.projectId != null ? (
+                                  <span
+                                    aria-label="プロジェクト"
+                                    className="ml-1.5 inline-flex h-4 w-4 align-middle text-[var(--m3-primary)]"
+                                    title="この会話はプロジェクトに属しています"
+                                  >
+                                    <FolderKanban className="h-3.5 w-3.5" />
+                                  </span>
+                                ) : null}
                               </div>
                             </Link>
                           )}

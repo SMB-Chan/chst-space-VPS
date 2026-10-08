@@ -641,7 +641,8 @@ components:
       enum: [openai, dashscope, openrouter, xiaomi]
     ProviderCredential:
       type: object
-      required: [provider, label, configured, source, keyHint, baseUrl, updatedAt]
+      required:
+        [provider, label, configured, source, keyHint, baseUrl, updatedAt]
       properties:
         provider:
           $ref: "#/components/schemas/ProviderId"
@@ -1195,6 +1196,8 @@ components:
           type: integer
         title:
           type: string
+        projectId:
+          type: [integer, "null"]
         createdAt:
           type: string
           format: date-time

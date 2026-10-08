@@ -476,6 +476,8 @@ export interface OpenaiMessageDeleteInput {
 export interface OpenaiConversationWithMessages {
   id: number;
   title: string;
+  /** @nullable */
+  projectId?: number | null;
   createdAt: string;
   messages: OpenaiMessage[];
 }

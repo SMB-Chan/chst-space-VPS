@@ -10,6 +10,8 @@ import type { OpenaiMessage } from './openaiMessage';
 export interface OpenaiConversationWithMessages {
   id: number;
   title: string;
+  /** @nullable */
+  projectId?: number | null;
   createdAt: Date;
   messages: OpenaiMessage[];
 }

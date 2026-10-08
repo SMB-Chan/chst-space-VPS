@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { FolderKanban, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/design-system/components";
@@ -18,16 +19,24 @@ export interface ProjectSummary {
 interface ProjectPanelProps {
   /** Called after a project is created (e.g. refresh work list). */
   onProjectCreated?: (project: ProjectSummary) => void;
-  /** Called when user opens files for a project. */
+  /**
+   * Called when a project is opened. Defaults to navigating to the project
+   * detail page (`/projects/:id`). Provide an explicit callback (e.g. admin
+   * FilesPage) to override.
+   */
+  onOpenProject?: (project: ProjectSummary) => void;
+  /** Called when user opens files for a project (admin-only behavior). */
   onOpenFiles?: (folder: string) => void;
   compact?: boolean;
 }
 
 export function ProjectPanel({
   onProjectCreated,
+  onOpenProject,
   onOpenFiles,
   compact,
 }: ProjectPanelProps) {
+  const [, setLocation] = useLocation();
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -205,15 +214,12 @@ export function ProjectPanel({
                     : "rounded-[var(--m3-shape-md)] px-2 py-1.5 hover:bg-[var(--m3-surface-container)]",
                 )}
                 onClick={() => {
-                  const folder = project.slug || project.name;
-                  if (compact) {
-                    // Never expand the inline browser inside Work — layout breaks.
-                    onOpenFiles?.(folder);
+                  if (onOpenProject) {
+                    onOpenProject(project);
                     return;
                   }
-                  setFilesPath(folder);
-                  setShowFiles(true);
-                  onOpenFiles?.(folder);
+                  // Default: navigate to the project detail page.
+                  setLocation(`/projects/${project.id}`);
                 }}
               >
                 <FolderKanban className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />

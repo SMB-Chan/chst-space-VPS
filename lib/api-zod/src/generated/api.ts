@@ -401,6 +401,7 @@ export const getOpenaiConversationResponseMessagesItemFilesMetaItemRemovedMin = 
 export const GetOpenaiConversationResponse = zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
+  "projectId": zod.number().int().nullish(),
   "createdAt": zod.coerce.date(),
   "messages": zod.array(zod.object({
   "id": zod.number().int(),

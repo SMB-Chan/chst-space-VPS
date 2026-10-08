@@ -253,9 +253,12 @@ const MEMORY_SYSTEM_PROMPT = `
 - 古い記憶の置換は新しい記憶を保存してからmemory_supersedeを使ってください。誤り・古い情報の失効にはmemory_invalidate、不要な記憶の本文と履歴の完全削除にはmemory_forgetを使ってください。
 - 記憶は過去の参考情報です。confidenceは申告値です。最新情報が必要な質問では記憶だけで回答せず、出典を再確認してください。`;
 
-export type ChatMemoryContext =
-  | { enabled: true; userId: string; projectId?: number | null }
-  | { enabled: false };
+export type ChatMemoryContext = {
+  enabled: boolean;
+  /** Always provided when projectId is — used for ownership-checked project context. */
+  userId?: string;
+  projectId?: number | null;
+};
 
 export type ChatFailureCallback = (input: {
   content: string;
@@ -596,10 +599,11 @@ export async function streamChatReply(args: {
     // recall is primary on the current message; when it matches nothing
     // (typical for short follow-ups like "それで？"), retry once with recent
     // conversation context so earlier turns can supply the missing keywords.
-    if (!translationMode && memory.enabled) {
+    if (!translationMode && memory.enabled && memory.userId) {
+      const memoryUserId = memory.userId;
       try {
         let relevantMemories = await findRelevantMemories(
-          memory.userId,
+          memoryUserId,
           userText,
           5,
         );
@@ -610,7 +614,7 @@ export async function streamChatReply(args: {
           );
           if (recentContext) {
             relevantMemories = await findRelevantMemories(
-              memory.userId,
+              memoryUserId,
               [userText, recentContext].filter(Boolean).join("\n"),
               5,
             );
@@ -625,15 +629,15 @@ export async function streamChatReply(args: {
         // Run maintenance periodically (non-blocking, throttled to every 5 min)
         const now = Date.now();
         if (
-          now - (memoryMaintenanceTimes.get(memory.userId) ?? 0) >
+          now - (memoryMaintenanceTimes.get(memoryUserId) ?? 0) >
           MEMORY_MAINTENANCE_INTERVAL_MS
         ) {
           if (memoryMaintenanceTimes.size >= 1000)
             memoryMaintenanceTimes.delete(
               memoryMaintenanceTimes.keys().next().value!,
             );
-          memoryMaintenanceTimes.set(memory.userId, now);
-          void runMemoryMaintenance(memory.userId).catch((error) => {
+          memoryMaintenanceTimes.set(memoryUserId, now);
+          void runMemoryMaintenance(memoryUserId).catch((error) => {
             logger.warn(
               safeFailureFields(
                 error,
@@ -649,15 +653,51 @@ export async function streamChatReply(args: {
       }
     }
 
-    // Project memory (TODO / credentials / structure) — keeps continuity when
-    // the operator switches models mid-project.
-    if (!translationMode && memory.enabled && memory.projectId != null) {
+    // Project context (instructions + memory + reference files). The user-
+    // authored instructions and project files are injected whenever a project
+    // is bound to the conversation; memory sections and the tool bank keep
+    // their original memory.enabled gate to avoid changing existing behaviour.
+    if (!translationMode && memory.projectId != null && memory.userId) {
+      const projectUserId = memory.userId;
+      const projectId = memory.projectId;
+      try {
+        const { loadProjectContext } = await import("./project-context");
+        // Memory sections are injected by the memory.enabled block below;
+        // exclude them here so they are never sent twice.
+        const projectPrompt = await loadProjectContext(
+          projectUserId,
+          projectId,
+          undefined,
+          { includeMemory: false },
+        );
+        if (projectPrompt) {
+          workingMessages.push({ role: "system", content: projectPrompt });
+        }
+      } catch (error) {
+        // Project context failures should not break the chat flow
+        logger.warn(
+          safeFailureFields(error, "chat-stream", "PROJECT_CONTEXT_FAILED"),
+          "Project context could not be loaded",
+        );
+      }
+    }
+
+    // Project memory sections + tool bank (operator-only features, gated
+    // on memory.enabled to keep existing behaviour).
+    if (
+      !translationMode &&
+      memory.enabled &&
+      memory.projectId != null &&
+      memory.userId
+    ) {
+      const projectUserId = memory.userId;
+      const projectId = memory.projectId;
       try {
         const { loadProjectMemoryContext } =
           await import("./project-memory-store");
         const projectPrompt = await loadProjectMemoryContext(
-          memory.userId,
-          memory.projectId,
+          projectUserId,
+          projectId,
         );
         if (projectPrompt) {
           workingMessages.push({ role: "system", content: projectPrompt });
@@ -665,7 +705,7 @@ export async function streamChatReply(args: {
 
         const { listToolBank, formatToolBankContext } =
           await import("./tool-bank-store");
-        const bankTools = await listToolBank(memory.userId, {
+        const bankTools = await listToolBank(projectUserId, {
           status: "active",
         });
         const bankPrompt = formatToolBankContext(bankTools);

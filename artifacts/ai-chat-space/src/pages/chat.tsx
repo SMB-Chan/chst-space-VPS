@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useParams, useLocation } from "wouter";
-import { useQueryClient } from "@tanstack/react-query";
+import { useParams, useLocation, useSearch, Link } from "wouter";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useGetOpenaiConversation,
   useCreateOpenaiConversation,
@@ -56,7 +56,12 @@ import {
   compactAttachmentMessageForHistory,
   serializeAttachmentMessage,
 } from "@/lib/attachments";
-import { X } from "lucide-react";
+import {
+  parseProjectIdFromSearch,
+  projectsApi,
+  type ProjectRecord,
+} from "@/lib/projects-api";
+import { FolderKanban, X } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -525,6 +530,12 @@ export function ChatPage() {
   const params = useParams();
   const [location, setLocation] = useLocation();
   const isPrivate = location === "/private" || location.startsWith("/private?");
+  // wouter's location is the pathname only; the query lives in useSearch().
+  const searchString = useSearch();
+  const projectIdFromQuery = useMemo(
+    () => (isPrivate ? null : parseProjectIdFromSearch(searchString)),
+    [isPrivate, searchString],
+  );
   const [initialSettings] = useState(loadSettings);
   const rawId = params.id;
   const parsedId = rawId ? Number.parseInt(rawId, 10) : NaN;
@@ -840,6 +851,57 @@ export function ChatPage() {
     },
   });
 
+  // The "active" project is whichever project should be associated with the
+  // chat: the stored projectId on /conversations/:id, else an explicit
+  // `?project=` on /chat (used when the first message creates the
+  // conversation), otherwise nothing.
+  const conversationProjectId = conversationId
+    ? (conversation?.projectId ?? null)
+    : null;
+  const pendingProjectId = conversationId ? null : projectIdFromQuery;
+  const activeProjectId = isPrivate
+    ? null
+    : (conversationProjectId ?? pendingProjectId);
+
+  // Persist the latest resolved project name from a /chat?project= pick so we
+  // can render the chip before the conversation is created.
+  const [pendingProjectName, setPendingProjectName] = useState<string | null>(
+    null,
+  );
+
+  const { data: projectRecord } = useQuery<ProjectRecord | null>({
+    queryKey: ["project", activeProjectId],
+    queryFn: async () => {
+      if (activeProjectId == null) return null;
+      try {
+        return await projectsApi.get(activeProjectId);
+      } catch {
+        return null;
+      }
+    },
+    enabled: activeProjectId != null,
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (projectRecord?.name) {
+      setPendingProjectName(projectRecord.name);
+    }
+  }, [projectRecord?.name]);
+
+  useEffect(() => {
+    // Clear cached name when the project changes / leaves the active set.
+    if (activeProjectId == null) {
+      setPendingProjectName(null);
+    }
+  }, [activeProjectId]);
+
+  // Only a not-yet-created chat can drop its project (the conversation is
+  // re-filed from the project page instead).
+  const clearPendingProject = useCallback(() => {
+    setLocation("/chat", { replace: true });
+  }, [setLocation]);
+
   useEffect(() => {
     if (!isPrivate) setPrivateMessages([]);
   }, [isPrivate]);
@@ -975,7 +1037,10 @@ export function ChatPage() {
     if (!targetId) {
       try {
         const newConv = await createConversation.mutateAsync({
-          data: { title: conversationTitle(input.prompt) },
+          data: {
+            title: conversationTitle(input.prompt),
+            ...(activeProjectId != null ? { projectId: activeProjectId } : {}),
+          },
         });
         targetId = newConv.id;
         await queryClient.invalidateQueries({
@@ -1101,7 +1166,10 @@ export function ChatPage() {
     if (!isPrivate && !targetId) {
       try {
         const newConv = await createConversation.mutateAsync({
-          data: { title: conversationTitle(content) },
+          data: {
+            title: conversationTitle(content),
+            ...(activeProjectId != null ? { projectId: activeProjectId } : {}),
+          },
         });
         targetId = newConv.id;
         queryClient.invalidateQueries({
@@ -1593,6 +1661,17 @@ export function ChatPage() {
         data-chat-composer-region=""
       >
         <div className="mx-auto max-w-4xl">
+          {activeProjectId != null ? (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <ProjectChip
+                projectId={activeProjectId}
+                name={pendingProjectName}
+                onClear={
+                  pendingProjectId != null ? clearPendingProject : undefined
+                }
+              />
+            </div>
+          ) : null}
           <MessageInput
             onSend={handleSend}
             draftScope={
@@ -1636,6 +1715,50 @@ export function ChatPage() {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+interface ProjectChipProps {
+  projectId: number;
+  name: string | null;
+  /**
+   * When false (e.g. the conversation already has a projectId), the chip is
+   * informational only and the × is hidden.
+   */
+  onClear?: () => void;
+}
+
+function ProjectChip({ projectId, name, onClear }: ProjectChipProps) {
+  const display = name ?? `プロジェクト #${projectId}`;
+  const href = `/projects/${projectId}`;
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 rounded-[var(--m3-shape-full)] border border-[var(--m3-outline-variant)] bg-[var(--m3-secondary-container)] py-1 pl-2.5 pr-1 text-xs text-[var(--m3-on-secondary-container)]"
+      data-testid="chat-project-chip"
+    >
+      <FolderKanban className="h-3.5 w-3.5 shrink-0" />
+      <span className="text-[10px] uppercase tracking-[0.16em] opacity-80">
+        プロジェクト
+      </span>
+      <Link
+        href={href}
+        className="max-w-[40ch] truncate font-medium hover:underline"
+        title={display}
+      >
+        {display}
+      </Link>
+      {onClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-[var(--m3-shape-full)] hover:bg-[var(--m3-surface-container-high)]"
+          aria-label="プロジェクトの選択を解除"
+          data-testid="chat-project-chip-clear"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      ) : null}
     </div>
   );
 }

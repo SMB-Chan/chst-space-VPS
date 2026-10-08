@@ -396,11 +396,16 @@ CREATE TABLE IF NOT EXISTS projects (
   name text NOT NULL,
   slug text NOT NULL,
   description text,
+  instructions text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS projects_user_slug_uidx ON projects(user_id, slug);
 CREATE INDEX IF NOT EXISTS projects_user_idx ON projects(user_id);
+
+-- Older deployments pre-date the user-authored system prompt; backfill the
+-- column with an empty default so the NOT NULL constraint can be enforced.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS instructions text NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS project_memory (
   project_id integer PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -412,6 +417,23 @@ CREATE TABLE IF NOT EXISTS project_memory (
   notes text NOT NULL DEFAULT '',
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS project_files (
+  id serial PRIMARY KEY,
+  project_id integer NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id text NOT NULL,
+  filename text NOT NULL,
+  mime_type text NOT NULL,
+  size_bytes integer NOT NULL,
+  data text NOT NULL,
+  extracted_text text NOT NULL DEFAULT '',
+  text_chars integer NOT NULL DEFAULT 0,
+  include_in_context boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS project_files_project_idx ON project_files(project_id);
+CREATE INDEX IF NOT EXISTS project_files_user_idx ON project_files(user_id);
 
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id integer;
 `.trim();

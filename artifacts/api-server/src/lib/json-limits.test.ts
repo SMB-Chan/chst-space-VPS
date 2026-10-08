@@ -5,6 +5,8 @@ import {
   DEFAULT_JSON_LIMIT,
   LARGE_JSON_LIMIT,
   LARGE_JSON_PATHS,
+  PROJECT_FILE_JSON_LIMIT,
+  PROJECT_FILE_JSON_PATHS,
 } from "./json-limits";
 
 function listen(app: express.Express): Promise<http.Server> {
@@ -94,6 +96,54 @@ describe("JSON body limits", () => {
       expect(conv.status).toBe(200);
       expect(ephemeral.status).toBe(200);
       expect(other.status).toBe(413);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  it("accepts an oversized payload on the project file route but rejects it elsewhere", async () => {
+    const app = express();
+    app.use(
+      [...PROJECT_FILE_JSON_PATHS],
+      express.json({ limit: PROJECT_FILE_JSON_LIMIT }),
+    );
+    app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
+    const echo: express.RequestHandler = (req, res) => {
+      res.json({
+        n: typeof req.body?.content === "string" ? req.body.content.length : 0,
+      });
+    };
+    app.post("/api/projects/:id/files", echo);
+    app.post("/api/projects", echo);
+    app.use(
+      (
+        err: Error & { status?: number; type?: string },
+        _req: express.Request,
+        res: express.Response,
+        _next: express.NextFunction,
+      ) => {
+        res
+          .status(err.status ?? 500)
+          .json({ error: err.message, type: err.type });
+      },
+    );
+
+    const server = await listen(app);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected a TCP port");
+    }
+    const { port } = address;
+    try {
+      // Larger than DEFAULT_JSON_LIMIT but inside PROJECT_FILE_JSON_LIMIT.
+      const large = 500_000;
+      const projectFiles = await post(port, "/api/projects/7/files", large);
+      const projects = await post(port, "/api/projects", large);
+      expect(projectFiles.status).toBe(200);
+      expect(projects.status).toBe(413);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
