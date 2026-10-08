@@ -858,6 +858,9 @@ components:
           type: integer
         title:
           type: string
+        projectId:
+          type: [integer, "null"]
+          description: Project this conversation belongs to (owned by the same user)
         createdAt:
           type: string
           format: date-time
@@ -1098,6 +1101,10 @@ components:
           type: string
           minLength: 1
           maxLength: 80
+        projectId:
+          type: [integer, "null"]
+          minimum: 1
+          description: Optional project to file the new conversation under (must be the caller's)
       required:
         - title
     OpenaiAttachment:

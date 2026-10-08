@@ -341,6 +341,7 @@ export const DownloadOpenaiArtifactResponse = zod.string()
 export const ListOpenaiConversationsResponseItem = zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
+  "projectId": zod.number().int().nullish().describe('Project this conversation belongs to (owned by the same user)'),
   "createdAt": zod.coerce.date()
 })
 export const ListOpenaiConversationsResponse = zod.array(ListOpenaiConversationsResponseItem)
@@ -353,13 +354,16 @@ export const createOpenaiConversationBodyTitleMax = 80;
 
 
 
+
 export const CreateOpenaiConversationBody = zod.object({
-  "title": zod.string().min(1).max(createOpenaiConversationBodyTitleMax)
+  "title": zod.string().min(1).max(createOpenaiConversationBodyTitleMax),
+  "projectId": zod.number().int().min(1).nullish().describe('Optional project to file the new conversation under (must be the caller\'s)')
 })
 
 export const CreateOpenaiConversationResponse = zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
+  "projectId": zod.number().int().nullish().describe('Project this conversation belongs to (owned by the same user)'),
   "createdAt": zod.coerce.date()
 })
 
@@ -478,13 +482,16 @@ export const updateOpenaiConversationBodyTitleMax = 80;
 
 
 
+
 export const UpdateOpenaiConversationBody = zod.object({
-  "title": zod.string().min(1).max(updateOpenaiConversationBodyTitleMax)
+  "title": zod.string().min(1).max(updateOpenaiConversationBodyTitleMax),
+  "projectId": zod.number().int().min(1).nullish().describe('Optional project to file the new conversation under (must be the caller\'s)')
 })
 
 export const UpdateOpenaiConversationResponse = zod.object({
   "id": zod.number().int(),
   "title": zod.string(),
+  "projectId": zod.number().int().nullish().describe('Project this conversation belongs to (owned by the same user)'),
   "createdAt": zod.coerce.date()
 })
 

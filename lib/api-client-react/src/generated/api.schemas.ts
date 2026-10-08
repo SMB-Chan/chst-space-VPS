@@ -235,6 +235,11 @@ export interface CapabilityRegistry {
 export interface OpenaiConversation {
   id: number;
   title: string;
+  /**
+     * Project this conversation belongs to (owned by the same user)
+     * @nullable
+     */
+  projectId?: number | null;
   createdAt: string;
 }
 
@@ -378,6 +383,12 @@ export interface OpenaiConversationInput {
      * @maxLength 80
      */
   title: string;
+  /**
+     * Optional project to file the new conversation under (must be the caller's)
+     * @minimum 1
+     * @nullable
+     */
+  projectId?: number | null;
 }
 
 export type OpenaiAttachmentKind = typeof OpenaiAttachmentKind[keyof typeof OpenaiAttachmentKind];

@@ -9,5 +9,10 @@
 export interface OpenaiConversation {
   id: number;
   title: string;
+  /**
+     * Project this conversation belongs to (owned by the same user)
+     * @nullable
+     */
+  projectId?: number | null;
   createdAt: Date;
 }
