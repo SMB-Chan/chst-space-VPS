@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { FolderKanban, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/design-system/components";
 import { Input } from "@/components/ui/input";
 import { FileBrowser } from "@/components/files/file-browser";
 import { cn } from "@/lib/utils";
@@ -171,9 +172,22 @@ export function ProjectPanel({
           読み込み中...
         </p>
       ) : projects.length === 0 ? (
-        <p className="px-2 text-xs text-[var(--m3-on-surface-variant)]">
-          まだプロジェクトがありません。名前を付けて作成すると、ワークスペースにフォルダも作られます。
-        </p>
+        <EmptyState
+          compact
+          title="プロジェクトがまだありません"
+          description="名前を付けるだけでワークスペースのフォルダが作成されます。"
+          primaryAction={
+            <Button
+              size="sm"
+              onClick={() => {
+                const firstInput = document.getElementById("project-name");
+                firstInput?.focus();
+              }}
+            >
+              最初のプロジェクトを作成
+            </Button>
+          }
+        />
       ) : (
         <ul className={compact ? "space-y-0.5 px-1" : "space-y-1"}>
           {projects.map((project) => (

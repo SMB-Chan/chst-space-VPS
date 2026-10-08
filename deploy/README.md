@@ -14,7 +14,9 @@ the runtime assets:
   deploy/
     Dockerfile               # builds the app image (context = repo root)
     compose.yaml             # db + searxng + app + code (project name pinned: chat-space)
-    deploy.sh                # git pull -> build -> migrate -> up
+    compose.override.yaml    # optional host-specific overrides (gitignored)
+    compose.override.example.yaml
+    deploy.sh                # git pull -> build -> schema -> up
     .env                     # real secrets (gitignored, created on the VPS)
     .env.example             # template
     searxng/settings.yml     # committed config (JSON enabled, no secret)
@@ -27,75 +29,53 @@ The compose project name is pinned to `chat-space` so the postgres volume
 `chat-space_chatpg` and network `chat-space_default` are stable across
 redeploys regardless of the directory compose is invoked from.
 
-## Coding environment (OpenCode + file browser)
+### Database volume and schema
 
-The standalone `/opt/opencode-sandbox` and `/opt/filebrowser` stacks were folded
-into this project:
+- If the database lives in a volume created outside this project (for example
+  after a manual migration), point at it from `deploy/compose.override.yaml`
+  (copy `compose.override.example.yaml`). `docker compose` merges it
+  automatically and it is gitignored, so `git pull --ff-only` stays clean.
+- `deploy.sh` resolves the postgres volume with `docker compose config` and
+  refuses to continue when it does not exist, so a missing override can never
+  boot the app on a fresh, empty database. First install only:
+  `ALLOW_NEW_DB_VOLUME=1 ALLOW_DESTRUCTIVE_PUSH=1 sudo bash deploy/deploy.sh`.
+- Schema: `drizzle-kit migrate` runs only when `lib/db/drizzle/meta/_journal.json`
+  exists. Otherwise the API server applies the schema at boot (`ensure-schema`,
+  idempotent `CREATE/ALTER ... IF NOT EXISTS`). `push --force` never runs
+  unless `ALLOW_DESTRUCTIVE_PUSH=1`.
 
-| Service | Container | Port | Purpose |
-| --- | --- | --- | --- |
-| `code` | `chat-space-code` | `127.0.0.1:4096` | OpenCode web |
-| `files` | `chat-space-files` | `127.0.0.1:8091` | filebrowser over `code-workspace` |
+### One-time step for the ConoHa host (2026-10)
 
-- Workspace: `<repo>/code-workspace` (mounted at `/workspace` and `/srv`)
-- Basic auth (OpenCode): `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`
-- Nginx front (optional): `deploy/code/nginx-oc-picker.conf` →
-  `/etc/nginx/conf.d/oc-picker.conf`, still listening on `127.0.0.1:8096`
-- Picker asset: copy `deploy/code/picker.js` to `/opt/oc-picker/picker.js`
-- filebrowser DB: `deploy/filebrowser/` (gitignored)
+As of 2026-10 the ConoHa clone (`/opt/chat-space/src`) needs four one-time
+fixes before `deploy.sh` can run:
 
-### Access modes (autonomous coding)
-
-`OPENCODE_ACCESS_MODE` or `deploy/code-access-mode` (`ask` | `auto` | `full`):
-
-| Mode | Behavior |
-| --- | --- |
-| `ask` | edit/bash require approval |
-| `auto` | auto-approve (`--auto`); deny catastrophic bash; block `.env` reads |
-| `full` | `permission: allow` — everything |
-
-Settings →「開発環境」から変更できます。反映は `docker compose restart code`。
-
-Build/run:
+1. The clone is owned by another uid, so root's git refuses it
+   ("dubious ownership").
+2. `origin` is an SSH URL but the host has no GitHub key. The repository is
+   public, so an HTTPS remote pulls without any credentials.
+3. Its database lives in the external volume `migration_chat_space_pg`,
+   set by an uncommitted edit to `deploy/compose.yaml`. Move that edit into
+   the gitignored override.
+4. Remove the untracked `deploy/compose.yaml.bak.20261004`.
 
 ```bash
-sudo docker build -f deploy/code/Dockerfile -t chat-space:code deploy/code
-cd deploy && sudo docker compose up -d code files
+git config --global --add safe.directory /opt/chat-space/src
+cd /opt/chat-space/src
+git remote set-url origin https://github.com/SMB-Chan/chst-space-VPS.git
+cp deploy/compose.yaml /root/compose.yaml.conoha-backup
+cat > deploy/compose.override.yaml <<'YAML'
+volumes:
+  chatpg:
+    external: true
+    name: migration_chat_space_pg
+YAML
+git checkout -- deploy/compose.yaml
+rm deploy/compose.yaml.bak.20261004
+git pull --ff-only
+(cd deploy && sudo docker compose config | grep -A2 '^  chatpg:')  # must show migration_chat_space_pg
+git status --porcelain   # must print nothing
+sudo bash deploy/deploy.sh
 ```
-
-Settings →「開発環境」からも開けます（ホスト名 `:8091` / `:4096`）。
-
-
-## Prerequisites (VPS)
-
-- Docker + Compose v2, `sudo` for the deploy user
-- A git deploy key with read access to `SMB-Chan/chst-space-VPS`
-- `deploy/.env` populated (copy from `.env.example`; include the full app
-  runtime config plus `DB_PASSWORD`, `SEARXNG_SECRET`, `SEARXNG_BASE_URL`)
-
-## Deploy
-
-```bash
-bash <repo>/deploy/deploy.sh
-```
-
-This pulls the latest `main`, rebuilds `chat-space:app`, ensures the DB schema,
-and recreates the services.
-
-## SearXNG notes
-
-- `searxng/settings.yml` enables `search.formats: [html, json]`; without JSON
-  the app's `format=json` queries are rejected.
-- The secret is injected from `SEARXNG_SECRET` (not stored in git).
-- The app reaches it at `SEARXNG_BASE_URL` over the internal compose network;
-  no host port is published.
-
-## Rollback
-
-```bash
-cd <repo> && git checkout <previous-sha>
-sudo docker build -f deploy/Dockerfile -t chat-space:app .
-cd deploy && sudo docker compose up -d
 
 ## マルチユーザー（パスワード認証）への移行
 
@@ -104,7 +84,9 @@ cd deploy && sudo docker compose up -d
 ユーザー・プロバイダー・モデルを管理できます。
 
 新しいテーブル（`app_users` / `app_sessions` / `llm_providers` / `llm_models`）は
-`deploy.sh` の `push-force` と API 起動時の `ensure-schema` の両方で作成されます。
+API 起動時の `ensure-schema`（冪等な `CREATE TABLE IF NOT EXISTS`）で作成されます
+（`deploy.sh` は `push --force` を実行しません。drizzle スキーマにも同じ定義があるため、
+初回構築で `ALLOW_DESTRUCTIVE_PUSH=1` を使っても削除されません）。
 組み込みのプロバイダー・モデルは起動のたびに既存行を上書きせず投入されるため、
 `AUTH_MODE=local` のままデプロイしても挙動は変わりません。
 
@@ -135,8 +117,9 @@ cd deploy && sudo docker compose up -d
    bash <repo>/deploy/deploy.sh
    ```
 
-   `deploy.sh` は `.env` の `AUTH_MODE` を読み、フロントエンドを
+   `deploy.sh` は `.env` の `AUTH_MODE` だけを読み、フロントエンドを
    `VITE_AUTH_MODE=password` でビルドします（未設定なら `local`）。
+   ConoHa で初めて実行する場合は、先に上記「One-time step for the ConoHa host」を済ませてください。
    起動ログに `Created the first admin account from BOOTSTRAP_ADMIN_*` が出れば成功です。
 
 4. **HTTPS でログインする**

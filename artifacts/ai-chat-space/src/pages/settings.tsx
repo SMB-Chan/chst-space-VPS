@@ -32,6 +32,8 @@ import { ProviderCredentialsSection } from "@/components/settings/provider-crede
 import { ProjectMemorySection } from "@/components/settings/project-memory-section";
 import { ToolBankSection } from "@/components/settings/tool-bank-section";
 import { PasswordChangeSection } from "@/components/settings/password-change-section";
+import { EmptyState, ScreenHeader } from "@/design-system/components";
+import { Inbox } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -237,17 +239,11 @@ export function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6 sm:py-10">
-        <div className="mb-7 px-1">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--m3-primary)]">
-            Preferences
-          </p>
-          <h1 className="text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">
-            設定
-          </h1>
-          <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--m3-on-surface-variant)]">
-            モデル、LLMプロバイダー、監査、インストール、保存データを一か所で管理します。
-          </p>
-        </div>
+        <ScreenHeader
+          title="設定"
+          description="モデル、LLM プロバイダー、監査、インストール、保存データを一か所で管理します。"
+          className="mb-7 px-1"
+        />
 
         <PasswordChangeSection />
 

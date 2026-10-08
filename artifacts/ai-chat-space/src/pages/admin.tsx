@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
-import { ChevronLeft, Loader2, ShieldCheck } from "lucide-react";
+import { ChevronLeft, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { ErrorState, ScreenHeader } from "@/design-system/components";
 import { OverviewTab } from "@/components/admin/overview-tab";
 import { UsersTab } from "@/components/admin/users-tab";
 import { ProvidersTab } from "@/components/admin/providers-tab";
@@ -92,19 +94,16 @@ export default function AdminPage() {
 
   if (me.role !== "admin") {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center">
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            このページは管理者のみアクセスできます。
-          </p>
-          <Link
-            href="/chat"
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            チャットに戻る
-          </Link>
-        </div>
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6">
+        <ErrorState
+          title="管理者ページにアクセスできません"
+          description="このページは管理者としてログインしたときだけ表示されます。"
+          primaryAction={
+            <Button asChild>
+              <Link href="/chat">チャットに戻る</Link>
+            </Button>
+          }
+        />
       </div>
     );
   }
@@ -112,29 +111,19 @@ export default function AdminPage() {
   return (
     <div className="min-h-[100dvh] bg-background">
       <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              <h1 className="text-xl font-serif text-foreground">
-                管理者コンソール
-              </h1>
-              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
-                {shortRole(me.role)}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              ユーザー・プロバイダー・モデルを一か所で管理します。
-            </p>
-          </div>
-          <Link
-            href="/chat"
-            className="inline-flex items-center gap-1 rounded-[var(--m3-shape-full)] border border-border/60 bg-card/50 px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            チャットに戻る
-          </Link>
-        </div>
+        <ScreenHeader
+          title="管理者コンソール"
+          description={`ユーザー・プロバイダー・モデルを一か所で管理します（${shortRole(me.role)}）。`}
+          actions={
+            <Link
+              href="/chat"
+              className="inline-flex items-center gap-1 rounded-[var(--m3-shape-full)] border border-border/60 bg-card/50 px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              チャットに戻る
+            </Link>
+          }
+        />
 
         {error ? (
           <div className="rounded-[var(--m3-shape-sm)] border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">

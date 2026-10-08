@@ -28,10 +28,10 @@ const buttonVariants = cva(
         link: "rounded-[var(--m3-shape-xs)] bg-transparent px-1 text-[var(--m3-primary)] underline-offset-4 hover:underline active:scale-100",
       },
       size: {
-        default: "h-10 px-5",
+        default: "h-11 px-5",
         sm: "h-8 px-3.5 text-[13px]",
         lg: "h-12 px-7 text-base",
-        icon: "h-10 w-10 px-0",
+        icon: "h-11 w-11 px-0",
       },
     },
     defaultVariants: {
