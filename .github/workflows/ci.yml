@@ -16,6 +16,24 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Many unit tests import @workspace/db (which requires DATABASE_URL at
+    # import time) and the *.pg.test.ts suites need a real database.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: chatspace
+          POSTGRES_PASSWORD: chatspace
+          POSTGRES_DB: chatspace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U chatspace -d chatspace"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://chatspace:chatspace@127.0.0.1:5432/chatspace
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -27,6 +45,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workspace/db run push
       - run: pnpm run format:check
       - run: pnpm run check:api-routes
       - run: pnpm run typecheck
