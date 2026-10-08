@@ -128,6 +128,13 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
 
   await esbuild({
     ...sharedBuildOptions,
+    entryPoints: [path.resolve(artifactDir, "src/cli/create-admin.ts")],
+    outdir: distDir,
+    outExtension: { ".js": ".mjs" },
+  });
+
+  await esbuild({
+    ...sharedBuildOptions,
     plugins: [],
     entryPoints: [path.resolve(artifactDir, "src/lib/file-extraction-worker.ts")],
     outfile: path.resolve(distDir, "file-extraction-worker.mjs"),

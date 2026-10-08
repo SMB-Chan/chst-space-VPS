@@ -31,6 +31,7 @@ import { getListOpenaiConversationsQueryKey } from "@workspace/api-client-react"
 import { ProviderCredentialsSection } from "@/components/settings/provider-credentials-section";
 import { ProjectMemorySection } from "@/components/settings/project-memory-section";
 import { ToolBankSection } from "@/components/settings/tool-bank-section";
+import { PasswordChangeSection } from "@/components/settings/password-change-section";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -247,6 +248,8 @@ export function SettingsPage() {
             モデル、LLMプロバイダー、監査、インストール、保存データを一か所で管理します。
           </p>
         </div>
+
+        <PasswordChangeSection />
 
         <ProviderCredentialsSection />
 

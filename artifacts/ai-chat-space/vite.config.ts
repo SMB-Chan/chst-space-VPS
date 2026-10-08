@@ -15,8 +15,16 @@ const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:5000';
 
 // Local-mode builds (VPS/Tailnet, AUTH_MODE=local) swap Clerk for a shim at
 // bundle time so the same components build without Clerk keys or network.
+// Password-mode builds (AUTH_MODE=password) swap Clerk for a shim that signs
+// in with a username/password against /api/auth/*.
 const isLocalAuth = process.env.VITE_AUTH_MODE === 'local';
+const isPasswordAuth = process.env.VITE_AUTH_MODE === 'password';
 const localAuthShim = path.resolve(import.meta.dirname, 'src', 'local-auth-shim.tsx');
+const passwordAuthShim = path.resolve(
+  import.meta.dirname,
+  'src',
+  'password-auth-shim.tsx',
+);
 
 function normalizeAllowedHost(raw: string): string | null {
   const value = raw.trim();
@@ -61,7 +69,13 @@ export default defineConfig({
             { find: /^@clerk\/react\/internal$/, replacement: localAuthShim },
             { find: /^@clerk\/themes$/, replacement: localAuthShim },
           ]
-        : []),
+        : isPasswordAuth
+          ? [
+              { find: /^@clerk\/react$/, replacement: passwordAuthShim },
+              { find: /^@clerk\/react\/internal$/, replacement: passwordAuthShim },
+              { find: /^@clerk\/themes$/, replacement: passwordAuthShim },
+            ]
+          : []),
       { find: '@', replacement: path.resolve(import.meta.dirname, 'src') },
       {
         find: '@assets',

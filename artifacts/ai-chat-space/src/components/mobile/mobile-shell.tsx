@@ -14,6 +14,7 @@ import {
   Plus,
   Settings,
   Shield,
+  ShieldCheck,
 } from "lucide-react";
 import { useLocation, useParams } from "wouter";
 import { useClerk, useUser } from "@clerk/react";
@@ -32,6 +33,7 @@ import {
   ModelSettingsSheet,
   type SpeedPreference,
 } from "./model-settings-sheet";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import "./mobile.css";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -80,6 +82,7 @@ export function MobileShell({ children }: MobileShellProps) {
   }, [location]);
 
   const activeId = params.id ? Number.parseInt(params.id, 10) : null;
+  const isAdmin = useIsAdmin();
 
   const selectedModel = sessionModel ?? settings.defaultModel;
   const reasoningLevel = sessionReasoning ?? settings.defaultReasoning;
@@ -293,6 +296,22 @@ export function MobileShell({ children }: MobileShellProps) {
             onClick={() => signOut({ redirectUrl: basePath || "/" })}
           >
             <LogOut className="h-4 w-4" />
+          {isAdmin ? (
+            <button
+              type="button"
+              className="mobile-drawer-item"
+              data-active={location === "/admin"}
+              onClick={() => {
+                setLocation("/admin");
+                setTab("chat");
+                setDrawerOpen(false);
+              }}
+              data-testid="nav-admin"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              管理
+            </button>
+          ) : null}
             ログアウト
           </button>
         </div>

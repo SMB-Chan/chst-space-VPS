@@ -37,6 +37,7 @@ import {
 import {
   getAvailableChatModels,
   getCapabilityRegistryWithAvailability,
+  isModelAllowedForRole,
   type GeneratedAsset,
 } from "../../lib/specialist-capabilities";
 import {
@@ -325,12 +326,10 @@ async function resolveSharedChatParams(
   const defaultModel =
     availableModels.find(
       (model) =>
-        (req.userRole === "admin" || model.provider === "openrouter") &&
+        isModelAllowedForRole(model, req.userRole) &&
         model.id === DEFAULT_MODEL,
     ) ??
-    availableModels.find(
-      (model) => req.userRole === "admin" || model.provider === "openrouter",
-    );
+    availableModels.find((model) => isModelAllowedForRole(model, req.userRole));
   const requestedModelId = parsedData.modelId || modelQuery || defaultModel?.id;
   if (!requestedModelId) {
     res.status(503).json({ error: "利用可能なモデルがありません。" });
@@ -354,23 +353,21 @@ async function resolveSharedChatParams(
   const auditReasoningLevel = parseReasoningLevel(req.query.auditReasoning);
   const translationMode = parseTranslationMode(req.query.translate);
 
-  // General users are provisioned exclusively on OpenRouter budget models.
-  // The model picker hides the rest; this is the server-side backstop.
-  if (req.userRole !== "admin" && modelDef.provider !== "openrouter") {
+  // General users are provisioned exclusively on the user-visible catalog
+  // models. The model picker hides the rest; this is the server-side
+  // backstop.
+  if (!isModelAllowedForRole(modelDef, req.userRole)) {
     res.status(403).json({
       error:
-        "一般ユーザーはOpenRouterモデルのみ利用できます。モデルを選び直してください。",
+        "このモデルは管理者のみ利用できます。設定で許可されたモデルを選び直してください。",
       code: "MODEL_NOT_ALLOWED",
     });
     return null;
   }
-  if (
-    auditModel &&
-    req.userRole !== "admin" &&
-    auditModel.provider !== "openrouter"
-  ) {
+  if (auditModel && !isModelAllowedForRole(auditModel, req.userRole)) {
     res.status(403).json({
-      error: "一般ユーザーはOpenRouterモデル以外を監査モデルに指定できません。",
+      error:
+        "この監査モデルは管理者のみ利用できます。設定で許可されたモデルを選び直してください。",
       code: "MODEL_NOT_ALLOWED",
     });
     return null;
@@ -678,13 +675,12 @@ router.use("/openai/artifacts", requireAuth);
 
 router.get("/openai/models", async (req, res) => {
   const models = await getAvailableChatModels();
-  // General users are provisioned on OpenRouter budget models only; the
-  // admin keeps the full provider catalog. Unauthenticated requests see the
-  // restricted list too (they cannot start chats anyway).
+  // Admins see the full provider catalog. General users only see catalog
+  // models whose user_visible flag is on (OpenRouter budget tier today;
+  // custom-provider models when an admin opts them in). Unauthenticated
+  // requests see the restricted list too (they cannot start chats).
   res.json(
-    req.userRole === "admin"
-      ? models
-      : models.filter((model) => model.provider === "openrouter"),
+    models.filter((model) => isModelAllowedForRole(model, req.userRole)),
   );
 });
 

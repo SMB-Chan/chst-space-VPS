@@ -14,4 +14,5 @@ export const CapabilityModelProvider = {
   dashscope: 'dashscope',
   openrouter: 'openrouter',
   xiaomi: 'xiaomi',
+  custom: 'custom',
 } as const;

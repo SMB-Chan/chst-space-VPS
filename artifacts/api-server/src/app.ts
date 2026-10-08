@@ -34,7 +34,7 @@ import {
 import { publicHttpError } from "./lib/public-error";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
 import { chatRunTrackingMiddleware } from "./middlewares/chatRunTrackingMiddleware";
-import { requireAuth } from "./middlewares/requireAuth";
+import { requireAuth, resolveAuthMode } from "./middlewares/requireAuth";
 import { sharedAiUsageGuard } from "./middlewares/sharedAiUsageGuard";
 import {
   TOKEN_PLAN_QUOTA_RESPONSE_HEADERS,
@@ -46,9 +46,10 @@ import { requireStartupReadiness } from "./lib/startup-readiness";
 
 const app: Express = express();
 
-// AUTH_MODE=local (single-operator VPS/Tailnet deployment) skips all Clerk
-// wiring; requireAuth assigns the fixed operator identity instead.
-const isLocalAuth = process.env.AUTH_MODE === "local";
+// AUTH_MODE=local (single-operator VPS/Tailnet deployment) and
+// AUTH_MODE=password (multi-user username/password accounts) skip all Clerk
+// wiring; requireAuth resolves the identity itself in those modes.
+const isClerkAuth = resolveAuthMode() === "clerk";
 
 app.use(
   pinoHttp({
@@ -71,7 +72,7 @@ app.use(
     customErrorMessage: () => SAFE_HTTP_ERROR_MESSAGE,
   }),
 );
-if (!isLocalAuth) {
+if (isClerkAuth) {
   app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 }
 
@@ -113,7 +114,7 @@ app.use("/api", requireStartupReadiness);
 
 const configuredClerkHosts = getConfiguredClerkHosts();
 
-if (!isLocalAuth) {
+if (isClerkAuth) {
   // Dynamic production publishable keys are only derived from a configured host
   // allowlist. If no request host matches, fall back to the configured key rather
   // than turning an arbitrary forwarded Host value into a new Clerk key.

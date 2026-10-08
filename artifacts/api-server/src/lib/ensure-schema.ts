@@ -467,6 +467,76 @@ export async function ensureToolBankSchema(
   await query(ENSURE_TOOL_BANK_SCHEMA_SQL);
 }
 
+// Constraint names match drizzle-kit's naming so `drizzle-kit push --force`
+// (deploy.sh) sees no diff on databases first created by this boot SQL.
+export const ENSURE_APP_USERS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS app_users (
+  id text PRIMARY KEY,
+  username text NOT NULL,
+  display_name text,
+  password_hash text NOT NULL,
+  role text NOT NULL DEFAULT 'user',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  last_login_at timestamptz,
+  CONSTRAINT app_users_username_unique UNIQUE (username)
+);
+
+CREATE TABLE IF NOT EXISTS app_sessions (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  CONSTRAINT app_sessions_user_id_app_users_id_fk FOREIGN KEY (user_id)
+    REFERENCES app_users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS app_sessions_user_id_idx ON app_sessions(user_id);
+`.trim();
+
+export async function ensureAppUsersSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_APP_USERS_SCHEMA_SQL);
+}
+
+export const ENSURE_LLM_CATALOG_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS llm_providers (
+  id text PRIMARY KEY,
+  label text NOT NULL,
+  kind text NOT NULL,
+  base_url text,
+  api_key_encrypted text,
+  key_hint text,
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS llm_models (
+  id text PRIMARY KEY,
+  provider_id text NOT NULL,
+  label text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  supports_vision boolean NOT NULL DEFAULT false,
+  supports_reasoning boolean NOT NULL DEFAULT false,
+  enabled boolean NOT NULL DEFAULT true,
+  user_visible boolean NOT NULL DEFAULT false,
+  builtin boolean NOT NULL DEFAULT false,
+  deleted boolean NOT NULL DEFAULT false,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT llm_models_provider_id_llm_providers_id_fk FOREIGN KEY (provider_id)
+    REFERENCES llm_providers(id) ON DELETE CASCADE
+);
+`.trim();
+
+export async function ensureLlmCatalogSchema(
+  query: (sql: string) => Promise<unknown>,
+): Promise<void> {
+  await query(ENSURE_LLM_CATALOG_SCHEMA_SQL);
+}
+
 export async function ensureUserUsageSchema(
   query: (sql: string) => Promise<unknown>,
 ): Promise<void> {
@@ -484,10 +554,12 @@ export async function ensureChatSchema(
   await ensureAlibabaVideoJobsSchema(execute);
   await ensureAiUsageSchema(execute);
   await ensureLlmMemoriesSchema(execute);
+  await ensureLlmCatalogSchema(execute);
   await ensureUserUsageSchema(execute);
   await ensureUserSettingsSchema(execute);
   await ensureGoogleAuthSchema(execute);
   await ensureProviderCredentialsSchema(execute);
   await ensureProjectsSchema(execute);
   await ensureToolBankSchema(execute);
+  await ensureAppUsersSchema(execute);
 }

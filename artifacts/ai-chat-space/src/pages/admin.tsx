@@ -1,150 +1,139 @@
 import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@clerk/react";
+import { Link } from "wouter";
+import { ChevronLeft, Loader2, ShieldCheck } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { OverviewTab } from "@/components/admin/overview-tab";
+import { UsersTab } from "@/components/admin/users-tab";
+import { ProvidersTab } from "@/components/admin/providers-tab";
+import { ModelsTab } from "@/components/admin/models-tab";
+import { refreshAvailableModels } from "@/components/chat/model-selector";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-interface AdminUserRow {
-  userId: string;
-  role: "admin" | "user";
-  month: string;
-  promptTokens: number;
-  completionTokens: number;
-  estimatedCostUsd: number;
-  budgetUsd: number | null;
-  suspended: boolean;
-  conversations: number;
-  messages: number;
+interface AdminRoleResponse {
+  role: string;
 }
 
-interface AdminOverview {
-  month: string;
-  defaultBudgetUsd: number;
-  users: AdminUserRow[];
+function shortRole(role: string): string {
+  if (role === "admin") return "管理者";
+  if (role === "user") return "一般ユーザー";
+  return role;
 }
 
-function formatUsd(amount: number): string {
-  return `$${amount.toFixed(2)}`;
-}
+const TABS = [
+  { value: "overview", label: "利用状況" },
+  { value: "users", label: "ユーザー" },
+  { value: "providers", label: "プロバイダー" },
+  { value: "models", label: "モデル" },
+] as const;
 
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return String(tokens);
-}
-
-function shortUserId(userId: string): string {
-  return userId.length > 18 ? `${userId.slice(0, 15)}…` : userId;
-}
+type TabValue = (typeof TABS)[number]["value"];
 
 export default function AdminPage() {
-  const { isLoaded, userId } = useAuth();
-  const [me, setMe] = useState<{ role: string } | null>(null);
-  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [me, setMe] = useState<AdminRoleResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({});
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  const loadOverview = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await fetch(`${BASE}/api/admin/overview`, {
-        credentials: "include",
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${BASE}/api/openai/me`, { credentials: "include" })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setMe({ role: "denied" });
+          setError(null);
+          return;
+        }
+        const body = (await res.json()) as AdminRoleResponse;
+        setMe(body);
+        setError(null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMe({ role: "denied" });
+          setError("サーバーへの接続に失敗しました。");
+        }
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        setError(body?.error ?? "読み込みに失敗しました。");
-        return;
-      }
-      setOverview((await res.json()) as AdminOverview);
-    } catch {
-      setError("読み込みに失敗しました。");
-    }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    fetch(`${BASE}/api/openai/me`, { credentials: "include" })
+    let cancelled = false;
+    fetch(`${BASE}/api/auth/me`, { credentials: "include" })
       .then(async (res) => {
-        if (!res.ok) {
-          setMe({ role: "denied" });
-          return;
-        }
-        setMe((await res.json()) as { role: string });
+        if (cancelled || !res.ok) return;
+        const body = (await res.json()) as {
+          user?: { id?: string } | null;
+        };
+        if (body.user?.id) setCurrentUserId(body.user.id);
       })
-      .catch(() => setMe({ role: "denied" }));
-  }, [isLoaded, userId]);
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  useEffect(() => {
-    if (me?.role === "admin") void loadOverview();
-  }, [me, loadOverview]);
+  const invalidateModelCache = useCallback(() => {
+    // The picker uses a module-level cache in model-selector.tsx, not
+    // react-query. Trigger a refetch so the next opened picker sees the
+    // updated provider/model list immediately.
+    void refreshAvailableModels();
+  }, []);
 
-  const act = useCallback(
-    async (action: () => Promise<Response>, reload = true) => {
-      setBusy(true);
-      try {
-        const res = await action();
-        if (!res.ok && res.status !== 204) {
-          const body = (await res.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          setError(body?.error ?? "操作に失敗しました。");
-        } else {
-          setError(null);
-          if (reload) await loadOverview();
-        }
-      } catch {
-        setError("操作に失敗しました。");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [loadOverview],
-  );
-
-  if (!isLoaded || (me === null && !error)) {
+  if (!me) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-background">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
-  if (me?.role !== "admin") {
+  if (me.role !== "admin") {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          このページは管理者のみアクセスできます。
-        </p>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            このページは管理者のみアクセスできます。
+          </p>
+          <Link
+            href="/chat"
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            チャットに戻る
+          </Link>
+        </div>
       </div>
     );
   }
-
-  const users = overview?.users ?? [];
 
   return (
     <div className="min-h-[100dvh] bg-background">
       <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-serif text-foreground">
-              管理者コンソール
-            </h1>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              <h1 className="text-xl font-serif text-foreground">
+                管理者コンソール
+              </h1>
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                {shortRole(me.role)}
+              </span>
+            </div>
             <p className="text-xs text-muted-foreground">
-              {overview
-                ? `${overview.month} の利用状況 ・ 一般ユーザーの既定上限 ${formatUsd(overview.defaultBudgetUsd)}／月`
-                : "読み込み中…"}
+              ユーザー・プロバイダー・モデルを一か所で管理します。
             </p>
           </div>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void loadOverview()}
-            className="rounded-[var(--m3-shape-full)] border border-border/60 bg-card/50 px-4 py-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+          <Link
+            href="/chat"
+            className="inline-flex items-center gap-1 rounded-[var(--m3-shape-full)] border border-border/60 bg-card/50 px-4 py-2 text-xs text-muted-foreground hover:text-foreground"
           >
-            更新
-          </button>
+            <ChevronLeft className="h-3.5 w-3.5" />
+            チャットに戻る
+          </Link>
         </div>
 
         {error ? (
@@ -153,176 +142,44 @@ export default function AdminPage() {
           </div>
         ) : null}
 
-        <div className="space-y-3">
-          {users.map((user) => {
-            const usageRatio =
-              user.budgetUsd && user.budgetUsd > 0
-                ? Math.min(1, user.estimatedCostUsd / user.budgetUsd)
-                : 0;
-            return (
-              <div
-                key={user.userId}
-                className="space-y-3 rounded-[var(--m3-shape-sm)] border border-border/60 bg-card/40 p-4"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm text-foreground">
-                        {shortUserId(user.userId)}
-                      </span>
-                      <span
-                        className={
-                          user.role === "admin"
-                            ? "rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary"
-                            : "rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
-                        }
-                      >
-                        {user.role === "admin" ? "管理者" : "一般"}
-                      </span>
-                      {user.suspended ? (
-                        <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] text-destructive">
-                          停止中
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      会話 {user.conversations} 件 ・ メッセージ {user.messages}{" "}
-                      件 ・ トークン{" "}
-                      {formatTokens(user.promptTokens + user.completionTokens)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-foreground">
-                      {formatUsd(user.estimatedCostUsd)}
-                      {user.budgetUsd !== null ? (
-                        <span className="text-xs text-muted-foreground">
-                          {" "}
-                          / {formatUsd(user.budgetUsd)}
-                        </span>
-                      ) : null}
-                    </p>
-                    {user.budgetUsd !== null ? (
-                      <div className="mt-1 h-1.5 w-32 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={
-                            usageRatio >= 1
-                              ? "h-full bg-destructive"
-                              : usageRatio > 0.8
-                                ? "h-full bg-[var(--app-status-warning)]"
-                                : "h-full bg-primary"
-                          }
-                          style={{ width: `${Math.round(usageRatio * 100)}%` }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                {user.role === "user" ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      placeholder={`${overview?.defaultBudgetUsd ?? 2}`}
-                      value={budgetDraft[user.userId] ?? ""}
-                      onChange={(event) =>
-                        setBudgetDraft((prev) => ({
-                          ...prev,
-                          [user.userId]: event.target.value,
-                        }))
-                      }
-                      className="h-9 w-28 rounded-[var(--m3-shape-xs)] border border-border/60 bg-background px-2 text-sm text-foreground"
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      $/月（空欄で既定値）
-                    </span>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void act(() => {
-                          const raw = budgetDraft[user.userId]?.trim();
-                          const parsed = raw ? Number(raw) : null;
-                          return fetch(
-                            `${BASE}/api/admin/users/${encodeURIComponent(user.userId)}/budget`,
-                            {
-                              method: "PUT",
-                              credentials: "include",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                monthlyBudgetUsd:
-                                  parsed === null || Number.isNaN(parsed)
-                                    ? null
-                                    : parsed,
-                              }),
-                            },
-                          );
-                        })
-                      }
-                      className="rounded-[var(--m3-shape-full)] bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
-                    >
-                      上限を保存
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void act(() =>
-                          fetch(
-                            `${BASE}/api/admin/users/${encodeURIComponent(user.userId)}/suspension`,
-                            {
-                              method: "PUT",
-                              credentials: "include",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                suspended: !user.suspended,
-                              }),
-                            },
-                          ),
-                        )
-                      }
-                      className="rounded-[var(--m3-shape-full)] border border-border/60 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-                    >
-                      {user.suspended ? "停止を解除" : "一時停止"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            `${shortUserId(user.userId)} の会話・記憶・利用記録をすべて削除します。元に戻せません。よろしいですか？`,
-                          )
-                        )
-                          return;
-                        void act(() =>
-                          fetch(
-                            `${BASE}/api/admin/users/${encodeURIComponent(user.userId)}/data`,
-                            {
-                              method: "DELETE",
-                              credentials: "include",
-                            },
-                          ),
-                        );
-                      }}
-                      className="rounded-[var(--m3-shape-full)] border border-destructive/40 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                    >
-                      データを削除
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-
-        {users.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            ユーザーデータはまだありません。
-          </p>
-        ) : null}
+        <Tabs
+          defaultValue="overview"
+          className="space-y-3"
+          onValueChange={(value) => {
+            void value;
+          }}
+        >
+          <TabsList className="flex flex-wrap bg-card/40 p-1">
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {TABS.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value as TabValue}>
+              {renderTabContent(tab.value, currentUserId, invalidateModelCache)}
+            </TabsContent>
+          ))}
+        </Tabs>
       </div>
     </div>
   );
+}
+
+function renderTabContent(
+  value: TabValue,
+  currentUserId: string | null,
+  invalidateModelCache: () => void,
+) {
+  switch (value) {
+    case "overview":
+      return <OverviewTab />;
+    case "users":
+      return <UsersTab currentUserId={currentUserId} />;
+    case "providers":
+      return <ProvidersTab onInvalidateModels={invalidateModelCache} />;
+    case "models":
+      return <ModelsTab onInvalidateModels={invalidateModelCache} />;
+  }
 }

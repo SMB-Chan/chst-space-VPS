@@ -86,6 +86,7 @@ export const OpenaiModelProvider = {
   dashscope: 'dashscope',
   openrouter: 'openrouter',
   xiaomi: 'xiaomi',
+  custom: 'custom',
 } as const;
 
 export type OpenaiModelReasoning = typeof OpenaiModelReasoning[keyof typeof OpenaiModelReasoning];
@@ -148,6 +149,7 @@ export const CapabilityModelProvider = {
   dashscope: 'dashscope',
   openrouter: 'openrouter',
   xiaomi: 'xiaomi',
+  custom: 'custom',
 } as const;
 
 export type CapabilityModelCapabilitiesItem = typeof CapabilityModelCapabilitiesItem[keyof typeof CapabilityModelCapabilitiesItem];

@@ -14,7 +14,13 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 git pull --ff-only
 
-sudo docker build -f deploy/Dockerfile -t chat-space:app .
+# Read the frontend auth mode (AUTH_MODE) from deploy/.env without exposing
+# any other secret. Defaults to "local" so single-user VPS deployments
+# continue to build the no-clerk bundle unless the operator opts in.
+AUTH_MODE_VALUE="$(sed -n 's/^AUTH_MODE=//p' "$SCRIPT_DIR/.env" 2>/dev/null | tail -n1 | tr -d '"\r')"
+AUTH_MODE_VALUE="${AUTH_MODE_VALUE:-local}"
+
+sudo docker build -f deploy/Dockerfile -t chat-space:app --build-arg "VITE_AUTH_MODE=${AUTH_MODE_VALUE}" .
 sudo docker build -f deploy/code/Dockerfile -t chat-space:code deploy/code
 
 # Coding workspace (OpenCode projects) — create once, owned by deploy user.

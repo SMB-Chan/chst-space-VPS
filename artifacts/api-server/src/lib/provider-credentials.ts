@@ -1,10 +1,20 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db, providerCredentials } from "@workspace/db";
 import type { ModelProvider } from "./ai-clients";
 
-export type ProviderId = ModelProvider;
+export type ProviderId = Exclude<ModelProvider, "custom">;
 
+// Labels for the built-in providers. Kept in this file (rather than
+// re-imported from ai-clients) to avoid a circular import: ai-clients
+// already imports helpers from here, so reading PROVIDER_LABELS back
+// from there would observe an uninitialised binding. Custom providers
+// carry an admin-defined label which lives in the catalog row.
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   openai: "OpenAI / Command Code",
   dashscope: "DashScope (Qwen)",
@@ -22,7 +32,9 @@ export const DEFAULT_PROVIDER_BASE_URLS: Record<ProviderId, string | null> = {
 const PROVIDER_IDS = Object.keys(PROVIDER_LABELS) as ProviderId[];
 
 export function isProviderId(value: unknown): value is ProviderId {
-  return typeof value === "string" && (PROVIDER_IDS as string[]).includes(value);
+  return (
+    typeof value === "string" && (PROVIDER_IDS as string[]).includes(value)
+  );
 }
 
 function secretKey(): Buffer {
@@ -79,7 +91,7 @@ export interface ProviderCredentialSummary {
   updatedAt: string | null;
 }
 
-function envKeyPresent(provider: ProviderId): boolean {
+export function envKeyPresent(provider: ProviderId): boolean {
   switch (provider) {
     case "openai":
       return Boolean(process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim());
@@ -88,18 +100,23 @@ function envKeyPresent(provider: ProviderId): boolean {
     case "openrouter":
       return Boolean(
         process.env.OPEN_ROUTER?.trim() ||
-          process.env.OPENROUTER_API_KEY?.trim(),
+        process.env.OPENROUTER_API_KEY?.trim(),
       );
     case "xiaomi":
       return Boolean(
         process.env.Xiaomi_Mimo_KEY?.trim() ||
-          process.env.XIAOMI_API_KEY?.trim(),
+        process.env.XIAOMI_API_KEY?.trim(),
       );
+    default:
+      return false;
   }
 }
 
 /** In-memory override cache so chat requests can resolve without a DB hit per call. */
-const runtimeOverrides = new Map<string, { apiKey: string; baseUrl?: string | null }>();
+const runtimeOverrides = new Map<
+  string,
+  { apiKey: string; baseUrl?: string | null }
+>();
 
 function overrideKey(userId: string, provider: ProviderId): string {
   return `${userId}::${provider}`;

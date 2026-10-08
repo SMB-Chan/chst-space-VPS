@@ -50,8 +50,11 @@ const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 // Local-mode builds (VITE_AUTH_MODE=local) replace Clerk with the shim and
-// never require a publishable key.
-const isLocalAuth = import.meta.env.VITE_AUTH_MODE === "local";
+// never require a publishable key. Password-mode builds do the same — they
+// never need a Clerk key; the API handles authentication via /api/auth/*.
+const isLocalAuth =
+  import.meta.env.VITE_AUTH_MODE === "local" ||
+  import.meta.env.VITE_AUTH_MODE === "password";
 
 // Clerk passes full paths to routerPush/routerReplace, but wouter's
 // setLocation prepends the base — strip it to avoid doubling.

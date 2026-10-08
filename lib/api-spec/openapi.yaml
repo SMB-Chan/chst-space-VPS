@@ -632,7 +632,7 @@ components:
           type: string
         provider:
           type: string
-          enum: [openai, dashscope, openrouter, xiaomi]
+          enum: [openai, dashscope, openrouter, xiaomi, custom]
         description:
           type: string
         supportsVision:
@@ -700,7 +700,7 @@ components:
           type: string
         provider:
           type: string
-          enum: [openai, dashscope, openrouter, xiaomi]
+          enum: [openai, dashscope, openrouter, xiaomi, custom]
         capabilities:
           type: array
           items:
