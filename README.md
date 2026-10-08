@@ -166,9 +166,13 @@ A summary of the work shipped on top of the upstream Replit fork:
   OpenCode / filebrowser containers are owned correctly.
 - Default `code-access-mode` to `ask` (verb-first per-action approval
   instead of the prior `auto` blanket grant).
-- Runs schema migrations via `drizzle-kit migrate` (not `--force`).
-  Override `ALLOW_DESTRUCTIVE_PUSH=1` to opt back into `push --force`
-  on greenfield bootstraps.
+- Applies schema changes without `--force`: `drizzle-kit migrate` when a
+  migration journal exists, otherwise the app's boot-time ensure-schema.
+  `ALLOW_DESTRUCTIVE_PUSH=1` opts into `push --force` on greenfield
+  bootstraps.
+- Refuses to start the database on a postgres volume that does not exist
+  yet (`ALLOW_NEW_DB_VOLUME=1` for a first install); host-specific volumes
+  go in the gitignored `deploy/compose.override.yaml`.
 - Probes `/api/healthz` after restart; prints rollback instructions on
   failure.
 - `deploy/code/Dockerfile` pins Node 22, pnpm 10, and opencode-ai

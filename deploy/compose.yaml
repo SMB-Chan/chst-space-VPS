@@ -71,7 +71,7 @@ services:
       OPENCODE_SERVER_USERNAME: ${OPENCODE_SERVER_USERNAME:-}
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
       # ask | auto | full — written into OpenCode permission config at start
-      OPENCODE_ACCESS_MODE: ${OPENCODE_ACCESS_MODE:-auto}
+      OPENCODE_ACCESS_MODE: ${OPENCODE_ACCESS_MODE:-ask}
     ports:
       - "127.0.0.1:4096:4096"
     volumes:

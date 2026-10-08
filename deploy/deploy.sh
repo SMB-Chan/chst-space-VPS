@@ -8,12 +8,19 @@
 #   1. git pull the repo (the clone root is the parent of deploy/)
 #   2. build the app (and coding-environment) images with content-addressable
 #      tags so we can roll back individually
-#   3. apply the schema through `drizzle-kit migrate` (NOT push-force — that
-#      path can silently drop columns/tables in production)
+#   3. apply schema changes: `drizzle-kit migrate` when lib/db/drizzle has a
+#      migration journal; otherwise the API server's boot-time ensure-schema
+#      (idempotent CREATE/ALTER ... IF NOT EXISTS) does it. Never push-force
+#      by default — that path can silently drop columns/tables in production
 #   4. (re)start services via `docker compose up -d`
 #
 # The compose project name is pinned to "chat-space" so the postgres volume
 # (chat-space_chatpg) and network (chat-space_default) survive redeploys.
+# Hosts whose database lives in a different volume (e.g. after a manual
+# migration) point at it from deploy/compose.override.yaml (gitignored; see
+# compose.override.example.yaml). The deploy refuses to start the database
+# on a volume that does not exist yet, so a missing override can never
+# silently boot the app on a fresh, empty database.
 #
 # Usage on the VPS host:
 #
@@ -26,6 +33,8 @@
 #   SKIP_PULL=1              skip `git pull --ff-only`
 #   ALLOW_DESTRUCTIVE_PUSH=1 run `drizzle-kit push --force` (only on the
 #                            initial greenfield bootstrap of an empty DB)
+#   ALLOW_NEW_DB_VOLUME=1    allow creating a brand-new (empty) postgres
+#                            volume (first install only)
 #   VERBOSE=1                `set -x` for debugging
 set -euo pipefail
 
@@ -54,7 +63,11 @@ docker compose version   >/dev/null 2>&1 || fail "docker compose plugin missing.
 # Refuse to deploy with uncommitted local changes — silent overwrites of
 # production schema are the single most common cause of "I lost data
 # after deploy" reports.
-if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+# A git error (e.g. "dubious ownership" when root runs this on a clone owned
+# by another uid) must not read as "clean".
+GIT_STATUS="$(git status --porcelain)" \
+  || fail "git status failed. If git reports dubious ownership, run: git config --global --add safe.directory $REPO_ROOT"
+if [[ -n "$GIT_STATUS" ]]; then
   fail "Local working tree has uncommitted changes. Commit or stash before deploying."
 fi
 
@@ -98,6 +111,25 @@ fi
 
 # ---- 4. Bring up the database ------------------------------------------
 cd "$COMPOSE_DIR"
+# Resolve the postgres volume exactly as compose will (compose.yaml plus an
+# optional compose.override.yaml) and make sure it already exists.
+COMPOSE_CONFIG="$(sudo docker compose config)" \
+  || fail "'docker compose config' failed; check deploy/compose*.yaml and deploy/.env."
+DB_VOLUME="$(printf '%s\n' "$COMPOSE_CONFIG" | awk '
+  /^[^ ]/       { top = ($0 == "volumes:"); vol = 0; next }
+  top && /^  [^ ]/ { vol = ($0 == "  chatpg:"); next }
+  top && vol && /^    name:/ && !found { name = $2; found = 1 }
+  END { print name }
+')"
+[[ -n "$DB_VOLUME" ]] || fail "Could not resolve the chatpg volume name from 'docker compose config'."
+if ! sudo docker volume inspect "$DB_VOLUME" >/dev/null 2>&1; then
+  if [[ "${ALLOW_NEW_DB_VOLUME:-0}" == "1" ]]; then
+    warn "Postgres volume '$DB_VOLUME' does not exist; creating a NEW EMPTY database (ALLOW_NEW_DB_VOLUME=1)."
+  else
+    fail "Postgres volume '$DB_VOLUME' does not exist. If your data lives in another volume, point at it from deploy/compose.override.yaml (see compose.override.example.yaml). For a first install, rerun with ALLOW_NEW_DB_VOLUME=1."
+  fi
+fi
+log "Postgres volume: $DB_VOLUME"
 log "Starting db"
 sudo docker compose up -d db
 log "Waiting for db to accept connections"
@@ -110,20 +142,25 @@ done
 sudo docker compose exec -T db pg_isready -U chat -d chat_space >/dev/null 2>&1 \
   || fail "Database did not become ready in time."
 
-# ---- 5. Apply schema changes through the migration pipeline -----------
+# ---- 5. Apply schema changes ------------------------------------------
 # We deliberately do NOT call `push --force`. That command drops columns
 # and tables non-interactively; in production that is a data-loss path.
-# The supported path is `drizzle-kit generate` (author) + `drizzle-kit
-# migrate` (apply). Only the initial bootstrap of an empty DB should run
-# push --force, and even then only with ALLOW_DESTRUCTIVE_PUSH=1.
+# When migrations have been authored (`pnpm --filter @workspace/db run
+# generate` writes lib/db/drizzle/meta/_journal.json), apply them with
+# `drizzle-kit migrate`. Without a journal `migrate` just fails, and the API
+# server's boot-time ensure-schema applies the (additive) schema instead.
+# Only the initial bootstrap of an empty DB should run push --force, and
+# even then only with ALLOW_DESTRUCTIVE_PUSH=1.
 if [[ "${ALLOW_DESTRUCTIVE_PUSH:-0}" == "1" ]]; then
   warn "ALLOW_DESTRUCTIVE_PUSH=1 set: running drizzle-kit push --force"
   sudo docker compose run --rm app \
     sh -c "pnpm --filter @workspace/db run push-force" | tee -a "$LOG_DIR/deploy.log"
-else
+elif [[ -f "$REPO_ROOT/lib/db/drizzle/meta/_journal.json" ]]; then
   log "Applying schema migrations (drizzle-kit migrate)"
   sudo docker compose run --rm app \
     sh -c "pnpm --filter @workspace/db run migrate" | tee -a "$LOG_DIR/deploy.log"
+else
+  log "No drizzle migrations; the app applies its schema at boot (ensure-schema)"
 fi
 
 # ---- 6. (Re)start the full stack --------------------------------------
@@ -134,16 +171,23 @@ sudo docker compose ps
 # ---- 7. Health probe --------------------------------------------------
 log "Probing /api/healthz (up to 30s)"
 HEALTH_URL="http://127.0.0.1:8080/api/healthz"
+healthy=0
 for _ in $(seq 1 30); do
   if curl --fail --silent --max-time 2 "$HEALTH_URL" >/dev/null; then
-    log "healthz OK"
+    healthy=1
     break
   fi
   sleep 1
-done || warn "healthz did not respond within 30s — check 'sudo docker compose logs app'."
+done
+if [[ "$healthy" == "1" ]]; then
+  log "healthz OK"
+else
+  warn "healthz did not respond within 30s — check 'sudo docker compose logs app'."
+fi
 
 # ---- 8. Done -----------------------------------------------------------
 log "Done."
 log "Image tags: chat-space:app-$IMAGE_TAG, chat-space:code-$IMAGE_TAG"
-log "Roll back with:  sudo docker compose up -d --force-recreate --no-deps chat-space-app chat-space-code"
-log "… after pulling those image tags:  sudo docker tag chat-space:app-<previous-tag> chat-space:app"
+log "Roll back with:  sudo docker tag chat-space:app-<previous-tag> chat-space:app"
+log "              (and chat-space:code-<previous-tag> chat-space:code), then"
+log "              cd $COMPOSE_DIR && sudo docker compose up -d --force-recreate --no-deps app code"

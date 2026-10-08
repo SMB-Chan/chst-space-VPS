@@ -4,6 +4,22 @@ All notable changes to Chat-Space will be documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `deploy.sh` no longer aborts at the schema step: `drizzle-kit migrate`
+  only runs when `lib/db/drizzle/meta/_journal.json` exists (there are no
+  authored migrations yet); otherwise the app's boot-time ensure-schema
+  applies the schema.
+- `deploy.sh` refuses to start postgres on a volume that does not exist
+  (`ALLOW_NEW_DB_VOLUME=1` for a first install), and host-specific compose
+  settings live in the gitignored `deploy/compose.override.yaml`.
+- `deploy.sh` health probe now actually warns when `/api/healthz` never
+  answers, and prints rollback commands with the right service names.
+- OpenCode entrypoint: an unknown access mode now falls back to `ask` (it
+  said `ask` but used `auto`); the compose default is `ask` as documented.
+
 ## [1.0.0] - 2026-09-19
 
 The first stable release of Chat-Space on top of the OpenCode / mobile Chat/Work

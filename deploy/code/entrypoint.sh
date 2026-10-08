@@ -18,7 +18,7 @@ case "$MODE" in
   ask|auto|full) ;;
   *)
     echo "unknown OPENCODE_ACCESS_MODE='$MODE', falling back to ask" >&2
-    MODE=auto
+    MODE=ask
     ;;
 esac
 
