@@ -20,14 +20,14 @@ let pool: (typeof import("@workspace/db"))["pool"];
 const createdToolIds: number[] = [];
 const createdProjectIds: number[] = [];
 
-function userId(label: string): string {
+function testUserId(label: string): string {
   return `tool-bank-test:${label}:${randomUUID()}`;
 }
 
 async function freshProject(userId: string, label: string): Promise<number> {
   const result = await pool.query<{ id: number }>(
-    "INSERT INTO projects (user_id, name, folder) VALUES ($1, $2, $3) RETURNING id",
-    [userId, label, `/tool-bank-test/${label}-${randomUUID()}`],
+    "INSERT INTO projects (user_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+    [userId, label, `tool-bank-test-${label}-${randomUUID()}`],
   );
   const id = result.rows[0]?.id;
   if (!id) throw new Error("failed to create test project");
@@ -54,7 +54,7 @@ describePostgres("tool-bank-store", () => {
 
   it("rejects empty names", async () => {
     await expect(
-      createToolBankItem(userId("name"), {
+      createToolBankItem(testUserId("name"), {
         name: "   ",
         code: "x",
         summary: "",
@@ -65,7 +65,7 @@ describePostgres("tool-bank-store", () => {
   it("rejects code that exceeds the policy cap", async () => {
     const tooBig = "x".repeat(TOOL_BANK_POLICY.MAX_CODE_CHARS + 1);
     await expect(
-      createToolBankItem(userId("oversize"), {
+      createToolBankItem(testUserId("oversize"), {
         name: "oversize",
         code: tooBig,
       }),
@@ -73,7 +73,7 @@ describePostgres("tool-bank-store", () => {
   });
 
   it("persists, increments, and copies without breaking invariants", async () => {
-    const userId = userId("crud");
+    const userId = testUserId("crud");
     const projectId = await freshProject(userId, "crud");
 
     const created = await createToolBankItem(userId, {
@@ -126,7 +126,7 @@ describePostgres("tool-bank-store", () => {
   });
 
   it("soft-deletes, then refuses to re-update, and is reported via listArchiveCandidates once idle", async () => {
-    const userId = userId("softdelete");
+    const userId = testUserId("softdelete");
     const created = await createToolBankItem(userId, {
       name: "Disposable",
       code: "echo ok\n",
@@ -170,7 +170,7 @@ describePostgres("tool-bank-store", () => {
   });
 
   it("forbids copying a soft-deleted tool but allows listing historical copies", async () => {
-    const userId = userId("deletecopy");
+    const userId = testUserId("deletecopy");
     const projectId = await freshProject(userId, "deletecopy");
     const tool = await createToolBankItem(userId, {
       name: "CopyBlocked",
@@ -188,5 +188,25 @@ describePostgres("tool-bank-store", () => {
     const copies = await listProjectToolCopies(userId, projectId);
     expect(copies).toHaveLength(1);
     expect(copies[0].toolId).toBe(tool.id);
+  });
+
+  it("refuses to copy a tool into another user's project", async () => {
+    const owner = testUserId("owner");
+    const intruder = testUserId("intruder");
+    const ownersProject = await freshProject(owner, "owner");
+    const tool = await createToolBankItem(intruder, {
+      name: "Intruder",
+      code: "x",
+    });
+    createdToolIds.push(tool.id);
+
+    await expect(
+      copyToolToProject(intruder, tool.id, ownersProject),
+    ).rejects.toBeInstanceOf(ToolBankPolicyError);
+    const rows = await pool.query(
+      "SELECT 1 FROM project_tool_copies WHERE project_id = $1",
+      [ownersProject],
+    );
+    expect(rows.rowCount).toBe(0);
   });
 });

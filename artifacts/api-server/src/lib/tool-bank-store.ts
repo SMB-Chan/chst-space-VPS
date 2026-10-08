@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import {
   db,
+  projects,
   toolBank,
   projectToolCopies,
   TOOL_BANK_STATUSES,
@@ -330,6 +331,16 @@ export async function copyToolToProject(
   }
   if (tool.status === "archived") {
     throw new ToolBankPolicyError("archived ツールはコピーできません。");
+  }
+  // The project must belong to the caller too; otherwise any user could
+  // attach rows to someone else's project id.
+  const [project] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+    .limit(1);
+  if (!project) {
+    throw new ToolBankPolicyError("プロジェクトが見つかりません。");
   }
 
   await db

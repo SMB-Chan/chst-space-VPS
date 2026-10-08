@@ -35,6 +35,10 @@ import {
   upsertProviderCredential,
 } from "../../lib/provider-credentials";
 import {
+  checkProviderBaseUrl,
+  UnsafeProviderUrlError,
+} from "../../lib/provider-base-url";
+import {
   getAvailableChatModels,
   getCapabilityRegistryWithAvailability,
   isModelAllowedForRole,
@@ -771,8 +775,25 @@ router.put("/openai/providers/:provider", requireAuth, async (req, res) => {
     return;
   }
   const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey : "";
-  const baseUrl =
-    typeof req.body?.baseUrl === "string" ? req.body.baseUrl : null;
+  let baseUrl =
+    typeof req.body?.baseUrl === "string" && req.body.baseUrl.trim()
+      ? req.body.baseUrl
+      : null;
+  if (baseUrl) {
+    try {
+      baseUrl = await checkProviderBaseUrl(baseUrl, {
+        allowPrivate: req.userRole === "admin",
+      });
+    } catch (err) {
+      res.status(400).json({
+        error:
+          err instanceof UnsafeProviderUrlError
+            ? err.message
+            : "接続先URLが不正です。",
+      });
+      return;
+    }
+  }
   try {
     const saved = await upsertProviderCredential(
       getUserId(req),
@@ -822,13 +843,32 @@ router.post(
     }
     const apiKey =
       typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-    const baseUrl =
+    const userBaseUrl =
       typeof req.body?.baseUrl === "string" && req.body.baseUrl.trim()
         ? req.body.baseUrl.trim()
-        : DEFAULT_PROVIDER_BASE_URLS[provider];
+        : null;
+    let baseUrl = userBaseUrl ?? DEFAULT_PROVIDER_BASE_URLS[provider];
     if (!apiKey) {
       res.status(400).json({ error: "APIキーを入力してください。" });
       return;
+    }
+    // A user-supplied endpoint is fetched by the server: refuse private
+    // targets for general users (SSRF), and never follow redirects.
+    if (userBaseUrl) {
+      try {
+        baseUrl = await checkProviderBaseUrl(userBaseUrl, {
+          allowPrivate: req.userRole === "admin",
+        });
+      } catch (err) {
+        res.status(400).json({
+          ok: false,
+          error:
+            err instanceof UnsafeProviderUrlError
+              ? err.message
+              : "接続先URLが不正です。",
+        });
+        return;
+      }
     }
 
     const url =
@@ -846,6 +886,7 @@ router.post(
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${apiKey}` },
         signal: AbortSignal.timeout(12_000),
+        redirect: "manual",
       });
       if (response.ok) {
         res.json({ ok: true, message: "接続に成功しました。" });
@@ -1344,6 +1385,10 @@ router.post("/openai/conversations", requireAuth, async (req, res) => {
       rawProjectId > 0
         ? rawProjectId
         : null;
+    if (projectId != null && !(await getProject(userId, projectId))) {
+      res.status(400).json({ error: "プロジェクトが見つかりません。" });
+      return;
+    }
     const [conversation] = await db
       .insert(conversations)
       .values({ userId, title, projectId })
@@ -1386,6 +1431,10 @@ router.patch(
         Number.isSafeInteger(rawProjectId) &&
         rawProjectId > 0
       ) {
+        if (!(await getProject(userId, rawProjectId))) {
+          res.status(400).json({ error: "プロジェクトが見つかりません。" });
+          return;
+        }
         patch.projectId = rawProjectId;
       }
       const [updated] = await db
@@ -1548,7 +1597,9 @@ router.post(
       let codingFolder: string | null = null;
       if (codingMode && requestedProjectId != null) {
         const project = await getProject(userId, requestedProjectId);
-        if (project) {
+        // The coding workspace is the operator's shared folder: only admins
+        // may write into it (see routes/files.ts).
+        if (project && req.userRole === "admin") {
           try {
             codingFolder = createProjectFolder(project.name);
             codingRoot = path.join(workspaceRoot(), codingFolder);
@@ -1564,18 +1615,21 @@ router.post(
             codingRoot = null;
           }
         }
-        try {
-          await db
-            .update(conversations)
-            .set({ projectId: requestedProjectId })
-            .where(
-              and(
-                eq(conversations.id, conversationId),
-                eq(conversations.userId, userId),
-              ),
-            );
-        } catch {
-          /* best-effort project binding */
+        // Only bind the conversation to a project the caller owns.
+        if (project) {
+          try {
+            await db
+              .update(conversations)
+              .set({ projectId: requestedProjectId })
+              .where(
+                and(
+                  eq(conversations.id, conversationId),
+                  eq(conversations.userId, userId),
+                ),
+              );
+          } catch {
+            /* best-effort project binding */
+          }
         }
       }
 

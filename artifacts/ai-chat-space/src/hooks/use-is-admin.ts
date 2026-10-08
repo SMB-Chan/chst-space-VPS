@@ -49,6 +49,15 @@ function loadRole(): Promise<void> {
   return inflight;
 }
 
+/**
+ * Drop the cached role without refetching. Call on sign-out so a different
+ * account signing in on the same tab (Clerk mode keeps the SPA alive) does
+ * not inherit the previous user's admin navigation.
+ */
+export function resetRoleCache(): void {
+  cachedRole = null;
+}
+
 export function invalidateRoleCache(): void {
   cachedRole = null;
   void loadRole();

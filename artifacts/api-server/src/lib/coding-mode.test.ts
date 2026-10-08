@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -201,5 +202,27 @@ describe("diffLines", () => {
       removed: 0,
       patch: expect.stringContaining("+a"),
     });
+  });
+});
+
+describe("coding mode symlink containment", () => {
+  it("does not read, write, list or search through symlinks leaving the project", () => {
+    const root = tempRoot();
+    const outside = tempRoot();
+    writeFileSync(path.join(outside, "secret.txt"), "TOP_SECRET_VALUE\n");
+    symlinkSync(outside, path.join(root, "escape"));
+    symlinkSync(path.join(outside, "secret.txt"), path.join(root, "s.txt"));
+    writeFileSync(path.join(root, "ok.ts"), "export const ok = 1;\n");
+
+    expect(() => readCodingFile(root, "escape/secret.txt")).toThrow();
+    expect(() => readCodingFile(root, "s.txt")).toThrow();
+    expect(() => applyCodingWrite(root, "escape/pwn.txt", "x")).toThrow();
+    expect(() => applyCodingWrite(root, "s.txt", "x")).toThrow();
+    expect(readFileSync(path.join(outside, "secret.txt"), "utf8")).toBe(
+      "TOP_SECRET_VALUE\n",
+    );
+    expect(searchCodingFiles(root, "TOP_SECRET_VALUE")).toEqual([]);
+    expect(formatCodingTree(root)).not.toContain("secret.txt");
+    expect(() => listCodingDir(root, "escape")).toThrow();
   });
 });

@@ -35,6 +35,7 @@ import {
 } from "./model-settings-sheet";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 import "./mobile.css";
+import { clearUserBrowserState } from "@/lib/session-cleanup";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -160,7 +161,13 @@ export function MobileShell({ children }: MobileShellProps) {
           onClick={() => setDrawerOpen(true)}
           data-testid="mobile-menu"
         >
-          <svg width="20" height="14" viewBox="0 0 20 14" fill="none" aria-hidden>
+          <svg
+            width="20"
+            height="14"
+            viewBox="0 0 20 14"
+            fill="none"
+            aria-hidden
+          >
             <path
               d="M2 7h16"
               stroke="currentColor"
@@ -189,11 +196,15 @@ export function MobileShell({ children }: MobileShellProps) {
             <div className="mobile-body min-h-0 flex-1 px-3 pb-2 pt-3">
               <ProjectPanel
                 compact
-                onOpenFiles={(folder) => {
-                  setLocation(
-                    `/files?path=${encodeURIComponent(folder)}`,
-                  );
-                }}
+                onOpenFiles={
+                  isAdmin
+                    ? (folder) => {
+                        setLocation(
+                          `/files?path=${encodeURIComponent(folder)}`,
+                        );
+                      }
+                    : undefined
+                }
               />
               <div className="mt-3">
                 {isLoading ? (
@@ -265,18 +276,20 @@ export function MobileShell({ children }: MobileShellProps) {
             <Shield className="h-4 w-4" />
             プライベート
           </button>
-          <button
-            type="button"
-            className="mobile-drawer-item"
-            onClick={() => {
-              setLocation("/files");
-              setTab("chat");
-              setDrawerOpen(false);
-            }}
-          >
-            <FolderOpen className="h-4 w-4" />
-            ファイル
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              className="mobile-drawer-item"
+              onClick={() => {
+                setLocation("/files");
+                setTab("chat");
+                setDrawerOpen(false);
+              }}
+            >
+              <FolderOpen className="h-4 w-4" />
+              ファイル
+            </button>
+          ) : null}
           <button
             type="button"
             className="mobile-drawer-item"
@@ -293,25 +306,28 @@ export function MobileShell({ children }: MobileShellProps) {
           <button
             type="button"
             className="mobile-drawer-item"
-            onClick={() => signOut({ redirectUrl: basePath || "/" })}
+            onClick={() => {
+              clearUserBrowserState();
+              void signOut({ redirectUrl: basePath || "/" });
+            }}
           >
             <LogOut className="h-4 w-4" />
-          {isAdmin ? (
-            <button
-              type="button"
-              className="mobile-drawer-item"
-              data-active={location === "/admin"}
-              onClick={() => {
-                setLocation("/admin");
-                setTab("chat");
-                setDrawerOpen(false);
-              }}
-              data-testid="nav-admin"
-            >
-              <ShieldCheck className="h-4 w-4" />
-              管理
-            </button>
-          ) : null}
+            {isAdmin ? (
+              <button
+                type="button"
+                className="mobile-drawer-item"
+                data-active={location === "/admin"}
+                onClick={() => {
+                  setLocation("/admin");
+                  setTab("chat");
+                  setDrawerOpen(false);
+                }}
+                data-testid="nav-admin"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                管理
+              </button>
+            ) : null}
             ログアウト
           </button>
         </div>
@@ -341,9 +357,7 @@ export function MobileShell({ children }: MobileShellProps) {
               ) : (
                 <MessageSquareText className="h-4 w-4 shrink-0" />
               )}
-              <span className="truncate">
-                {conversation.title || "無題"}
-              </span>
+              <span className="truncate">{conversation.title || "無題"}</span>
             </button>
           ))}
           {isLoading ? (
@@ -385,4 +399,3 @@ function MobileSheetBridge({ onOpen }: { onOpen: () => void }) {
 export function openMobileModelSheet() {
   window.dispatchEvent(new CustomEvent("mobile-open-model-sheet"));
 }
-

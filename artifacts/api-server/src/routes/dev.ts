@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { readFileSync, writeFileSync } from "node:fs";
-import { requireAuth } from "./middleware";
+import { requireAdmin, requireAuth } from "./middleware";
 
 export type CodeAccessMode = "ask" | "auto" | "full";
 
@@ -35,8 +35,11 @@ export function resolveCodeAccessMode(): CodeAccessMode {
 
 const router: Router = Router();
 
+// The access mode controls how much the OpenCode agent may do on the VPS
+// ("full" = no confirmation). Only admins may read or change it.
+
 /** OpenCode access mode for the VPS coding environment. */
-router.get("/dev/access-mode", requireAuth, (_req: Request, res: Response) => {
+router.get("/dev/access-mode", requireAuth, requireAdmin, (_req: Request, res: Response) => {
   res.json({
     mode: resolveCodeAccessMode(),
     modes: MODES,
@@ -50,7 +53,7 @@ router.get("/dev/access-mode", requireAuth, (_req: Request, res: Response) => {
   });
 });
 
-router.put("/dev/access-mode", requireAuth, (req: Request, res: Response) => {
+router.put("/dev/access-mode", requireAuth, requireAdmin, (req: Request, res: Response) => {
   const mode = typeof req.body?.mode === "string" ? req.body.mode : "";
   if (!(MODES as string[]).includes(mode)) {
     res.status(400).json({ error: "mode は ask / auto / full のいずれかです。" });

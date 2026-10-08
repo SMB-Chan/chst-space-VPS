@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useAuth, useClerk } from "@clerk/react";
 import { hydrateSettingsFromServer } from "@/lib/settings";
+import { clearUserBrowserState } from "@/lib/session-cleanup";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const USER_NOT_ALLOWED_CODE = "USER_NOT_ALLOWED";
@@ -83,7 +84,10 @@ export function AccessGate({ children }: { children: ReactNode }) {
           </p>
           <button
             type="button"
-            onClick={() => void clerk.signOut()}
+            onClick={() => {
+              clearUserBrowserState();
+              void clerk.signOut();
+            }}
             className="inline-flex min-h-11 items-center justify-center rounded-[var(--m3-shape-full)] bg-primary px-6 text-sm font-medium text-primary-foreground transition-[transform,background-color] duration-[var(--m3-duration-short)] ease-[var(--m3-motion-standard)] hover:opacity-90 active:scale-[0.99]"
           >
             サインアウト
