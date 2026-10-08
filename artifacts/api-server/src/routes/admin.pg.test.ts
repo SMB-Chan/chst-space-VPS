@@ -434,6 +434,15 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
     expect(
       getCuratedBuiltinChatModels().find((m) => m.id === ADDED_BUILTIN_MODEL),
     ).toMatchObject({ provider: "openrouter", reasoning: "openrouter" });
+    // Omitting userVisible defaults to visible for general users.
+    const afterAdd = await call("GET", "/admin/models", {
+      cookie: adminCookie,
+    });
+    expect(
+      (afterAdd.body as Array<{ id: string; userVisible: boolean }>).find(
+        (m) => m.id === ADDED_BUILTIN_MODEL,
+      )?.userVisible,
+    ).toBe(true);
     expect(
       (
         await call("POST", "/admin/models", {

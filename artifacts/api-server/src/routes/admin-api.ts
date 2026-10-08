@@ -310,7 +310,9 @@ router.post("/admin/models", async (req, res) => {
       description: body.description ?? "",
       supportsVision: body.supportsVision ?? false,
       supportsReasoning: body.supportsReasoning ?? false,
-      userVisible: body.userVisible ?? false,
+      // New models are offered to general users unless the admin opts out
+      // (matches the admin form's default).
+      userVisible: body.userVisible ?? true,
       enabled: body.enabled ?? true,
       deleted: false,
       updatedAt: new Date(),
