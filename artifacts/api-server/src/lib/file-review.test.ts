@@ -8,8 +8,9 @@ import {
 
 describe("getVisionClient", () => {
   it("returns the requested model when it supports vision", () => {
-    const result = getVisionClient("o4-mini");
-    expect(result.modelId).toBe("o4-mini");
+    // A vision-capable catalog model other than the fallback default.
+    const result = getVisionClient("gpt-5.6-luna");
+    expect(result.modelId).toBe("gpt-5.6-luna");
   });
 
   it("falls back to a vision model when the requested model does not support vision", () => {

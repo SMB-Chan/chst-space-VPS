@@ -106,6 +106,77 @@ export const PutOpenaiSettingsResponse = zod.void()
 
 
 /**
+ * @summary List the account's BYOK provider keys (hints only, never the key)
+ */
+export const ListOpenaiProviderCredentialsResponse = zod.object({
+  "providers": zod.array(zod.object({
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi']),
+  "label": zod.string(),
+  "configured": zod.boolean(),
+  "source": zod.enum(['user', 'env', 'none']),
+  "keyHint": zod.string().nullable(),
+  "baseUrl": zod.string().nullable(),
+  "updatedAt": zod.coerce.date().nullable()
+}))
+})
+
+
+/**
+ * baseUrl must be an http(s) URL. General users may only use public addresses; private, loopback and link-local endpoints are admin-only.
+ * @summary Store (encrypted) the account's API key for a provider
+ */
+export const PutOpenaiProviderCredentialParams = zod.object({
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi'])
+})
+
+export const PutOpenaiProviderCredentialBody = zod.object({
+  "apiKey": zod.string(),
+  "baseUrl": zod.string().nullish()
+})
+
+export const PutOpenaiProviderCredentialResponse = zod.object({
+  "provider": zod.object({
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi']),
+  "label": zod.string(),
+  "configured": zod.boolean(),
+  "source": zod.enum(['user', 'env', 'none']),
+  "keyHint": zod.string().nullable(),
+  "baseUrl": zod.string().nullable(),
+  "updatedAt": zod.coerce.date().nullable()
+})
+})
+
+
+/**
+ * @summary Remove the account's API key for a provider
+ */
+export const DeleteOpenaiProviderCredentialParams = zod.object({
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi'])
+})
+
+export const DeleteOpenaiProviderCredentialResponse = zod.void()
+
+
+/**
+ * @summary Check a key against the provider's /models endpoint without storing it
+ */
+export const TestOpenaiProviderCredentialParams = zod.object({
+  "provider": zod.enum(['openai', 'dashscope', 'openrouter', 'xiaomi'])
+})
+
+export const TestOpenaiProviderCredentialBody = zod.object({
+  "apiKey": zod.string(),
+  "baseUrl": zod.string().nullish()
+})
+
+export const TestOpenaiProviderCredentialResponse = zod.object({
+  "ok": zod.boolean(),
+  "message": zod.string().optional(),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary Create an authenticated Qwen Audio realtime session
  */
 

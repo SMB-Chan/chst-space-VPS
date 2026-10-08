@@ -227,7 +227,9 @@ describe("dynamic chat model discovery", () => {
 
     const models = await getAvailableChatModels();
 
-    expect(models).toHaveLength(21);
+    // Full static catalog (the OpenAI group gained deepseek/deepseek-v4-pro
+    // in c6a8351).
+    expect(models).toHaveLength(22);
     expect(models.some((model) => model.id === "gpt-5.6-terra")).toBe(true);
     expect(models.some((model) => model.id === "qwen3.8-max")).toBe(true);
     expect(
@@ -287,7 +289,9 @@ describe("dynamic chat model discovery", () => {
     const models = await pending;
     await getAvailableChatModels();
 
-    expect(models).toHaveLength(3);
+    // Falls back to the four static OpenAI-group models: gpt-5.6-terra,
+    // gpt-5.6-luna, gpt-5.5 and deepseek/deepseek-v4-pro.
+    expect(models).toHaveLength(4);
     expect(openAiList).toHaveBeenCalledTimes(1);
   });
   it("omits absent providers but retains a configured provider after discovery failure", () => {

@@ -92,6 +92,82 @@ paths:
       responses:
         "204":
           description: Stored
+  /openai/providers:
+    get:
+      operationId: listOpenaiProviderCredentials
+      tags: [openai]
+      summary: List the account's BYOK provider keys (hints only, never the key)
+      responses:
+        "200":
+          description: One entry per built-in provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialList"
+  /openai/providers/{provider}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ProviderId"
+    put:
+      operationId: putOpenaiProviderCredential
+      tags: [openai]
+      summary: Store (encrypted) the account's API key for a provider
+      description: >-
+        baseUrl must be an http(s) URL. General users may only use public
+        addresses; private, loopback and link-local endpoints are admin-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderCredentialInput"
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialEnvelope"
+        "400":
+          description: Unsupported provider, empty key or rejected base URL
+    delete:
+      operationId: deleteOpenaiProviderCredential
+      tags: [openai]
+      summary: Remove the account's API key for a provider
+      responses:
+        "204":
+          description: Removed
+  /openai/providers/{provider}/test:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ProviderId"
+    post:
+      operationId: testOpenaiProviderCredential
+      tags: [openai]
+      summary: Check a key against the provider's /models endpoint without storing it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderCredentialInput"
+      responses:
+        "200":
+          description: Key accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialTestResult"
+        "400":
+          description: Missing or rejected key, or rejected base URL
+        "502":
+          description: Provider unreachable or returned an error
   /openai/realtime/session:
     post:
       operationId: createOpenaiRealtimeSession
@@ -560,6 +636,61 @@ paths:
                 $ref: "#/components/schemas/OpenaiError"
 components:
   schemas:
+    ProviderId:
+      type: string
+      enum: [openai, dashscope, openrouter, xiaomi]
+    ProviderCredential:
+      type: object
+      required: [provider, label, configured, source, keyHint, baseUrl, updatedAt]
+      properties:
+        provider:
+          $ref: "#/components/schemas/ProviderId"
+        label:
+          type: string
+        configured:
+          type: boolean
+        source:
+          type: string
+          enum: [user, env, none]
+        keyHint:
+          type: [string, "null"]
+        baseUrl:
+          type: [string, "null"]
+        updatedAt:
+          type: [string, "null"]
+          format: date-time
+    ProviderCredentialList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderCredential"
+    ProviderCredentialEnvelope:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          $ref: "#/components/schemas/ProviderCredential"
+    ProviderCredentialInput:
+      type: object
+      required: [apiKey]
+      properties:
+        apiKey:
+          type: string
+        baseUrl:
+          type: [string, "null"]
+    ProviderCredentialTestResult:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        error:
+          type: string
     OpenaiSettings:
       type: object
       required:

@@ -6,6 +6,7 @@ import {
   applyStreamingToolParams,
   isUnsupportedGenerationParam,
 } from "./ai-clients";
+import { setCatalogSnapshot } from "./model-registry";
 
 describe("applyGenerationParams", () => {
   it("does not send reasoning_effort to gpt-5.6 models", () => {
@@ -16,9 +17,38 @@ describe("applyGenerationParams", () => {
   });
 
   it("sends reasoning_effort only for o-series", () => {
-    const opts: Record<string, unknown> = {};
-    applyGenerationParams(opts, "o4-mini", "openai", "high");
-    expect(opts.reasoning_effort).toBe("high");
+    // No o-series model ships in the static catalog any more (o4-mini was
+    // removed in c6a8351); an admin can still add one under the built-in
+    // OpenAI provider and flag it reasoning-capable.
+    setCatalogSnapshot({
+      providers: new Map(),
+      models: new Map([
+        [
+          "o4-mini",
+          {
+            id: "o4-mini",
+            providerId: "openai",
+            label: "o4-mini",
+            description: "",
+            supportsVision: true,
+            supportsReasoning: true,
+            enabled: true,
+            userVisible: true,
+            builtin: false,
+            deleted: false,
+            sortOrder: 0,
+          },
+        ],
+      ]),
+      customClients: new Map(),
+    });
+    try {
+      const opts: Record<string, unknown> = {};
+      applyGenerationParams(opts, "o4-mini", "openai", "high");
+      expect(opts.reasoning_effort).toBe("high");
+    } finally {
+      setCatalogSnapshot(null);
+    }
   });
 
   it("sends GLM vendor parameters at the Node SDK top level", () => {

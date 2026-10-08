@@ -7,6 +7,9 @@ import {
   normalizeAlibabaRealtimeEvent,
 } from "./alibaba-realtime";
 
+// Any chat model from the static catalog (o4-mini was removed in c6a8351).
+const CHAT_MODEL_ID = "gpt-5.6-luna";
+
 const env = {
   ALIBABA_SPECIALIST_API_KEY: "sk-regular",
   ALIBABA_SPECIALIST_WORKSPACE_ID: "ws-test",
@@ -18,7 +21,7 @@ describe("Alibaba Qwen Audio realtime session broker", () => {
       {
         userId: `realtime-test-${randomUUID()}`,
         conversationId: 42,
-        modelId: "o4-mini",
+        modelId: CHAT_MODEL_ID,
       },
       env,
     );
@@ -70,7 +73,7 @@ describe("Alibaba Qwen Audio realtime session broker", () => {
         {
           userId: "invalid-conversation-user",
           conversationId: 0,
-          modelId: "o4-mini",
+          modelId: CHAT_MODEL_ID,
         },
         env,
       );
@@ -88,7 +91,7 @@ describe("Alibaba Qwen Audio realtime session broker", () => {
     createAlibabaRealtimeSession(
       {
         userId,
-        modelId: "o4-mini",
+        modelId: CHAT_MODEL_ID,
       },
       env,
     );
@@ -97,7 +100,7 @@ describe("Alibaba Qwen Audio realtime session broker", () => {
       createAlibabaRealtimeSession(
         {
           userId,
-          modelId: "o4-mini",
+          modelId: CHAT_MODEL_ID,
         },
         env,
       );

@@ -35,6 +35,11 @@ import type {
   OpenaiSettingsEnvelope,
   OpenaiVideoJob,
   OpenaiVideoJobInput,
+  ProviderCredentialEnvelope,
+  ProviderCredentialInput,
+  ProviderCredentialList,
+  ProviderCredentialTestResult,
+  ProviderId,
   RealtimeSession,
   RealtimeSessionInput,
   SendOpenaiEphemeralMessageParams,
@@ -524,6 +529,299 @@ export const usePutOpenaiSettings = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPutOpenaiSettingsMutationOptions(options));
+    }
+
+export const getListOpenaiProviderCredentialsUrl = () => {
+
+
+
+
+  return `/api/openai/providers`
+}
+
+/**
+ * @summary List the account's BYOK provider keys (hints only, never the key)
+ */
+export const listOpenaiProviderCredentials = async ( options?: Parameters<typeof customFetch>[1]): Promise<ProviderCredentialList> => {
+
+  return customFetch<ProviderCredentialList>(getListOpenaiProviderCredentialsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpenaiProviderCredentialsQueryKey = () => {
+    return [
+    `/api/openai/providers`
+    ] as const;
+    }
+
+
+export const getListOpenaiProviderCredentialsQueryOptions = <TData = Awaited<ReturnType<typeof listOpenaiProviderCredentials>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiProviderCredentials>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpenaiProviderCredentialsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpenaiProviderCredentials>>> = ({ signal }) => listOpenaiProviderCredentials({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpenaiProviderCredentials>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListOpenaiProviderCredentialsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpenaiProviderCredentials>>>
+export type ListOpenaiProviderCredentialsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the account's BYOK provider keys (hints only, never the key)
+ */
+
+export function useListOpenaiProviderCredentials<TData = Awaited<ReturnType<typeof listOpenaiProviderCredentials>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listOpenaiProviderCredentials>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListOpenaiProviderCredentialsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPutOpenaiProviderCredentialUrl = (provider: ProviderId,) => {
+
+
+
+
+  return `/api/openai/providers/${provider}`
+}
+
+/**
+ * baseUrl must be an http(s) URL. General users may only use public addresses; private, loopback and link-local endpoints are admin-only.
+ * @summary Store (encrypted) the account's API key for a provider
+ */
+export const putOpenaiProviderCredential = async (provider: ProviderId,
+    providerCredentialInput: ProviderCredentialInput, options?: Parameters<typeof customFetch>[1]): Promise<ProviderCredentialEnvelope> => {
+
+  return customFetch<ProviderCredentialEnvelope>(getPutOpenaiProviderCredentialUrl(provider),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(providerCredentialInput)
+  }
+);}
+
+
+
+
+
+export const getPutOpenaiProviderCredentialMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putOpenaiProviderCredential>>, TError,{provider: ProviderId;data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putOpenaiProviderCredential>>, TError,{provider: ProviderId;data: BodyType<ProviderCredentialInput>}, TContext> => {
+
+const mutationKey = ['putOpenaiProviderCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putOpenaiProviderCredential>>, {provider: ProviderId;data: BodyType<ProviderCredentialInput>}> = (props) => {
+          const {provider,data} = props ?? {};
+
+          return  putOpenaiProviderCredential(provider,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutOpenaiProviderCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof putOpenaiProviderCredential>>>
+    export type PutOpenaiProviderCredentialMutationBody = BodyType<ProviderCredentialInput>
+    export type PutOpenaiProviderCredentialMutationError = ErrorType<void>
+
+    /**
+ * @summary Store (encrypted) the account's API key for a provider
+ */
+export const usePutOpenaiProviderCredential = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putOpenaiProviderCredential>>, TError,{provider: ProviderId;data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof putOpenaiProviderCredential>>,
+        TError,
+        {provider: ProviderId;data: BodyType<ProviderCredentialInput>},
+        TContext
+      > => {
+      return useMutation(getPutOpenaiProviderCredentialMutationOptions(options));
+    }
+
+export const getDeleteOpenaiProviderCredentialUrl = (provider: ProviderId,) => {
+
+
+
+
+  return `/api/openai/providers/${provider}`
+}
+
+/**
+ * @summary Remove the account's API key for a provider
+ */
+export const deleteOpenaiProviderCredential = async (provider: ProviderId, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteOpenaiProviderCredentialUrl(provider),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteOpenaiProviderCredentialMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOpenaiProviderCredential>>, TError,{provider: ProviderId}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteOpenaiProviderCredential>>, TError,{provider: ProviderId}, TContext> => {
+
+const mutationKey = ['deleteOpenaiProviderCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteOpenaiProviderCredential>>, {provider: ProviderId}> = (props) => {
+          const {provider} = props ?? {};
+
+          return  deleteOpenaiProviderCredential(provider,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteOpenaiProviderCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof deleteOpenaiProviderCredential>>>
+
+    export type DeleteOpenaiProviderCredentialMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove the account's API key for a provider
+ */
+export const useDeleteOpenaiProviderCredential = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOpenaiProviderCredential>>, TError,{provider: ProviderId}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteOpenaiProviderCredential>>,
+        TError,
+        {provider: ProviderId},
+        TContext
+      > => {
+      return useMutation(getDeleteOpenaiProviderCredentialMutationOptions(options));
+    }
+
+export const getTestOpenaiProviderCredentialUrl = (provider: ProviderId,) => {
+
+
+
+
+  return `/api/openai/providers/${provider}/test`
+}
+
+/**
+ * @summary Check a key against the provider's /models endpoint without storing it
+ */
+export const testOpenaiProviderCredential = async (provider: ProviderId,
+    providerCredentialInput: ProviderCredentialInput, options?: Parameters<typeof customFetch>[1]): Promise<ProviderCredentialTestResult> => {
+
+  return customFetch<ProviderCredentialTestResult>(getTestOpenaiProviderCredentialUrl(provider),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(providerCredentialInput)
+  }
+);}
+
+
+
+
+
+export const getTestOpenaiProviderCredentialMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testOpenaiProviderCredential>>, TError,{provider: ProviderId;data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof testOpenaiProviderCredential>>, TError,{provider: ProviderId;data: BodyType<ProviderCredentialInput>}, TContext> => {
+
+const mutationKey = ['testOpenaiProviderCredential'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof testOpenaiProviderCredential>>, {provider: ProviderId;data: BodyType<ProviderCredentialInput>}> = (props) => {
+          const {provider,data} = props ?? {};
+
+          return  testOpenaiProviderCredential(provider,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TestOpenaiProviderCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof testOpenaiProviderCredential>>>
+    export type TestOpenaiProviderCredentialMutationBody = BodyType<ProviderCredentialInput>
+    export type TestOpenaiProviderCredentialMutationError = ErrorType<void>
+
+    /**
+ * @summary Check a key against the provider's /models endpoint without storing it
+ */
+export const useTestOpenaiProviderCredential = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testOpenaiProviderCredential>>, TError,{provider: ProviderId;data: BodyType<ProviderCredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof testOpenaiProviderCredential>>,
+        TError,
+        {provider: ProviderId;data: BodyType<ProviderCredentialInput>},
+        TContext
+      > => {
+      return useMutation(getTestOpenaiProviderCredentialMutationOptions(options));
     }
 
 export const getCreateOpenaiRealtimeSessionUrl = () => {
