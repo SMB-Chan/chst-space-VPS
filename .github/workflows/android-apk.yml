@@ -30,14 +30,14 @@ jobs:
         run: ./gradlew assembleRelease assembleDebug --no-daemon
 
       - name: Upload release APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chat-space-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
       - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chat-space-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
