@@ -165,7 +165,7 @@ export function pickAuditModel(
   primaryId: string,
   models: {
     id: string;
-    provider: "openai" | "dashscope" | "openrouter" | "xiaomi";
+    provider: "openai" | "dashscope" | "openrouter" | "xiaomi" | "custom";
   }[],
   preferred?: string,
 ): string {

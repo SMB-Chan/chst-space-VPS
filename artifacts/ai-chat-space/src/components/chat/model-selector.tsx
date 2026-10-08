@@ -24,11 +24,12 @@ const QUOTA_HEADERS = {
 export interface ModelInfo {
   id: string;
   label: string;
-  provider: "openai" | "dashscope" | "openrouter" | "xiaomi";
+  provider: "openai" | "dashscope" | "openrouter" | "xiaomi" | "custom";
   description: string;
   supportsVision: boolean;
   supportsReasoning: boolean;
-  reasoning?: "none" | "openai" | "dashscope" | "openrouter" | "xiaomi";
+  reasoning?:
+    "none" | "openai" | "dashscope" | "openrouter" | "xiaomi" | "custom";
 }
 
 export interface TokenPlanQuotaHint {
@@ -206,7 +207,8 @@ function isModelInfo(value: unknown): value is ModelInfo {
     (v.provider === "openai" ||
       v.provider === "dashscope" ||
       v.provider === "openrouter" ||
-      v.provider === "xiaomi") &&
+      v.provider === "xiaomi" ||
+      v.provider === "custom") &&
     typeof v.description === "string" &&
     typeof v.supportsVision === "boolean" &&
     typeof v.supportsReasoning === "boolean"
@@ -385,6 +387,15 @@ function requestModels(): Promise<void> {
   return modelsInFlight;
 }
 
+/**
+ * Force the module-level model cache to refetch on demand (e.g. after an
+ * admin mutation in `/admin`). Safe to call when no consumer has mounted yet.
+ */
+export function refreshAvailableModels(): Promise<void> {
+  modelsInFlight = null;
+  return requestModels();
+}
+
 function subscribeModelStore(listener: () => void): () => void {
   modelStoreListeners.add(listener);
   return () => modelStoreListeners.delete(listener);
@@ -458,6 +469,9 @@ export function ModelSelector({
   );
   const xiaomiModels = filterModels(
     models.filter((m) => m.provider === "xiaomi"),
+  );
+  const customModels = filterModels(
+    models.filter((m) => m.provider === "custom"),
   );
   const triggerQuota =
     quota?.weeklyRemainingPercent ?? quota?.limitingRemainingPercent;
@@ -553,7 +567,8 @@ export function ModelSelector({
     openaiModels.length === 0 &&
     qwenModels.length === 0 &&
     openRouterModels.length === 0 &&
-    xiaomiModels.length === 0;
+    xiaomiModels.length === 0 &&
+    customModels.length === 0;
 
   const searchInput = (
     <div className="px-1 pb-1 pt-0.5">
@@ -602,6 +617,15 @@ export function ModelSelector({
                 {PROVIDER_LABELS["xiaomi"]}
               </DropdownMenuLabel>
               {xiaomiModels.map((model) => renderModelOption(model, "desktop"))}
+            </>
+          )}
+          {customModels.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                カスタム
+              </DropdownMenuLabel>
+              {customModels.map((model) => renderModelOption(model, "desktop"))}
             </>
           )}
           {qwenModels.length > 0 && (
@@ -700,6 +724,17 @@ export function ModelSelector({
                     {PROVIDER_LABELS["xiaomi"]}
                   </div>
                   {xiaomiModels.map((model) =>
+                    renderModelOption(model, "mobile", close),
+                  )}
+                </>
+              )}
+              {customModels.length > 0 && (
+                <>
+                  <div className="my-2 h-px bg-[var(--m3-outline-variant)]" />
+                  <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
+                    カスタム
+                  </div>
+                  {customModels.map((model) =>
                     renderModelOption(model, "mobile", close),
                   )}
                 </>

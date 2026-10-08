@@ -17,6 +17,7 @@ import {
   Loader2,
   Settings,
   Shield,
+  ShieldCheck,
   Pencil,
   LockKeyhole,
   MessageSquareText,
@@ -48,6 +49,7 @@ import { ProjectPanel } from "@/components/projects/project-panel";
 import { FolderOpen } from "lucide-react";
 import { CONVERSATION_TITLE_MAX, normalizeConversationTitle } from "@/lib/chat";
 import { useClerk, useUser } from "@clerk/react";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -93,6 +95,7 @@ export function ChatLayout({ children }: ChatLayoutProps) {
   const activeId = params.id ? Number.parseInt(params.id, 10) : null;
   const { signOut } = useClerk();
   const { user } = useUser();
+  const isAdmin = useIsAdmin();
 
   const handleNewChat = useCallback(() => {
     setLocation("/chat");
@@ -101,6 +104,11 @@ export function ChatLayout({ children }: ChatLayoutProps) {
 
   const handlePrivate = useCallback(() => {
     setLocation("/private");
+    if (isMobile) setSidebarOpen(false);
+  }, [setLocation, isMobile]);
+
+  const handleAdmin = useCallback(() => {
+    setLocation("/admin");
     if (isMobile) setSidebarOpen(false);
   }, [setLocation, isMobile]);
 
@@ -316,6 +324,19 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                 <Shield className="h-5 w-5" />
               </Button>
               <div className="flex-1" />
+              {isAdmin ? (
+                <Button
+                  variant={location === "/admin" ? "tonal" : "ghost"}
+                  size="icon"
+                  className="h-12 w-12 rounded-[var(--m3-shape-xl)]"
+                  onClick={handleAdmin}
+                  title="管理"
+                  aria-label="管理"
+                  data-testid="nav-admin"
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                </Button>
+              ) : null}
               <Button
                 variant={location === "/settings" ? "tonal" : "ghost"}
                 size="icon"
@@ -364,6 +385,17 @@ export function ChatLayout({ children }: ChatLayoutProps) {
                   <FolderOpen className="h-4 w-4" />
                   ファイル
                 </Button>
+                {isAdmin ? (
+                  <Button
+                    onClick={handleAdmin}
+                    className="h-10 w-full justify-start rounded-[var(--m3-shape-md)]"
+                    variant={location === "/admin" ? "tonal" : "ghost"}
+                    data-testid="nav-admin"
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    管理
+                  </Button>
+                ) : null}
               </div>
 
               <div className="px-1 pb-2">

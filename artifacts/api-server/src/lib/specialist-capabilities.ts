@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { isProviderFrozen } from "./provider-policy";
 import type OpenAI from "openai";
+import type { UserRole } from "../middlewares/allowedUsers";
+import {
+  getCuratedBuiltinChatModels,
+  getCustomChatModels,
+  getReservedModelIds,
+} from "./model-catalog";
+import {
+  findCatalogModel,
+  isCatalogModelUsable,
+  isCatalogProviderEnabled,
+} from "./model-registry";
 import {
   AVAILABLE_MODELS,
   dashscopeClient,
@@ -329,6 +340,10 @@ function providerConfigured(provider: ModelProvider): boolean {
       return openRouterConfigured();
     case "xiaomi":
       return Boolean(xiaomiClient);
+    case "custom":
+      // Custom providers are listed via getCustomChatModels(), which only
+      // returns models whose provider has a ready client.
+      return true;
   }
 }
 
@@ -389,15 +404,22 @@ export function mergeAvailableChatModels(
     provider: ModelProvider;
     ids: ReadonlySet<string> | null;
   }>,
+  curated: readonly ChatModel[] = AVAILABLE_MODELS,
+  reservedIds: ReadonlySet<string> = new Set(AVAILABLE_MODELS.map((m) => m.id)),
 ): ChatModel[] {
   const idsByProvider = new Map(
     discoveredModels.map(({ provider, ids }) => [provider, ids]),
   );
-  const catalogIds = new Set<string>(AVAILABLE_MODELS.map((m) => m.id));
+  // Ids owned by the curated catalog (including admin-deleted built-ins)
+  // are never re-added as "discovered" models.
+  const catalogIds = new Set<string>([
+    ...reservedIds,
+    ...curated.map((m) => m.id),
+  ]);
   const result: ChatModel[] = [];
   const resultIds = new Set<string>();
 
-  for (const model of AVAILABLE_MODELS) {
+  for (const model of curated) {
     if (!idsByProvider.has(model.provider)) continue;
     const providerIds = idsByProvider.get(model.provider);
     if (!providerIds || providerIds.has(model.id)) {
@@ -419,6 +441,7 @@ export function mergeAvailableChatModels(
 
   for (const { id, provider } of discovered) {
     if (catalogIds.has(id) || resultIds.has(id)) continue;
+    if (!isCatalogProviderEnabled(provider)) continue;
     if (!CHAT_MODEL_PATTERNS.some((pattern) => pattern.test(id))) continue;
     result.push({
       id,
@@ -435,6 +458,24 @@ export function mergeAvailableChatModels(
   return result;
 }
 
+/**
+ * Whether a chat model may be listed for / used by the given role.
+ *
+ * Admins may use every available model. General users get the models the
+ * admin marked "visible to general users" in the catalog; ids the catalog
+ * does not know (dynamically discovered models, or before the catalog has
+ * loaded) keep the original policy of OpenRouter budget models only.
+ */
+export function isModelAllowedForRole(
+  model: Pick<ChatModel, "id" | "provider">,
+  role: UserRole | undefined,
+): boolean {
+  if (role === "admin") return true;
+  const entry = findCatalogModel(model.id);
+  if (entry) return entry.userVisible && isCatalogModelUsable(model.id);
+  return model.provider === "openrouter";
+}
+
 export async function getAvailableChatModels(): Promise<ChatModel[]> {
   const [dashScopeIds, openAiIds, xiaomiIds, openRouterOverBudget] =
     await Promise.all([
@@ -444,18 +485,29 @@ export async function getAvailableChatModels(): Promise<ChatModel[]> {
       isOpenRouterOverBudget(),
     ]);
 
-  const models = mergeAvailableChatModels([
-    { provider: "dashscope", ids: dashScopeIds },
-    { provider: "openai", ids: openAiIds },
-    { provider: "xiaomi", ids: xiaomiIds },
-    // OpenRouter uses only the curated catalog, not aggregator discovery.
-    { provider: "openrouter", ids: null },
-  ]);
-  return models.filter(
-    (model) =>
-      providerConfigured(model.provider) &&
-      !(model.provider === "openrouter" && openRouterOverBudget),
+  // Built-in providers: the admin-managed catalog (disabled / deleted
+  // models and disabled providers are dropped; admin-added ids included),
+  // reconciled with live discovery as before.
+  const models = mergeAvailableChatModels(
+    [
+      { provider: "dashscope", ids: dashScopeIds },
+      { provider: "openai", ids: openAiIds },
+      { provider: "xiaomi", ids: xiaomiIds },
+      // OpenRouter uses only the curated catalog, not aggregator discovery.
+      { provider: "openrouter", ids: null },
+    ],
+    getCuratedBuiltinChatModels(),
+    getReservedModelIds(),
   );
+  return [
+    ...models.filter(
+      (model) =>
+        providerConfigured(model.provider) &&
+        !(model.provider === "openrouter" && openRouterOverBudget),
+    ),
+    // Admin-defined OpenAI-compatible providers.
+    ...getCustomChatModels(),
+  ];
 }
 
 export async function getCapabilityRegistryWithAvailability(): Promise<{

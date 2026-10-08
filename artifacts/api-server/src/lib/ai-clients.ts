@@ -14,6 +14,13 @@ import { resolveOpenRouterApiKey } from "./openrouter-config";
 import { isProviderFrozen } from "./provider-policy";
 import { getRequestUserId } from "../middlewares/requireAuth";
 import { resolveUserProviderApiKey } from "./provider-credentials";
+import {
+  findCatalogModel,
+  findCatalogProvider,
+  getCustomProviderClient,
+  isCatalogModelUsable,
+  isCatalogProviderEnabled,
+} from "./model-registry";
 
 // Replit-managed OpenAI proxy
 if (
@@ -117,7 +124,8 @@ if (xiaomiApiKey) {
 
 export { xiaomiClient };
 
-export type ModelProvider = "openai" | "dashscope" | "openrouter" | "xiaomi";
+export type ModelProvider =
+  "openai" | "dashscope" | "openrouter" | "xiaomi" | "custom";
 export type ReasoningKind =
   "none" | "openai" | "dashscope" | "openrouter" | "xiaomi";
 export type ReasoningLevel = "off" | "low" | "medium" | "high";
@@ -130,6 +138,8 @@ export interface ChatModel {
   supportsVision: boolean;
   supportsReasoning: boolean;
   reasoning: ReasoningKind;
+  /** Catalog provider id for provider "custom" models (admin-defined). */
+  providerId?: string;
 }
 
 export const AVAILABLE_MODELS = [
@@ -371,6 +381,8 @@ export const VISION_MODEL_IDS = new Set<string>(
 );
 
 export function modelSupportsVision(modelId: string): boolean {
+  const catalogModel = findCatalogModel(modelId);
+  if (catalogModel) return catalogModel.supportsVision;
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
   return model ? model.supportsVision : false;
 }
@@ -383,7 +395,7 @@ export function resolveConfiguredVisionModel(
     ...preferred,
     ...AVAILABLE_MODELS.map((model) => model.id),
   ]) {
-    if (!modelSupportsVision(id)) continue;
+    if (!modelSupportsVision(id) || !isCatalogModelUsable(id)) continue;
     try {
       getClientForModel(id);
       return id;
@@ -395,7 +407,11 @@ export function resolveConfiguredVisionModel(
 }
 
 export function getModelLabel(modelId: string): string {
-  return AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
+  return (
+    findCatalogModel(modelId)?.label ??
+    AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ??
+    modelId
+  );
 }
 
 export function parseReasoningLevel(raw: unknown): ReasoningLevel {
@@ -423,11 +439,22 @@ export function applyGenerationParams(
   const model = AVAILABLE_MODELS.find(
     (m) => m.id === modelId && m.provider === provider,
   );
+  // Admin-added catalog models under a built-in provider inherit that
+  // provider's reasoning dialect when flagged as reasoning-capable. Custom
+  // (admin-defined) providers never receive vendor reasoning params.
+  const catalogModel = model ? null : findCatalogModel(modelId);
+  const reasoning: ReasoningKind | undefined =
+    provider === "custom"
+      ? "none"
+      : (model?.reasoning ??
+        (catalogModel?.providerId === provider && catalogModel.supportsReasoning
+          ? provider
+          : undefined));
   if (provider === "openai") {
     opts.max_completion_tokens = 8192;
     // Only o-series reliably accepts reasoning_effort on the Replit proxy.
     // Sending it to gpt-5.6-* returns 400 Unsupported parameter.
-    if (model?.reasoning === "openai" && modelId.startsWith("o")) {
+    if (reasoning === "openai" && modelId.startsWith("o")) {
       opts.reasoning_effort = level === "off" ? "low" : level;
     }
     return;
@@ -441,7 +468,7 @@ export function applyGenerationParams(
     // background stages (audit, verification, file generation) that run with
     // reasoningLevel "off" would otherwise burn their token cap and minutes
     // of wall-clock time on hidden reasoning before the turn can finish.
-    if (model?.reasoning === "openrouter") {
+    if (reasoning === "openrouter") {
       opts.reasoning = level === "off" ? { enabled: false } : { effort: level };
     }
     return;
@@ -453,12 +480,19 @@ export function applyGenerationParams(
     return;
   }
 
+  if (provider === "custom") {
+    // Custom providers are OpenAI-compatible. We don't know which vendor
+    // params the upstream gateway tolerates, so only the safe defaults.
+    opts.max_tokens = 8192;
+    return;
+  }
+
   opts.max_tokens = 8192;
   // Alibaba's OpenAI-compatible API accepts these vendor parameters at the
   // request-body top level when used through the OpenAI Node.js SDK. The
   // Python SDK's extra_body convention is not interpreted by the Node SDK.
   opts.incremental_output = true;
-  if (model?.reasoning === "dashscope") {
+  if (reasoning === "dashscope") {
     opts.enable_thinking = level !== "off";
     if (level !== "off") {
       if (modelId.startsWith("qwen3.8")) {
@@ -582,14 +616,42 @@ export function getClientForModel(
   modelId: string,
   explicitProvider?: ModelProvider,
 ): { client: OpenAI; provider: ModelProvider } {
+  const catalogModel = findCatalogModel(modelId);
+  const catalogProvider = catalogModel
+    ? findCatalogProvider(catalogModel.providerId)
+    : null;
+  // Admin-defined (custom) providers carry their own base URL and key; the
+  // registry holds a ready client per enabled provider.
+  if (explicitProvider === "custom" || catalogProvider?.kind === "custom") {
+    const client =
+      catalogProvider?.kind === "custom" && isCatalogModelUsable(modelId)
+        ? getCustomProviderClient(catalogProvider.id)
+        : null;
+    if (!client) {
+      throw new Error(
+        `カスタムプロバイダーのモデルを利用できません: ${modelId}。管理画面で設定を確認してください。`,
+      );
+    }
+    return { client, provider: "custom" };
+  }
+
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
-  const provider = explicitProvider ?? model?.provider;
+  // "custom" was fully handled above, so only built-in providers remain.
+  const provider = (explicitProvider ??
+    model?.provider ??
+    (catalogProvider?.kind === "builtin" ? catalogProvider.id : undefined)) as
+    Exclude<ModelProvider, "custom"> | undefined;
   if (!provider) {
     throw new Error(`未対応のモデルです: ${modelId}`);
   }
   if (isProviderFrozen(provider)) {
     throw new Error(
       `${provider} のモデルは一時凍結中です。別のモデルを選択してください。`,
+    );
+  }
+  if (!isCatalogProviderEnabled(provider)) {
+    throw new Error(
+      `${provider} のモデルは管理者により無効化されています。別のモデルを選択してください。`,
     );
   }
 
@@ -654,6 +716,10 @@ const xiaomiCircuit = getOrCreateCircuitBreaker("xiaomi", {
   failureThreshold: 5,
   resetTimeoutMs: 30_000,
 });
+const customCircuit = getOrCreateCircuitBreaker("custom", {
+  failureThreshold: 5,
+  resetTimeoutMs: 30_000,
+});
 
 export function getCircuitBreakerForProvider(
   provider: ModelProvider,
@@ -661,6 +727,7 @@ export function getCircuitBreakerForProvider(
   if (provider === "dashscope") return dashscopeCircuit;
   if (provider === "openrouter") return openrouterCircuit;
   if (provider === "xiaomi") return xiaomiCircuit;
+  if (provider === "custom") return customCircuit;
   return openaiCircuit;
 }
 
@@ -673,8 +740,18 @@ export async function withCircuitBreaker<T>(
     return await circuit.execute(fn);
   } catch (err) {
     if (err instanceof CircuitBreakerOpenError) {
+      const label =
+        provider === "dashscope"
+          ? "DashScope"
+          : provider === "openrouter"
+            ? "OpenRouter"
+            : provider === "xiaomi"
+              ? "Xiaomi MiMo"
+              : provider === "custom"
+                ? "カスタムプロバイダー"
+                : "OpenAI";
       throw new Error(
-        `${{ dashscope: "DashScope", openai: "OpenAI", openrouter: "OpenRouter", xiaomi: "Xiaomi MiMo" }[provider]} APIが一時的に利用できません。しばらく待ってから再試行してください。`,
+        `${label} APIが一時的に利用できません。しばらく待ってから再試行してください。`,
       );
     }
     throw err;

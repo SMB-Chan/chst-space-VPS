@@ -8,6 +8,9 @@ import { attachAlibabaRealtimeWebSocket } from "./lib/alibaba-realtime";
 import { startMemoryWorker } from "./lib/llm-memory-worker";
 import { logger } from "./lib/logger";
 import { startupReadiness } from "./lib/startup-readiness";
+import { resolveAuthMode } from "./middlewares/requireAuth";
+import { ensureBootstrapAdmin } from "./lib/bootstrap-admin";
+import { seedModelCatalog } from "./lib/model-catalog";
 
 const rawPort = process.env["PORT"] ?? "5000";
 
@@ -73,6 +76,28 @@ async function main(): Promise<void> {
     // user-settings stores) is ensured here. Enumerating functions here used
     // to drift from ensureChatSchema and left new tables uncreated at boot.
     await ensureChatSchema((sql) => pool.query(sql));
+    // Seed built-in providers/models into the admin-managed catalog
+    // (ON CONFLICT DO NOTHING keeps admin edits) and load the registry.
+    try {
+      await seedModelCatalog();
+    } catch (err) {
+      // The static in-code catalog keeps serving chats if this fails.
+      logger.error({ err }, "Failed to seed the model catalog");
+    }
+    if (resolveAuthMode() === "password") {
+      const bootstrap = await ensureBootstrapAdmin();
+      if (bootstrap === "created") {
+        logger.info("Created the first admin account from BOOTSTRAP_ADMIN_*");
+      } else if (bootstrap === "missing-config") {
+        logger.warn(
+          "AUTH_MODE=password has no admin account yet. Set BOOTSTRAP_ADMIN_USERNAME and BOOTSTRAP_ADMIN_PASSWORD, or run dist/create-admin.mjs.",
+        );
+      } else if (bootstrap === "invalid-config") {
+        logger.warn(
+          "BOOTSTRAP_ADMIN_* is invalid (username 3-32 chars [a-z0-9._-], password 8-200 chars) or already taken; no admin was created.",
+        );
+      }
+    }
     memoryWorker = startMemoryWorker();
     startupReadiness.markReady();
     logger.info("Server ready");

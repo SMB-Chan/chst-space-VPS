@@ -76,3 +76,70 @@ git pull --ff-only
 git status --porcelain   # must print nothing
 sudo bash deploy/deploy.sh
 ```
+
+## マルチユーザー（パスワード認証）への移行
+
+`AUTH_MODE=password` にすると、ユーザー名 + パスワードでログインする複数人向け
+モードになります（既定は `local`：ログインなしの1人運用）。`/admin` から
+ユーザー・プロバイダー・モデルを管理できます。
+
+新しいテーブル（`app_users` / `app_sessions` / `llm_providers` / `llm_models`）は
+API 起動時の `ensure-schema`（冪等な `CREATE TABLE IF NOT EXISTS`）で作成されます
+（`deploy.sh` は `push --force` を実行しません。drizzle スキーマにも同じ定義があるため、
+初回構築で `ALLOW_DESTRUCTIVE_PUSH=1` を使っても削除されません）。
+組み込みのプロバイダー・モデルは起動のたびに既存行を上書きせず投入されるため、
+`AUTH_MODE=local` のままデプロイしても挙動は変わりません。
+
+1. **DB をバックアップする**
+
+   ```bash
+   cd <repo>/deploy
+   sudo docker compose exec -T db pg_dump -U chat chat_space > ~/chat_space-$(date +%Y%m%d).sql
+   ```
+
+2. **`deploy/.env` を編集する**
+
+   ```ini
+   AUTH_MODE=password
+   BOOTSTRAP_ADMIN_USERNAME=admin
+   BOOTSTRAP_ADMIN_PASSWORD=<十分に長いパスワード>
+   # BOOTSTRAP_ADMIN_USER_ID は通常未設定のままにします。
+   ```
+
+   最初の管理者のユーザーIDは `BOOTSTRAP_ADMIN_USER_ID` → `LOCAL_USER_ID` →
+   `local-user` の順で決まります。未設定なら、これまで local モードで使っていた
+   会話・メモリ・設定がそのまま最初の管理者に引き継がれます。
+   管理者が1人もいないときだけ作成され、既に管理者がいれば何もしません。
+
+3. **`deploy.sh` を実行する**
+
+   ```bash
+   bash <repo>/deploy/deploy.sh
+   ```
+
+   `deploy.sh` は `.env` の `AUTH_MODE` だけを読み、フロントエンドを
+   `VITE_AUTH_MODE=password` でビルドします（未設定なら `local`）。
+   ConoHa で初めて実行する場合は、先に上記「One-time step for the ConoHa host」を済ませてください。
+   起動ログに `Created the first admin account from BOOTSTRAP_ADMIN_*` が出れば成功です。
+
+4. **HTTPS でログインする**
+
+   `NODE_ENV=production` ではセッション Cookie に `Secure` が付くため、
+   `https://` でアクセスしてください（`AUTH_COOKIE_SECURE` で上書き可能）。
+   ログイン後、設定 →「パスワード変更」で初期パスワードを変更し、
+   `/admin` →「ユーザー」から利用者を追加します。
+
+5. **`BOOTSTRAP_ADMIN_PASSWORD` を `.env` から削除する**。管理者が存在する限り
+   使われませんが、実行中コンテナの環境変数からも消すため
+   `cd <repo>/deploy && sudo docker compose up -d app` でコンテナを作り直します。
+
+管理者をコマンドで追加・昇格する場合（パスワードはプロンプトで入力、
+または `CHAT_SPACE_ADMIN_PASSWORD` 環境変数で渡します）：
+
+```bash
+cd <repo>/deploy
+sudo docker compose exec -it app node artifacts/api-server/dist/create-admin.mjs --username <name>
+```
+
+**ロールバック**：`.env` を `AUTH_MODE=local` に戻して `deploy.sh` を再実行します。
+追加したテーブルは残りますが、local モードでは参照されません。

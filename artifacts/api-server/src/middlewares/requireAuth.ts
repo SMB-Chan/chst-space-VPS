@@ -8,6 +8,8 @@ import {
   type UserRole,
 } from "./allowedUsers";
 import { warmProviderOverrides } from "../lib/provider-credentials";
+import { SESSION_COOKIE, resolveSession } from "../lib/password-auth";
+import { logger } from "../lib/logger";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -29,18 +31,50 @@ export function getRequestUserId(): string | undefined {
   return requestUserContext.getStore()?.userId;
 }
 
-// "local" mode serves a single-operator deployment (VPS/Tailnet) where the
-// network perimeter is the authentication boundary. "clerk" keeps the
-// original Clerk-based flow. Select with AUTH_MODE=local.
-export const AUTH_MODE: "local" | "clerk" =
-  process.env.AUTH_MODE === "local" ? "local" : "clerk";
+/** Effective auth mode for the running process. */
+export type AuthMode = "local" | "clerk" | "password";
+
+/**
+ * Resolve the auth mode from process.env. "password" is the new
+ * multi-user local mode backed by app_users + app_sessions. "local"
+ * remains the single-operator deployment. Default is "clerk" for
+ * backwards compatibility.
+ */
+export function resolveAuthMode(
+  env: NodeJS.ProcessEnv = process.env,
+): AuthMode {
+  const raw = (env.AUTH_MODE ?? "").trim().toLowerCase();
+  if (raw === "local") return "local";
+  if (raw === "password") return "password";
+  return "clerk";
+}
+
+
+/** Raw `cs_session` token from the Cookie header (password mode). */
+export function readSessionCookie(req: Request): string | null {
+  const header = req.headers?.cookie;
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() !== SESSION_COOKIE) continue;
+    const value = part.slice(separator + 1).trim();
+    try {
+      return decodeURIComponent(value) || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 export function requireAuth(
   req: Request,
   res: Response,
   next: NextFunction,
 ): void {
-  if (AUTH_MODE === "local") {
+  const authMode = resolveAuthMode();
+  if (authMode === "local") {
     const userId = process.env.LOCAL_USER_ID || "local-user";
     req.userId = userId;
     req.userRole = "admin";
@@ -48,6 +82,10 @@ export function requireAuth(
       /* non-fatal: falls back to env keys until warm succeeds */
     });
     requestUserContext.run({ userId, userRole: "admin" }, () => next());
+    return;
+  }
+  if (authMode === "password") {
+    void handlePasswordAuth(req, res, next);
     return;
   }
   const auth = getAuth(req);
@@ -70,6 +108,35 @@ export function requireAuth(
   requestUserContext.run({ userId, userRole }, () => next());
 }
 
+async function handlePasswordAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  let session: Awaited<ReturnType<typeof resolveSession>> = null;
+  try {
+    session = await resolveSession(readSessionCookie(req));
+  } catch (err) {
+    logger.warn(
+      { component: "requireAuth", err },
+      "Failed to resolve password-mode session",
+    );
+    res.status(503).json({ error: "認証情報を確認できませんでした。" });
+    return;
+  }
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { userId, role: userRole } = session;
+  req.userId = userId;
+  req.userRole = userRole;
+  void warmProviderOverrides(userId).catch(() => {
+    /* non-fatal */
+  });
+  requestUserContext.run({ userId, userRole }, () => next());
+}
+
 /** Moderator boundary: admin-only endpoints mount this after requireAuth. */
 export function requireAdmin(
   req: Request,
@@ -85,4 +152,3 @@ export function requireAdmin(
     code: "ADMIN_ONLY",
   });
 }
-

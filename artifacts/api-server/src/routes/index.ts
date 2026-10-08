@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import memoriesRouter from "./memories";
 import openaiRouter from "./openai";
 import adminRouter from "./admin";
+import authRouter from "./auth";
 import googleRouter from "./google";
 import devRouter from "./dev";
 import projectsRouter from "./projects";
@@ -10,6 +11,7 @@ import filesRouter from "./files";
 
 const router: IRouter = Router();
 
+router.use(authRouter);
 router.use(memoriesRouter);
 router.use(openaiRouter);
 router.use(adminRouter);

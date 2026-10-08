@@ -8,7 +8,10 @@ RUN apt-get update && \
 WORKDIR /app
 COPY . .
 
-ENV VITE_AUTH_MODE=local
+# Frontend build auth mode; deploy.sh passes AUTH_MODE from deploy/.env.
+# `local` (single operator), `password` (multi-user), or `clerk`.
+ARG VITE_AUTH_MODE=local
+ENV VITE_AUTH_MODE=${VITE_AUTH_MODE}
 
 RUN pnpm install --frozen-lockfile && pnpm build
 

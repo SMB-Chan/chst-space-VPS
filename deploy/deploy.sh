@@ -79,8 +79,14 @@ fi
 
 # ---- 2. Build images ---------------------------------------------------
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-  log "Building app image (tag $IMAGE_TAG)"
+  # The frontend bundle must match AUTH_MODE (local | password | clerk).
+  # Read only that key from deploy/.env; default "local" keeps single-user
+  # VPS deployments unchanged.
+  AUTH_MODE_VALUE="$(sed -n 's/^AUTH_MODE=//p' "$SCRIPT_DIR/.env" 2>/dev/null | tail -n1 | tr -d '"\r' || true)"
+  AUTH_MODE_VALUE="${AUTH_MODE_VALUE:-local}"
+  log "Building app image (tag $IMAGE_TAG, VITE_AUTH_MODE=$AUTH_MODE_VALUE)"
   sudo docker build -f deploy/Dockerfile \
+    --build-arg "VITE_AUTH_MODE=$AUTH_MODE_VALUE" \
     -t "chat-space:app" -t "chat-space:app-$IMAGE_TAG" . | tee -a "$LOG_DIR/deploy.log"
   log "Building coding-environment image (tag $IMAGE_TAG)"
   sudo docker build -f deploy/code/Dockerfile \

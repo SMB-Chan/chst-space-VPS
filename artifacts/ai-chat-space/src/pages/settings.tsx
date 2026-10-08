@@ -31,6 +31,7 @@ import { getListOpenaiConversationsQueryKey } from "@workspace/api-client-react"
 import { ProviderCredentialsSection } from "@/components/settings/provider-credentials-section";
 import { ProjectMemorySection } from "@/components/settings/project-memory-section";
 import { ToolBankSection } from "@/components/settings/tool-bank-section";
+import { PasswordChangeSection } from "@/components/settings/password-change-section";
 import { EmptyState, ScreenHeader } from "@/design-system/components";
 import { Inbox } from "lucide-react";
 
@@ -243,6 +244,8 @@ export function SettingsPage() {
           description="モデル、LLM プロバイダー、監査、インストール、保存データを一か所で管理します。"
           className="mb-7 px-1"
         />
+
+        <PasswordChangeSection />
 
         <ProviderCredentialsSection />
 
