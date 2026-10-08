@@ -1,0 +1,11 @@
+# Host-specific compose overrides. Copy to deploy/compose.override.yaml
+# (gitignored); `docker compose` in deploy/ merges it automatically.
+#
+# Example: the database lives in a volume created outside this compose
+# project (e.g. after a manual migration). deploy.sh refuses to start the
+# database when the resolved volume does not exist, so a missing override
+# cannot silently boot the app on an empty database.
+volumes:
+  chatpg:
+    external: true
+    name: migration_chat_space_pg
