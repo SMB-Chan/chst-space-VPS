@@ -1,3 +1,4 @@
+import { isBuiltinEnvUsable } from "./model-registry";
 import { isProviderFrozen } from "./provider-policy";
 
 const TOKEN_PLAN_KEY_PREFIX = /^sk-sp-/i;
@@ -25,6 +26,8 @@ export function getAlibabaSpecialistConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): AlibabaSpecialistConfig | null {
   if (isProviderFrozen("dashscope", env)) return null;
+  // Disabled / hidden / key-disconnected in the admin catalog.
+  if (!isBuiltinEnvUsable("dashscope")) return null;
   const explicit = env.ALIBABA_SPECIALIST_API_KEY?.trim();
   const fallback = env.DASHSCOPE_API_KEY?.trim();
   const apiKey = explicit || fallback;

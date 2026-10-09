@@ -13,12 +13,16 @@ import {
 import { resolveOpenRouterApiKey } from "./openrouter-config";
 import { isProviderFrozen } from "./provider-policy";
 import { getRequestUserId } from "../middlewares/requireAuth";
-import { resolveUserProviderApiKey } from "./provider-credentials";
+import {
+  PROVIDER_LABELS,
+  resolveUserProviderApiKey,
+} from "./provider-credentials";
 import { guardUserProviderFetch } from "./provider-base-url";
 import {
   findCatalogModel,
   findCatalogProvider,
   getCustomProviderClient,
+  isBuiltinEnvKeyAllowed,
   isCatalogModelUsable,
   isCatalogProviderEnabled,
 } from "./model-registry";
@@ -627,16 +631,25 @@ export function getClientForModel(
   // Admin-defined (custom) providers carry their own base URL and key; the
   // registry holds a ready client per enabled provider.
   if (explicitProvider === "custom" || catalogProvider?.kind === "custom") {
-    const client =
-      catalogProvider?.kind === "custom" && isCatalogModelUsable(modelId)
-        ? getCustomProviderClient(catalogProvider.id)
-        : null;
-    if (!client) {
-      throw new Error(
-        `カスタムプロバイダーのモデルを利用できません: ${modelId}。管理画面で設定を確認してください。`,
-      );
+    if (catalogProvider?.kind === "custom") {
+      if (!catalogProvider.enabled) {
+        throw new Error(
+          `${catalogProvider.label} は管理者により無効化されています。別のモデルを選択してください。`,
+        );
+      }
+      const client = getCustomProviderClient(catalogProvider.id);
+      if (!client) {
+        throw new Error(
+          `${catalogProvider.label} のAPIキーが設定されていないため利用できません。管理画面でAPIキーを設定してください。`,
+        );
+      }
+      if (isCatalogModelUsable(modelId)) {
+        return { client, provider: "custom" };
+      }
     }
-    return { client, provider: "custom" };
+    throw new Error(
+      `カスタムプロバイダーのモデルを利用できません: ${modelId}。管理画面で設定を確認してください。`,
+    );
   }
 
   const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
@@ -650,12 +663,12 @@ export function getClientForModel(
   }
   if (isProviderFrozen(provider)) {
     throw new Error(
-      `${provider} のモデルは一時凍結中です。別のモデルを選択してください。`,
+      `${PROVIDER_LABELS[provider]} のモデルは一時凍結中です。別のモデルを選択してください。`,
     );
   }
   if (!isCatalogProviderEnabled(provider)) {
     throw new Error(
-      `${provider} のモデルは管理者により無効化されています。別のモデルを選択してください。`,
+      `${PROVIDER_LABELS[provider]} は管理者により無効化されています。別のモデルを選択してください。`,
     );
   }
 
@@ -672,7 +685,24 @@ export function getClientForModel(
     }
   }
 
+  // Built-in DB key (admin-supplied) takes precedence over the env client.
+  // Cached per provider+updatedAt so a snapshot refresh does not silently
+  // keep a stale client around after an admin key rotation.
+  const dbClient = getBuiltinDbClient(provider);
+  if (dbClient) return { client: dbClient, provider };
+
+  // The env key is the "disconnect" target for built-ins: when an admin
+  // stores a DB key but disables use_env_key, no env client should be
+  // returned. The same gate is honoured by the capability / speech / audio
+  // modules via providerConfigured() / isBuiltinEnvUsable().
+  const envAllowed = isBuiltinEnvKeyAllowed(provider);
+
   if (provider === "dashscope") {
+    if (!envAllowed) {
+      throw new Error(
+        `${PROVIDER_LABELS.dashscope} のAPIキーは管理者により解除されています。別のモデルを選択してください。`,
+      );
+    }
     if (!dashscopeClient) {
       throw new Error(
         "DashScope APIキーが設定されていません。設定画面からAPIキーを追加するか、DASHSCOPE_API_KEY を確認してください。",
@@ -681,6 +711,11 @@ export function getClientForModel(
     return { client: dashscopeClient, provider: "dashscope" };
   }
   if (provider === "openrouter") {
+    if (!envAllowed) {
+      throw new Error(
+        `${PROVIDER_LABELS.openrouter} のAPIキーは管理者により解除されています。別のモデルを選択してください。`,
+      );
+    }
     if (!openrouterClient) {
       throw new Error(
         "OpenRouter APIキーが設定されていません。設定画面からAPIキーを追加するか、OPEN_ROUTER / OPENROUTER_API_KEY を確認してください。",
@@ -689,6 +724,11 @@ export function getClientForModel(
     return { client: openrouterClient, provider: "openrouter" };
   }
   if (provider === "xiaomi") {
+    if (!envAllowed) {
+      throw new Error(
+        `${PROVIDER_LABELS.xiaomi} のAPIキーは管理者により解除されています。別のモデルを選択してください。`,
+      );
+    }
     if (!xiaomiClient) {
       throw new Error(
         "Xiaomi APIキーが設定されていません。設定画面からAPIキーを追加するか、XIAOMI_API_KEY を確認してください。",
@@ -696,12 +736,53 @@ export function getClientForModel(
     }
     return { client: xiaomiClient, provider: "xiaomi" };
   }
+  if (!envAllowed) {
+    throw new Error(
+      `${PROVIDER_LABELS.openai} のAPIキーは管理者により解除されています。別のモデルを選択してください。`,
+    );
+  }
   if (!openaiClient) {
     throw new Error(
       "OpenAI APIが設定されていません。設定画面からAPIキーを追加するか、環境変数を確認してください。",
     );
   }
   return { client: openaiClient, provider: "openai" };
+}
+
+interface BuiltinDbClientEntry {
+  client: OpenAI;
+  /** Snapshot updatedAt as ms epoch; invalidates the cache on key rotation. */
+  updatedAt: number;
+}
+
+const builtinDbClients = new Map<
+  Exclude<ModelProvider, "custom">,
+  BuiltinDbClientEntry
+>();
+
+/**
+ * Build (and memoize) the OpenAI client for a built-in provider's admin DB
+ * key. The cache key is `provider + updatedAt`, so admin key rotations and
+ * snapshot refreshes naturally evict the previous client.
+ */
+function getBuiltinDbClient(
+  provider: Exclude<ModelProvider, "custom">,
+): OpenAI | null {
+  const row = findCatalogProvider(provider);
+  if (!row || row.kind !== "builtin" || !row.apiKey) {
+    builtinDbClients.delete(provider);
+    return null;
+  }
+  const updatedAt = row.updatedAt.getTime();
+  const cached = builtinDbClients.get(provider);
+  if (cached && cached.updatedAt === updatedAt) return cached.client;
+  const client = buildUserOverrideClient(provider, row.apiKey, null);
+  if (!client) {
+    builtinDbClients.delete(provider);
+    return null;
+  }
+  builtinDbClients.set(provider, { client, updatedAt });
+  return client;
 }
 
 const openaiCircuit = getOrCreateCircuitBreaker("openai", {

@@ -508,9 +508,19 @@ CREATE TABLE IF NOT EXISTS llm_providers (
   api_key_encrypted text,
   key_hint text,
   enabled boolean NOT NULL DEFAULT true,
+  use_env_key boolean NOT NULL DEFAULT true,
+  deleted boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Existing deployments may predate the use_env_key / deleted columns. Add
+-- them idempotently so a fresh database and a legacy database end up the
+-- same shape.
+ALTER TABLE llm_providers
+  ADD COLUMN IF NOT EXISTS use_env_key boolean NOT NULL DEFAULT true;
+ALTER TABLE llm_providers
+  ADD COLUMN IF NOT EXISTS deleted boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS llm_models (
   id text PRIMARY KEY,

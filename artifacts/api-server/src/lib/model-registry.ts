@@ -19,6 +19,12 @@ export interface CatalogProvider {
   enabled: boolean;
   hasKey: boolean;
   keyHint: string | null;
+  /** Built-in providers only: whether the env key is currently used. */
+  useEnvKey: boolean;
+  /** Built-in providers only: soft delete (hidden from lists but recoverable). */
+  deleted: boolean;
+  /** Built-in providers only: decrypted admin DB key, if any. */
+  apiKey: string | null;
   updatedAt: Date;
 }
 
@@ -65,7 +71,8 @@ export function findCatalogProvider(id: string): CatalogProvider | null {
 /** A provider is usable unless the loaded catalog explicitly disables it. */
 export function isCatalogProviderEnabled(providerId: string): boolean {
   const provider = snapshot?.providers.get(providerId);
-  return provider ? provider.enabled : true;
+  if (!provider) return true;
+  return provider.enabled && !provider.deleted;
 }
 
 /**
@@ -85,4 +92,44 @@ export function isCatalogModelUsable(modelId: string): boolean {
 
 export function getCustomProviderClient(providerId: string): OpenAI | null {
   return snapshot?.customClients.get(providerId) ?? null;
+}
+
+/**
+ * Whether a built-in provider is active: enabled and not soft-deleted.
+ * Unknown rows and the not-yet-loaded catalog count as active so a fresh
+ * install keeps its env-configured behavior.
+ */
+export function isBuiltinProviderActive(providerId: string): boolean {
+  const provider = snapshot?.providers.get(providerId);
+  if (!provider || provider.kind !== "builtin") return true;
+  return provider.enabled && !provider.deleted;
+}
+
+/**
+ * Whether the server env key may serve a built-in provider. An admin
+ * "disconnect" (キーを解除) sets use_env_key=false; the env key is then
+ * ignored everywhere until restored.
+ */
+export function isBuiltinEnvKeyAllowed(providerId: string): boolean {
+  const provider = snapshot?.providers.get(providerId);
+  if (!provider || provider.kind !== "builtin") return true;
+  return provider.useEnvKey;
+}
+
+/**
+ * Env-backed direct uses (audio transcription, TTS, speech capability
+ * checks) may run only when the provider is active and its env key is
+ * still allowed. Admin DB keys apply to chat completions only.
+ */
+export function isBuiltinEnvUsable(providerId: string): boolean {
+  return (
+    isBuiltinProviderActive(providerId) && isBuiltinEnvKeyAllowed(providerId)
+  );
+}
+
+/** Decrypted admin DB key for a built-in provider, if one is stored. */
+export function getBuiltinProviderDbKey(providerId: string): string | null {
+  const provider = snapshot?.providers.get(providerId);
+  if (!provider || provider.kind !== "builtin") return null;
+  return provider.apiKey;
 }

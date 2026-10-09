@@ -59,6 +59,18 @@ async function loadSnapshot(): Promise<void> {
   const customClients = new Map<string, OpenAI>();
   for (const row of providerRows) {
     const kind = row.kind === "custom" ? "custom" : "builtin";
+    let apiKey: string | null = null;
+    if (row.apiKeyEncrypted) {
+      try {
+        apiKey = decryptSecret(row.apiKeyEncrypted);
+      } catch (err) {
+        logger.warn(
+          { component: "model-catalog", providerId: row.id, err },
+          "Provider key could not be decrypted; provider unavailable",
+        );
+        apiKey = null;
+      }
+    }
     providers.set(row.id, {
       id: row.id,
       label: row.label,
@@ -67,21 +79,14 @@ async function loadSnapshot(): Promise<void> {
       enabled: row.enabled,
       hasKey: Boolean(row.apiKeyEncrypted),
       keyHint: row.keyHint ?? null,
+      useEnvKey: row.useEnvKey ?? true,
+      deleted: row.deleted ?? false,
+      apiKey,
       updatedAt: row.updatedAt,
     });
     if (kind !== "custom" || !row.enabled) continue;
-    if (!row.apiKeyEncrypted || !row.baseUrl) continue;
-    try {
-      customClients.set(
-        row.id,
-        buildCustomClient(row.baseUrl, decryptSecret(row.apiKeyEncrypted)),
-      );
-    } catch (err) {
-      logger.warn(
-        { component: "model-catalog", providerId: row.id, err },
-        "Custom provider key could not be decrypted; provider unavailable",
-      );
-    }
+    if (!row.apiKeyEncrypted || !row.baseUrl || !apiKey) continue;
+    customClients.set(row.id, buildCustomClient(row.baseUrl, apiKey));
   }
   const models = new Map<string, CatalogModel>();
   for (const row of modelRows) {
@@ -166,6 +171,9 @@ function staticProviders(): CatalogProvider[] {
     enabled: true,
     hasKey: false,
     keyHint: null,
+    useEnvKey: true,
+    deleted: false,
+    apiKey: null,
     updatedAt: new Date(0),
   }));
 }
@@ -186,14 +194,32 @@ function staticModels(): CatalogModel[] {
   }));
 }
 
-/** Providers, built-ins first then custom ones by id. */
+/**
+ * Providers visible in normal lists, built-ins first then custom ones by id.
+ * Soft-deleted (hidden) built-ins are excluded; admins see them through
+ * `getCatalogDeletedProviders` for the restore section.
+ */
 export function getCatalogProviders(): CatalogProvider[] {
   const snap = getCatalogSnapshot();
   if (!snap) return staticProviders();
-  const list = [...snap.providers.values()];
+  const list = [...snap.providers.values()].filter(
+    (p) => !(p.kind === "builtin" && p.deleted),
+  );
   const rank = (p: CatalogProvider) =>
     isBuiltinProviderId(p.id) ? BUILTIN_PROVIDER_IDS.indexOf(p.id) : 100;
   return list.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
+}
+
+/**
+ * Soft-deleted built-in providers, in id order. The admin UI shows these
+ * in a separate "deleted" section with a restore button.
+ */
+export function getCatalogDeletedProviders(): CatalogProvider[] {
+  const snap = getCatalogSnapshot();
+  if (!snap) return [];
+  return [...snap.providers.values()]
+    .filter((p) => p.kind === "builtin" && p.deleted)
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Non-deleted catalog models in display order. */
@@ -225,7 +251,7 @@ export function getCuratedBuiltinChatModels(): ChatModel[] {
   for (const model of getCatalogModels()) {
     if (!model.enabled || !isBuiltinProviderId(model.providerId)) continue;
     const provider = snap.providers.get(model.providerId);
-    if (provider && !provider.enabled) continue;
+    if (provider && (!provider.enabled || provider.deleted)) continue;
     const seed = AVAILABLE_MODELS.find(
       (candidate) =>
         candidate.id === model.id && candidate.provider === model.providerId,
@@ -276,3 +302,5 @@ export function getCustomChatModels(): ChatModel[] {
 export function resetModelCatalogForTests(): void {
   setCatalogSnapshot(null);
 }
+
+export { isBuiltinProviderActive } from "./model-registry";

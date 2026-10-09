@@ -1,6 +1,7 @@
 import { isProviderFrozen } from "./provider-policy";
 import type OpenAI from "openai";
 import { dashscopeClient, openaiClient } from "./ai-clients";
+import { isBuiltinEnvUsable } from "./model-registry";
 import { AlibabaAsrError, transcribeQwenAudio } from "./alibaba-asr";
 import {
   isAlibabaSpecialistConfigured,
@@ -114,6 +115,11 @@ export async function transcribeDashScopeAudio(
   if (isProviderFrozen("dashscope")) {
     throw new TranscriptionError("Alibaba Cloudのモデルは一時凍結中です。");
   }
+  if (!isBuiltinEnvUsable("dashscope")) {
+    throw new TranscriptionError(
+      "DashScope (Qwen) は管理者により無効化またはキー解除されています。",
+    );
+  }
   if (model === QWEN_TRANSCRIBE_MODEL) {
     try {
       const text = await transcribeQwenAudio(args);
@@ -174,7 +180,9 @@ export async function transcribeAudio(
 ): Promise<string> {
   const failures: string[] = [];
 
-  for (const model of openaiClient && !isProviderFrozen("openai")
+  for (const model of openaiClient &&
+  !isProviderFrozen("openai") &&
+  isBuiltinEnvUsable("openai")
     ? openAiCandidateModels()
     : []) {
     try {
@@ -201,6 +209,7 @@ export async function transcribeAudio(
 
   if (
     !isProviderFrozen("dashscope") &&
+    isBuiltinEnvUsable("dashscope") &&
     (dashscopeClient || isAlibabaSpecialistConfigured())
   ) {
     try {
