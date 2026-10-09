@@ -88,7 +88,7 @@ describePostgres("project files (PostgreSQL)", () => {
     const { default: router } = await import("./projects");
     const { default: openaiRouter } = await import("./openai");
     const app = express();
-    app.use(express.json({ limit: "10mb" }));
+    app.use(express.json({ limit: "30mb" }));
     app.use(openaiRouter);
     app.use(router);
     server = await new Promise<Server>((resolve) => {
@@ -159,6 +159,23 @@ describePostgres("project files (PostgreSQL)", () => {
       owner,
     );
     expect(remove.status).toBe(204);
+  });
+
+  it("accepts a file close to the 20 MiB default limit", async () => {
+    const projectId = ownerProjects[0]!;
+    const big = Buffer.alloc(19 * 1024 * 1024, "line of text 0123456789\n");
+    const uploaded = await call("POST", `/projects/${projectId}/files`, owner, {
+      filename: "big.txt",
+      dataBase64: big.toString("base64"),
+    });
+    expect(uploaded.status).toBe(201);
+    expect(uploaded.body.file.sizeBytes).toBe(big.length);
+    const removed = await call(
+      "DELETE",
+      `/projects/${projectId}/files/${uploaded.body.file.id}`,
+      owner,
+    );
+    expect(removed.status).toBe(204);
   });
 
   it("rejects invalid base64 payloads with 400", async () => {
