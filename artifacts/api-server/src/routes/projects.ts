@@ -62,7 +62,9 @@ const memorySchema = z.object({
 
 const fileUploadSchema = z.object({
   filename: z.string().min(1).max(200),
-  dataBase64: z.string().min(1).max(20_000_000),
+  // Size is bounded by the JSON body limit and the per-file encoded-length
+  // check below (both derived from PROJECT_FILE_MAX_BYTES), not here.
+  dataBase64: z.string().min(1),
 });
 
 const filePatchSchema = z.object({
