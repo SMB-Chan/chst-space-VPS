@@ -4,3 +4,7 @@
 deploy/.env
 **/*.bak
 **/.DS_Store
+# Host-installed dependencies must never enter the image: the build runs a
+# clean `pnpm install --frozen-lockfile`, so lockfile changes (new packages)
+# are actually installed instead of a stale host node_modules being reused.
+**/node_modules
