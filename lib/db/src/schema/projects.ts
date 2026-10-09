@@ -95,6 +95,17 @@ export const projectFiles = pgTable(
     /** Number of UTF-8 characters actually persisted in extractedText. */
     textChars: integer("text_chars").notNull().default(0),
     includeInContext: boolean("include_in_context").notNull().default(true),
+    /** "document" (text extracted) or "image" (described + OCR'd once). */
+    kind: text("kind").notNull().default("document"),
+    /** Base64 WebP thumbnail for images (metadata-free, ~320px). */
+    thumbnail: text("thumbnail"),
+    imageWidth: integer("image_width"),
+    imageHeight: integer("image_height"),
+    /** Attach the image itself to chats whose model supports vision. */
+    sendImage: boolean("send_image").notNull().default(false),
+    /** none | pending | ready | unavailable | failed */
+    descriptionStatus: text("description_status").notNull().default("none"),
+    descriptionModel: text("description_model"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

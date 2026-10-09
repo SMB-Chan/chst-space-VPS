@@ -24,11 +24,19 @@ import {
   addProjectFile,
   deleteProjectFile,
   getProjectFileForDownload,
+  getProjectFileThumbnail,
   getUserProjectFilesUsage,
+  imageDescriberHooks,
   listProjectFiles,
   ProjectFileError,
+  requestProjectImageDescription,
   setProjectFileIncluded,
+  setProjectFileSendImage,
 } from "../lib/project-files-store";
+
+function requestRole(req: Request): "admin" | "user" {
+  return req.userRole === "admin" ? "admin" : "user";
+}
 
 /**
  * Project folders live in the operator's shared coding workspace, and two
@@ -67,9 +75,10 @@ const fileUploadSchema = z.object({
   dataBase64: z.string().min(1),
 });
 
-const filePatchSchema = z.object({
-  includeInContext: z.boolean(),
-});
+const filePatchSchema = z.union([
+  z.object({ includeInContext: z.boolean() }).strict(),
+  z.object({ sendImage: z.boolean() }).strict(),
+]);
 
 const ASSIGN_CONVERSATIONS_LIMIT = 200;
 
@@ -373,7 +382,13 @@ router.get(
         return;
       }
       const files = await listProjectFiles(getUserId(req), id);
-      res.json({ files });
+      res.json({
+        files,
+        imageDescription: {
+          available:
+            imageDescriberHooks.resolveModel(requestRole(req)) !== null,
+        },
+      });
     } catch (err) {
       logSafeHttpError(req, 500, err);
       res.status(500).json({ error: "ファイル一覧を取得できませんでした。" });
@@ -423,6 +438,7 @@ router.post(
       const meta = await addProjectFile(getUserId(req), id, {
         filename,
         buffer,
+        role: requestRole(req),
       });
       res.status(201).json({ file: meta });
     } catch (err) {
@@ -453,12 +469,20 @@ router.patch(
       return;
     }
     try {
-      const meta = await setProjectFileIncluded(
-        getUserId(req),
-        id,
-        fileId,
-        parsed.data.includeInContext,
-      );
+      const meta =
+        "sendImage" in parsed.data
+          ? await setProjectFileSendImage(
+              getUserId(req),
+              id,
+              fileId,
+              parsed.data.sendImage,
+            )
+          : await setProjectFileIncluded(
+              getUserId(req),
+              id,
+              fileId,
+              parsed.data.includeInContext,
+            );
       if (!meta) {
         res.status(404).json({ error: "ファイルが見つかりません。" });
         return;
@@ -535,6 +559,72 @@ router.get(
     } catch (err) {
       logSafeHttpError(req, 500, err);
       res.status(500).json({ error: "ファイルの取得に失敗しました。" });
+    }
+  },
+);
+
+router.get(
+  "/projects/:id/files/:fileId/thumbnail",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const id = parseProjectId(req.params.id);
+    const fileId = parseProjectId(req.params.fileId);
+    if (id == null || fileId == null) {
+      res.status(400).json({ error: "IDが不正です。" });
+      return;
+    }
+    try {
+      const thumbnail = await getProjectFileThumbnail(
+        getUserId(req),
+        id,
+        fileId,
+      );
+      if (!thumbnail) {
+        res.status(404).json({ error: "サムネイルが見つかりません。" });
+        return;
+      }
+      res.setHeader("Content-Type", "image/webp");
+      res.setHeader("Content-Length", String(thumbnail.length));
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(thumbnail);
+    } catch (err) {
+      logSafeHttpError(req, 500, err);
+      res.status(500).json({ error: "サムネイルの取得に失敗しました。" });
+    }
+  },
+);
+
+router.post(
+  "/projects/:id/files/:fileId/describe",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const id = parseProjectId(req.params.id);
+    const fileId = parseProjectId(req.params.fileId);
+    if (id == null || fileId == null) {
+      res.status(400).json({ error: "IDが不正です。" });
+      return;
+    }
+    try {
+      const meta = await requestProjectImageDescription(
+        getUserId(req),
+        id,
+        fileId,
+        requestRole(req),
+      );
+      if (!meta) {
+        res.status(404).json({ error: "ファイルが見つかりません。" });
+        return;
+      }
+      res.status(202).json({ file: meta });
+    } catch (err) {
+      if (err instanceof ProjectFileError) {
+        const mapped = projectFileErrorResponse(err);
+        res.status(mapped.status).json(mapped.body);
+        return;
+      }
+      logSafeHttpError(req, 500, err);
+      res.status(500).json({ error: "画像の説明を作成できませんでした。" });
     }
   },
 );

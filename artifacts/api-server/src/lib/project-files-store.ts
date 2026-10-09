@@ -5,6 +5,19 @@ import { detectBinaryFamily } from "./binary-detection";
 import { extractBinaryText } from "./file-extraction";
 import type { BinaryAttachment } from "./message-content";
 import { getProjectLimits, type ProjectLimits } from "./project-limits";
+import { logger } from "./logger";
+import {
+  describeProjectImage,
+  detectProjectImageFormat,
+  formatImageDescriptionText,
+  processProjectImage,
+  ProjectImageDecodeError,
+  resolveImageDescribeModel,
+  storedImageFilename,
+  toVisionDataUrl,
+  type ProjectImageUserRole,
+} from "./project-images";
+import { getModelLabel } from "./ai-clients";
 
 export type ProjectFileErrorCode =
   | "too_large"
@@ -33,9 +46,23 @@ export interface ProjectFileMetadata {
   sizeBytes: number;
   textChars: number;
   includeInContext: boolean;
+  kind: ProjectFileKind;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  hasThumbnail: boolean;
+  sendImage: boolean;
+  descriptionStatus: ProjectImageDescriptionStatus;
+  descriptionModel: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type ProjectFileKind = "document" | "image";
+export type ProjectImageDescriptionStatus =
+  "none" | "pending" | "ready" | "unavailable" | "failed";
+
+/** A description still "pending" after this long was lost (e.g. restart). */
+const DESCRIPTION_STALE_MS = 10 * 60 * 1000;
 
 export interface ProjectFileUsage {
   totalBytes: number;
@@ -84,19 +111,6 @@ function mimeForFamily(family: "pdf" | "docx" | "xlsx" | "pptx"): string {
     case "pptx":
       return PPTX_MIME;
   }
-}
-
-/** PNG / JPEG / GIF / WebP magic numbers (for a clearer rejection message). */
-function looksLikeImage(buffer: Buffer): boolean {
-  if (buffer.length < 12) return false;
-  const hex = buffer.subarray(0, 4).toString("hex");
-  return (
-    hex === "89504e47" ||
-    hex.startsWith("ffd8ff") ||
-    buffer.subarray(0, 4).toString("latin1") === "GIF8" ||
-    (buffer.subarray(0, 4).toString("latin1") === "RIFF" &&
-      buffer.subarray(8, 12).toString("latin1") === "WEBP")
-  );
 }
 
 /**
@@ -192,6 +206,13 @@ const metadataColumns = {
   sizeBytes: projectFiles.sizeBytes,
   textChars: projectFiles.textChars,
   includeInContext: projectFiles.includeInContext,
+  kind: projectFiles.kind,
+  imageWidth: projectFiles.imageWidth,
+  imageHeight: projectFiles.imageHeight,
+  hasThumbnail: sql<boolean>`(${projectFiles.thumbnail} is not null)`,
+  sendImage: projectFiles.sendImage,
+  descriptionStatus: projectFiles.descriptionStatus,
+  descriptionModel: projectFiles.descriptionModel,
   createdAt: projectFiles.createdAt,
   updatedAt: projectFiles.updatedAt,
 };
@@ -204,9 +225,42 @@ type MetadataRow = {
   sizeBytes: number;
   textChars: number;
   includeInContext: boolean;
+  kind: string;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  hasThumbnail: boolean;
+  sendImage: boolean;
+  descriptionStatus: string;
+  descriptionModel: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+const DESCRIPTION_STATUSES: readonly ProjectImageDescriptionStatus[] = [
+  "none",
+  "pending",
+  "ready",
+  "unavailable",
+  "failed",
+];
+
+function effectiveDescriptionStatus(
+  row: Pick<MetadataRow, "descriptionStatus" | "updatedAt">,
+  now = Date.now(),
+): ProjectImageDescriptionStatus {
+  const status = DESCRIPTION_STATUSES.includes(
+    row.descriptionStatus as ProjectImageDescriptionStatus,
+  )
+    ? (row.descriptionStatus as ProjectImageDescriptionStatus)
+    : "none";
+  if (
+    status === "pending" &&
+    now - row.updatedAt.getTime() > DESCRIPTION_STALE_MS
+  ) {
+    return "failed";
+  }
+  return status;
+}
 
 function toMetadata(row: MetadataRow): ProjectFileMetadata {
   return {
@@ -217,6 +271,13 @@ function toMetadata(row: MetadataRow): ProjectFileMetadata {
     sizeBytes: row.sizeBytes,
     textChars: row.textChars,
     includeInContext: row.includeInContext,
+    kind: row.kind === "image" ? "image" : "document",
+    imageWidth: row.imageWidth ?? null,
+    imageHeight: row.imageHeight ?? null,
+    hasThumbnail: Boolean(row.hasThumbnail),
+    sendImage: row.sendImage,
+    descriptionStatus: effectiveDescriptionStatus(row),
+    descriptionModel: row.descriptionModel ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -291,6 +352,13 @@ export async function extractProjectFileContent(
     hasUtf16Bom && decodeProjectText(buffer) !== null
       ? null
       : detectBinaryFamily(buffer);
+  // Before the audio check: HEIC shares the ISO-BMFF "ftyp" box with M4A.
+  if (detectProjectImageFormat(buffer)) {
+    throw new ProjectFileError(
+      "unsupported_type",
+      "画像ファイルはここでは読み込めません。プロジェクトの参考ファイルへ直接アップロードしてください。",
+    );
+  }
   if (family === "audio") {
     throw new ProjectFileError(
       "unsupported_type",
@@ -301,12 +369,6 @@ export async function extractProjectFileContent(
     throw new ProjectFileError(
       "unsupported_type",
       "ZIP アーカイブは未対応です。PDF / Office / テキストをアップロードしてください。",
-    );
-  }
-  if (looksLikeImage(buffer)) {
-    throw new ProjectFileError(
-      "unsupported_type",
-      "画像ファイルはプロジェクトの参考ファイルには未対応です。画像はチャットの添付 (＋) から送ってください。",
     );
   }
   try {
@@ -334,10 +396,78 @@ export async function extractProjectFileContent(
   }
 }
 
+interface PreparedProjectFile {
+  filename: string;
+  mimeType: string;
+  buffer: Buffer;
+  extractedText: string;
+  textChars: number;
+  kind: ProjectFileKind;
+  thumbnail: string | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  descriptionStatus: ProjectImageDescriptionStatus;
+  describeModelId: string | null;
+}
+
+async function prepareProjectFile(
+  filename: string,
+  buffer: Buffer,
+  limits: ProjectLimits,
+  role: ProjectImageUserRole,
+): Promise<PreparedProjectFile> {
+  const imageFormat = detectProjectImageFormat(buffer);
+  if (imageFormat) {
+    let processed;
+    try {
+      processed = await processProjectImage(buffer, imageFormat);
+    } catch (err) {
+      if (err instanceof ProjectImageDecodeError) {
+        throw new ProjectFileError("extraction_failed", err.message);
+      }
+      throw err;
+    }
+    if (processed.stored.length > limits.fileMaxBytes) {
+      throw new ProjectFileError(
+        "too_large",
+        `変換後の画像が大きすぎます。1ファイル ${Math.round(limits.fileMaxBytes / 1024 / 1024)}MB 以下にしてください。`,
+      );
+    }
+    const describeModelId = imageDescriberHooks.resolveModel(role);
+    return {
+      filename: storedImageFilename(filename, processed.extension),
+      mimeType: processed.mimeType,
+      buffer: processed.stored,
+      extractedText: "",
+      textChars: 0,
+      kind: "image",
+      thumbnail: processed.thumbnail.toString("base64"),
+      imageWidth: processed.width,
+      imageHeight: processed.height,
+      descriptionStatus: describeModelId ? "pending" : "unavailable",
+      describeModelId,
+    };
+  }
+  const extracted = await extractProjectFileContent(filename, buffer, limits);
+  return {
+    filename: extracted.filename,
+    mimeType: extracted.mimeType,
+    buffer,
+    extractedText: extracted.extractedText,
+    textChars: extracted.textChars,
+    kind: "document",
+    thumbnail: null,
+    imageWidth: null,
+    imageHeight: null,
+    descriptionStatus: "none",
+    describeModelId: null,
+  };
+}
+
 export async function addProjectFile(
   userId: string,
   projectId: number,
-  input: { filename: string; buffer: Buffer },
+  input: { filename: string; buffer: Buffer; role?: ProjectImageUserRole },
 ): Promise<ProjectFileMetadata> {
   const limits = getProjectLimits();
   const filename = sanitizeProjectFilename(input.filename);
@@ -355,10 +485,15 @@ export async function addProjectFile(
     );
   }
 
-  const extracted = await extractProjectFileContent(filename, buffer, limits);
+  const prepared = await prepareProjectFile(
+    filename,
+    buffer,
+    limits,
+    input.role ?? "user",
+  );
 
   // Lock the project row so the count/quota check and insert are atomic.
-  return db.transaction(async (tx) => {
+  const meta = await db.transaction(async (tx) => {
     // The byte quota spans all of the user's projects, so serialise uploads
     // per user (the project row lock below only covers one project).
     await tx.execute(
@@ -396,7 +531,7 @@ export async function addProjectFile(
       .from(projectFiles)
       .where(eq(projectFiles.userId, userId));
     const currentTotal = Number(usageRow?.total ?? 0);
-    if (currentTotal + buffer.length > limits.userTotalMaxBytes) {
+    if (currentTotal + prepared.buffer.length > limits.userTotalMaxBytes) {
       throw new ProjectFileError(
         "quota_exceeded",
         `プロジェクトファイルの合計サイズが上限を超えています。${Math.round(limits.userTotalMaxBytes / 1024 / 1024)}MB までアップロードできます。`,
@@ -408,13 +543,19 @@ export async function addProjectFile(
       .values({
         projectId,
         userId,
-        filename: extracted.filename,
-        mimeType: extracted.mimeType,
-        sizeBytes: buffer.length,
-        data: buffer.toString("base64"),
-        extractedText: extracted.extractedText,
-        textChars: extracted.textChars,
+        filename: prepared.filename,
+        mimeType: prepared.mimeType,
+        sizeBytes: prepared.buffer.length,
+        data: prepared.buffer.toString("base64"),
+        extractedText: prepared.extractedText,
+        textChars: prepared.textChars,
         includeInContext: true,
+        kind: prepared.kind,
+        thumbnail: prepared.thumbnail,
+        imageWidth: prepared.imageWidth,
+        imageHeight: prepared.imageHeight,
+        sendImage: false,
+        descriptionStatus: prepared.descriptionStatus,
         updatedAt: new Date(),
       })
       .returning(metadataColumns);
@@ -423,6 +564,239 @@ export async function addProjectFile(
     }
     return toMetadata(row);
   });
+  if (prepared.describeModelId) {
+    scheduleImageDescription(userId, meta.id, prepared.describeModelId);
+  }
+  return meta;
+}
+
+// --- Image descriptions (generated once, in the background) --------------
+
+/** Overridable in tests so no real model is ever called. */
+export const imageDescriberHooks = {
+  resolveModel: resolveImageDescribeModel,
+  describe: describeProjectImage,
+};
+
+const inFlightDescriptions = new Map<number, Promise<void>>();
+const MAX_CONCURRENT_DESCRIPTIONS = 2;
+let activeDescriptions = 0;
+const descriptionWaiters: (() => void)[] = [];
+
+async function acquireDescriptionSlot(): Promise<void> {
+  if (activeDescriptions < MAX_CONCURRENT_DESCRIPTIONS) {
+    activeDescriptions += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => descriptionWaiters.push(resolve));
+  activeDescriptions += 1;
+}
+
+function releaseDescriptionSlot(): void {
+  activeDescriptions -= 1;
+  descriptionWaiters.shift()?.();
+}
+
+async function runImageDescription(
+  userId: string,
+  fileId: number,
+  modelId: string,
+): Promise<void> {
+  const fileScope = and(
+    eq(projectFiles.id, fileId),
+    eq(projectFiles.userId, userId),
+    eq(projectFiles.kind, "image"),
+  );
+  await acquireDescriptionSlot();
+  try {
+    const [row] = await db
+      .select({ filename: projectFiles.filename, data: projectFiles.data })
+      .from(projectFiles)
+      .where(fileScope)
+      .limit(1);
+    if (!row) return;
+    const imageDataUrl = await toVisionDataUrl(Buffer.from(row.data, "base64"));
+    const description = await imageDescriberHooks.describe({
+      modelId,
+      imageDataUrl,
+      filename: row.filename,
+    });
+    const text = clipHeadUtf8Safe(
+      formatImageDescriptionText(modelId, description),
+      getProjectLimits().fileTextMaxChars,
+      "",
+    );
+    await db
+      .update(projectFiles)
+      .set({
+        extractedText: text,
+        textChars: text.length,
+        descriptionStatus: "ready",
+        descriptionModel: getModelLabel(modelId),
+        updatedAt: new Date(),
+      })
+      .where(and(fileScope, eq(projectFiles.descriptionStatus, "pending")));
+  } catch (err) {
+    logger.warn(
+      {
+        fileId,
+        describeModelId: modelId,
+        errorName: err instanceof Error ? err.name : typeof err,
+      },
+      "Project image description failed",
+    );
+    await db
+      .update(projectFiles)
+      .set({ descriptionStatus: "failed", updatedAt: new Date() })
+      .where(and(fileScope, eq(projectFiles.descriptionStatus, "pending")))
+      .catch(() => undefined);
+  } finally {
+    releaseDescriptionSlot();
+  }
+}
+
+function scheduleImageDescription(
+  userId: string,
+  fileId: number,
+  modelId: string,
+): void {
+  if (inFlightDescriptions.has(fileId)) return;
+  const job = runImageDescription(userId, fileId, modelId).finally(() => {
+    inFlightDescriptions.delete(fileId);
+  });
+  inFlightDescriptions.set(fileId, job);
+}
+
+/** Test helper: resolves once every scheduled description has settled. */
+export async function waitForImageDescriptions(): Promise<void> {
+  while (inFlightDescriptions.size > 0) {
+    await Promise.allSettled([...inFlightDescriptions.values()]);
+  }
+}
+
+/**
+ * (Re)generate an image's description. Returns null when the file does not
+ * exist for this user; throws unsupported_type for non-image files.
+ */
+export async function requestProjectImageDescription(
+  userId: string,
+  projectId: number,
+  fileId: number,
+  role: ProjectImageUserRole,
+): Promise<ProjectFileMetadata | null> {
+  await assertOwnedProject(userId, projectId);
+  const scope = and(
+    eq(projectFiles.id, fileId),
+    eq(projectFiles.projectId, projectId),
+    eq(projectFiles.userId, userId),
+  );
+  const [current] = await db
+    .select(metadataColumns)
+    .from(projectFiles)
+    .where(scope)
+    .limit(1);
+  if (!current) return null;
+  if (current.kind !== "image") {
+    throw new ProjectFileError(
+      "unsupported_type",
+      "説明を作成できるのは画像ファイルだけです。",
+    );
+  }
+  if (inFlightDescriptions.has(fileId)) return toMetadata(current);
+  const modelId = imageDescriberHooks.resolveModel(role);
+  const [row] = await db
+    .update(projectFiles)
+    .set({
+      descriptionStatus: modelId ? "pending" : "unavailable",
+      updatedAt: new Date(),
+    })
+    .where(scope)
+    .returning(metadataColumns);
+  if (!row) return null;
+  if (modelId) scheduleImageDescription(userId, fileId, modelId);
+  return toMetadata(row);
+}
+
+export async function setProjectFileSendImage(
+  userId: string,
+  projectId: number,
+  fileId: number,
+  sendImage: boolean,
+): Promise<ProjectFileMetadata | null> {
+  await assertOwnedProject(userId, projectId);
+  const [row] = await db
+    .update(projectFiles)
+    .set({ sendImage, updatedAt: new Date() })
+    .where(
+      and(
+        eq(projectFiles.id, fileId),
+        eq(projectFiles.projectId, projectId),
+        eq(projectFiles.userId, userId),
+        eq(projectFiles.kind, "image"),
+      ),
+    )
+    .returning(metadataColumns);
+  return row ? toMetadata(row) : null;
+}
+
+export async function getProjectFileThumbnail(
+  userId: string,
+  projectId: number,
+  fileId: number,
+): Promise<Buffer | null> {
+  if (!(await assertProjectOwnership(userId, projectId))) return null;
+  const [row] = await db
+    .select({ thumbnail: projectFiles.thumbnail })
+    .from(projectFiles)
+    .where(
+      and(
+        eq(projectFiles.id, fileId),
+        eq(projectFiles.projectId, projectId),
+        eq(projectFiles.userId, userId),
+      ),
+    )
+    .limit(1);
+  return row?.thumbnail ? Buffer.from(row.thumbnail, "base64") : null;
+}
+
+/** Most images attached to one chat turn via 「画像そのものを送る」. */
+export const PROJECT_VISION_MAX_IMAGES = 4;
+
+/**
+ * Data URLs (≤1568px JPEG) of the project's images flagged 「画像そのものを
+ * 送る」 and included in context, oldest first, for vision-capable models.
+ */
+export async function loadProjectVisionImages(
+  userId: string,
+  projectId: number,
+): Promise<{ filename: string; dataUrl: string }[]> {
+  if (!(await assertProjectOwnership(userId, projectId))) return [];
+  const rows = await db
+    .select({ filename: projectFiles.filename, data: projectFiles.data })
+    .from(projectFiles)
+    .where(
+      and(
+        eq(projectFiles.projectId, projectId),
+        eq(projectFiles.userId, userId),
+        eq(projectFiles.kind, "image"),
+        eq(projectFiles.sendImage, true),
+        eq(projectFiles.includeInContext, true),
+      ),
+    )
+    .orderBy(asc(projectFiles.createdAt), asc(projectFiles.id))
+    .limit(PROJECT_VISION_MAX_IMAGES);
+  const images: { filename: string; dataUrl: string }[] = [];
+  for (const row of rows) {
+    try {
+      images.push({
+        filename: row.filename,
+        dataUrl: await toVisionDataUrl(Buffer.from(row.data, "base64")),
+      });
+    } catch {
+      // A stored image that no longer decodes is skipped, not fatal.
+    }
+  }
+  return images;
 }
 
 export async function setProjectFileIncluded(

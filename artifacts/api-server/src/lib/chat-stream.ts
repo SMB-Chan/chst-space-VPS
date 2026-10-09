@@ -218,6 +218,50 @@ export function createResponseCancellation(
   };
 }
 
+/**
+ * Append project reference images to the latest user message (vision models
+ * only). Converts string content to parts so the user's text stays first.
+ */
+export function attachProjectImagesToLastUserTurn(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  images: { filename: string; dataUrl: string }[],
+): boolean {
+  if (images.length === 0) return false;
+  let index = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      index = i;
+      break;
+    }
+  }
+  if (index < 0) return false;
+  const last = messages[
+    index
+  ] as OpenAI.Chat.Completions.ChatCompletionUserMessageParam;
+  const existing: OpenAI.Chat.Completions.ChatCompletionContentPart[] =
+    typeof last.content === "string"
+      ? [{ type: "text", text: last.content }]
+      : [...last.content];
+  const names = images.map((image) => image.filename).join("、");
+  messages[index] = {
+    ...last,
+    content: [
+      ...existing,
+      {
+        type: "text",
+        text: `\n\n（以下はプロジェクトの参考画像です: ${names}。説明文はプロジェクト資料にもあります）`,
+      },
+      ...images.map(
+        (image): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
+          type: "image_url",
+          image_url: { url: image.dataUrl },
+        }),
+      ),
+    ],
+  };
+  return true;
+}
+
 export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
@@ -294,6 +338,12 @@ export async function streamChatReply(args: {
   includeArtifactContent?: boolean;
   /** Persistent conversation id. When provided, file generation is persisted to assets. */
   conversationId?: number;
+  /**
+   * The main model can see images: project images flagged 「画像そのものを
+   * 送る」 are attached to the current user turn (their text descriptions are
+   * always in the project context regardless).
+   */
+  projectVision?: boolean;
   /** Explicit file format requested by the frontend. */
   requestedFileFormat?: FileFormat | null;
   /** Explicit coding mode writes `file:` fences into this project folder. */
@@ -679,6 +729,17 @@ export async function streamChatReply(args: {
         );
         if (projectPrompt) {
           workingMessages.push({ role: "system", content: projectPrompt });
+        }
+        if (args.projectVision) {
+          const { loadProjectVisionImages } =
+            await import("./project-files-store");
+          const images = await loadProjectVisionImages(
+            projectUserId,
+            projectId,
+          );
+          if (images.length > 0) {
+            attachProjectImagesToLastUserTurn(workingMessages, images);
+          }
         }
       } catch (error) {
         // Project context failures should not break the chat flow

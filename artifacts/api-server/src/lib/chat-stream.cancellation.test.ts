@@ -212,7 +212,9 @@ describe("response cancellation", () => {
     cancellation.dispose();
   });
 
-  it("does not invoke completion persistence after a client disconnects", async () => {
+  // 9e03677: a dropped client (navigation, stop, restart) must not erase the
+  // turn, so the finished answer is persisted exactly once.
+  it("persists the completion once even after a client disconnects", async () => {
     const response = new MockResponse();
     const cancellation = createResponseCancellation(
       response as unknown as Response,
@@ -241,7 +243,10 @@ describe("response cancellation", () => {
     });
 
     expect(cancellation.signal.aborted).toBe(true);
-    expect(onComplete).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "answer" }),
+    );
     cancellation.dispose();
   });
 

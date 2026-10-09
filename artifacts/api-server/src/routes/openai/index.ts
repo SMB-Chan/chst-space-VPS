@@ -1779,6 +1779,7 @@ router.post(
         audioAttachmentsForTools,
         translationMode,
         conversationId,
+        projectVision: supportsVision,
         requestedFileFormat,
         cancellation,
         coding:

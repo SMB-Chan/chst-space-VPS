@@ -6,6 +6,8 @@ import {
   Download,
   FileText,
   FolderKanban,
+  Image as ImageIcon,
+  ImagePlus,
   Loader2,
   MessageSquareText,
   Plus,
@@ -44,6 +46,7 @@ import {
 import { formatBytes } from "@/lib/project-upload";
 import { formatDateJa } from "@/lib/projects-format";
 import {
+  hasPendingDescriptions,
   projectsApi,
   type ProjectFile,
   type ProjectRecord,
@@ -56,6 +59,8 @@ import {
   type UploadOutcome,
 } from "@/lib/project-upload";
 import { DriveReferences } from "@/components/projects/drive-references";
+
+const DESCRIPTION_POLL_INTERVAL_MS = 3000;
 
 export function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
@@ -85,6 +90,9 @@ export function ProjectDetailPage() {
 
   const [limits, setLimits] = useState<ProjectsLimits | null>(null);
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
+  /** Server-side flag: any configured model that can describe images? */
+  const [imageDescriptionAvailable, setImageDescriptionAvailable] =
+    useState(true);
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{
@@ -99,6 +107,7 @@ export function ProjectDetailPage() {
   const dragCounterRef = useRef(0);
   const [busyFileId, setBusyFileId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [conversations, setConversations] = useState<
     | { id: number; title: string; createdAt: string; updatedAt?: string }[]
@@ -144,11 +153,14 @@ export function ProjectDetailPage() {
   const refreshFiles = useCallback(async () => {
     if (projectId == null) return;
     try {
-      const list = await projectsApi.listFiles(projectId);
-      setFiles(list);
+      const meta = await projectsApi.listFilesWithMeta(projectId);
+      setFiles(meta.files);
+      setImageDescriptionAvailable(meta.imageDescriptionAvailable);
     } catch (err) {
       setFileError(err instanceof Error ? err.message : null);
       setFiles([]);
+      // Keep imageDescriptionAvailable as-is on transient errors so the
+      // banner does not flash in and out.
     }
   }, [projectId]);
 
@@ -170,6 +182,23 @@ export function ProjectDetailPage() {
     void refreshConversations();
   }, [refreshProject, refreshLimits, refreshFiles, refreshConversations]);
 
+  // Poll while at least one image file's description is still being created.
+  // The server returns 202 + status:"pending" on POST /describe, so we re-fetch
+  // the file list every few seconds until no file is pending. Stops on unmount
+  // and when the user navigates away (projectId change clears the timer).
+  const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!hasPendingDescriptions(files)) return;
+    const timer = setTimeout(() => {
+      void refreshFiles();
+    }, DESCRIPTION_POLL_INTERVAL_MS);
+    pendingRef.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (pendingRef.current === timer) pendingRef.current = null;
+    };
+  }, [files, refreshFiles]);
+
   const instructionsMax = limits?.instructionsMaxChars ?? 4000;
   const instructionsOver = instructions.length > instructionsMax;
 
@@ -185,6 +214,11 @@ export function ProjectDetailPage() {
       (conv) => !projectConversationsById.has(conv.id),
     );
   }, [allConversations, projectConversationsById]);
+
+  const hasImages = useMemo(
+    () => (files ?? []).some((f) => f.kind === "image"),
+    [files],
+  );
 
   // Upload hooks must stay above the early returns below (rules of hooks):
   // the page renders a loading state first, then the project.
@@ -221,7 +255,7 @@ export function ProjectDetailPage() {
         setUploadProgress(null);
       }
     },
-    [project, files?.length, limits, fileBusy],
+    [project, files?.length, limits, fileBusy, refreshFiles, refreshLimits],
   );
 
   // Page-level drop handler. We swallow dragover/drop so the browser does not
@@ -332,8 +366,21 @@ export function ProjectDetailPage() {
     void handleFiles(selected);
   };
 
+  const handleImageInputChange = (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const input = event.target;
+    const selected = Array.from(input.files ?? []);
+    input.value = "";
+    void handleFiles(selected);
+  };
+
   const openFilePicker = () => {
     fileInputRef.current?.click();
+  };
+
+  const openImagePicker = () => {
+    imageInputRef.current?.click();
   };
 
   // Dropzone handlers. dragenter/dragleave fire on every nested child
@@ -377,6 +424,42 @@ export function ProjectDetailPage() {
         file.id,
         next,
       );
+      setFiles((prev) =>
+        prev
+          ? prev.map((entry) => (entry.id === updated.id ? updated : entry))
+          : prev,
+      );
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : null);
+    } finally {
+      setBusyFileId(null);
+    }
+  };
+
+  const handleToggleSendImage = async (file: ProjectFile, next: boolean) => {
+    setBusyFileId(file.id);
+    try {
+      const updated = await projectsApi.setFileSendImage(
+        project.id,
+        file.id,
+        next,
+      );
+      setFiles((prev) =>
+        prev
+          ? prev.map((entry) => (entry.id === updated.id ? updated : entry))
+          : prev,
+      );
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : null);
+    } finally {
+      setBusyFileId(null);
+    }
+  };
+
+  const handleDescribeFile = async (file: ProjectFile) => {
+    setBusyFileId(file.id);
+    try {
+      const updated = await projectsApi.describeFile(project.id, file.id);
       setFiles((prev) =>
         prev
           ? prev.map((entry) => (entry.id === updated.id ? updated : entry))
@@ -511,6 +594,15 @@ export function ProjectDetailPage() {
                 onChange={handleFileInputChange}
                 data-testid="project-file-input"
               />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*,.heic,.heif"
+                multiple
+                className="hidden"
+                onChange={handleImageInputChange}
+                data-testid="project-image-input"
+              />
               <Button
                 variant="tonal"
                 onClick={openFilePicker}
@@ -524,6 +616,16 @@ export function ProjectDetailPage() {
                   <Plus className="h-4 w-4" />
                 )}
                 ファイルを追加
+              </Button>
+              <Button
+                variant="tonal"
+                onClick={openImagePicker}
+                disabled={fileBusy || !limits}
+                className="gap-1.5"
+                data-testid="project-upload-image"
+              >
+                <ImagePlus className="h-4 w-4" />
+                写真を追加
               </Button>
             </div>
           </div>
@@ -558,8 +660,10 @@ export function ProjectDetailPage() {
             </p>
             <p className="text-[11px] text-[var(--m3-on-surface-variant)]">
               対応形式: PDF・Word・Excel・PowerPoint・テキスト / CSV / Markdown
-              / JSON /
-              コード（UTF-8・Shift_JIS）。画像・音声・ZIPは未対応。複数選択できます。
+              / JSON / コード（UTF-8・Shift_JIS）・画像（JPEG / PNG / WebP / GIF
+              /
+              HEIC）。画像は説明文と文字起こしを自動作成して参照します。音声・ZIPは未対応。
+              複数選択できます。
             </p>
           </div>
 
@@ -593,6 +697,14 @@ export function ProjectDetailPage() {
           {fileError ? (
             <p className="text-xs text-[var(--m3-error)]">{fileError}</p>
           ) : null}
+          {!imageDescriptionAvailable && hasImages ? (
+            <p
+              className="text-[11px] text-[var(--m3-on-surface-variant)]"
+              data-testid="project-image-description-unavailable"
+            >
+              現在、画像の説明を作成できるモデルが有効になっていません。画像は保存され、モデルが有効になったら「説明を再作成」できます。
+            </p>
+          ) : null}
           {files === null ? (
             <p className="py-4 text-sm text-[var(--m3-on-surface-variant)]">
               読み込み中...
@@ -606,57 +718,159 @@ export function ProjectDetailPage() {
             />
           ) : (
             <ul className="divide-y divide-[var(--m3-outline-variant)]/40">
-              {files.map((file) => (
-                <li
-                  key={file.id}
-                  className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />
-                      <span className="truncate text-sm font-medium">
-                        {file.filename}
-                      </span>
+              {files.map((file) => {
+                const isImage = file.kind === "image";
+                const status = file.descriptionStatus ?? "none";
+                return (
+                  <li
+                    key={file.id}
+                    className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
+                    data-testid={`project-file-${file.id}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        {isImage && file.hasThumbnail ? (
+                          <img
+                            src={projectsApi.fileThumbnailUrl(
+                              project.id,
+                              file.id,
+                            )}
+                            loading="lazy"
+                            alt=""
+                            width={48}
+                            height={48}
+                            data-testid={`project-file-thumb-${file.id}`}
+                            className="h-12 w-12 shrink-0 rounded-md object-cover"
+                          />
+                        ) : isImage ? (
+                          <ImageIcon
+                            className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <FileText className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />
+                        )}
+                        <span className="truncate text-sm font-medium">
+                          {file.filename}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-[var(--m3-on-surface-variant)]">
+                        {formatBytes(file.sizeBytes)}
+                        {isImage &&
+                        file.imageWidth != null &&
+                        file.imageHeight != null
+                          ? ` ・ ${file.imageWidth}×${file.imageHeight}`
+                          : ""}
+                        {isImage ? " ・ 説明 " : " ・ 抽出 "}
+                        {file.textChars.toLocaleString()} 文字 ・{" "}
+                        {formatDateJa(file.createdAt)}
+                      </p>
+                      {isImage ? (
+                        <div
+                          className="mt-1 space-y-1 text-[11px] text-[var(--m3-on-surface-variant)]"
+                          data-testid={`project-file-status-${file.id}`}
+                        >
+                          {status === "pending" ? (
+                            <p className="flex items-center gap-1.5">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              説明と文字起こしを作成中…
+                            </p>
+                          ) : status === "unavailable" ? (
+                            <p className="flex flex-wrap items-center gap-1.5">
+                              <span>
+                                説明を作成できるモデルがありません（画像は保存済み）
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void handleDescribeFile(file)}
+                                disabled={busyFileId === file.id}
+                                className="inline-flex h-7 items-center gap-1 rounded-[var(--m3-shape-md)] border border-[var(--m3-outline-variant)] px-2 hover:bg-[var(--m3-surface-container)]"
+                                data-testid={`project-file-describe-${file.id}`}
+                              >
+                                説明を再作成
+                              </button>
+                            </p>
+                          ) : status === "failed" ? (
+                            <p className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[var(--m3-error)]">
+                                説明の作成に失敗しました
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void handleDescribeFile(file)}
+                                disabled={busyFileId === file.id}
+                                className="inline-flex h-7 items-center gap-1 rounded-[var(--m3-shape-md)] border border-[var(--m3-outline-variant)] px-2 hover:bg-[var(--m3-surface-container)]"
+                                data-testid={`project-file-describe-${file.id}`}
+                              >
+                                説明を再作成
+                              </button>
+                            </p>
+                          ) : status === "ready" ? (
+                            <p className="text-[10px]">
+                              説明: {file.descriptionModel ?? ""}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
-                    <p className="mt-0.5 text-[11px] text-[var(--m3-on-surface-variant)]">
-                      {formatBytes(file.sizeBytes)} ・ 抽出{" "}
-                      {file.textChars.toLocaleString()} 文字 ・{" "}
-                      {formatDateJa(file.createdAt)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                    <label className="flex items-center gap-2 text-xs text-[var(--m3-on-surface-variant)]">
-                      <Switch
-                        checked={file.includeInContext}
-                        onCheckedChange={(value) =>
-                          void handleToggleInclusion(file, value)
-                        }
-                        disabled={busyFileId === file.id}
-                        aria-label="チャットで参照"
-                      />
-                      <span>チャットで参照</span>
-                    </label>
-                    <a
-                      href={projectsApi.fileDownloadUrl(project.id, file.id)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-[var(--m3-shape-md)] border border-[var(--m3-outline-variant)] px-3 text-xs hover:bg-[var(--m3-surface-container)]"
-                      data-testid={`project-file-download-${file.id}`}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      ダウンロード
-                    </a>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void handleDeleteFile(file)}
-                      disabled={busyFileId === file.id}
-                      aria-label="ファイルを削除"
-                      className="h-9 w-9 p-0 text-[var(--m3-error)]"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                    <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                      {isImage ? (
+                        <label className="flex flex-col items-end gap-0.5 text-xs text-[var(--m3-on-surface-variant)]">
+                          <span className="flex items-center gap-2">
+                            <Switch
+                              checked={file.sendImage ?? false}
+                              onCheckedChange={(value) =>
+                                void handleToggleSendImage(file, value)
+                              }
+                              disabled={busyFileId === file.id}
+                              aria-label="画像そのものを送る"
+                              data-testid={`project-file-send-image-${file.id}`}
+                            />
+                            <span>画像そのものを送る</span>
+                          </span>
+                          <span className="text-[10px]">
+                            画像対応モデルのときだけ画像も送信（トークン増）
+                          </span>
+                        </label>
+                      ) : null}
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                        <label className="flex items-center gap-2 text-xs text-[var(--m3-on-surface-variant)]">
+                          <Switch
+                            checked={file.includeInContext}
+                            onCheckedChange={(value) =>
+                              void handleToggleInclusion(file, value)
+                            }
+                            disabled={busyFileId === file.id}
+                            aria-label="チャットで参照"
+                          />
+                          <span>チャットで参照</span>
+                        </label>
+                        <a
+                          href={projectsApi.fileDownloadUrl(
+                            project.id,
+                            file.id,
+                          )}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--m3-shape-md)] border border-[var(--m3-outline-variant)] px-3 text-xs hover:bg-[var(--m3-surface-container)]"
+                          data-testid={`project-file-download-${file.id}`}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          ダウンロード
+                        </a>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handleDeleteFile(file)}
+                          disabled={busyFileId === file.id}
+                          aria-label="ファイルを削除"
+                          className="h-9 w-9 p-0 text-[var(--m3-error)]"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
