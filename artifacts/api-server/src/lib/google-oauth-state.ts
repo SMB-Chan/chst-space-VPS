@@ -113,3 +113,18 @@ export function googleOAuthCookie(nonce: string | null): string {
   if (cookieIsSecure()) parts.push("Secure");
   return parts.join("; ");
 }
+
+export const GOOGLE_RETURN_COOKIE = "google_oauth_return";
+
+/** Short-lived cookie remembering where to land after the consent screen. */
+export function googleReturnCookie(path: string | null): string {
+  const parts = [
+    `${GOOGLE_RETURN_COOKIE}=${path ? encodeURIComponent(path) : ""}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/api/google",
+    `Max-Age=${path ? 600 : 0}`,
+  ];
+  if (cookieIsSecure()) parts.push("Secure");
+  return parts.join("; ");
+}

@@ -238,7 +238,7 @@ async function assertProjectOwnership(
  * Verify that the caller owns the project before any file row is read or
  * written. Anything that fails this check behaves identically to "not found".
  */
-async function assertOwnedProject(
+export async function assertOwnedProject(
   userId: string,
   projectId: number,
 ): Promise<void> {
@@ -266,27 +266,21 @@ export async function listProjectFiles(
   return rows.map(toMetadata);
 }
 
-export async function addProjectFile(
-  userId: string,
-  projectId: number,
-  input: { filename: string; buffer: Buffer },
-): Promise<ProjectFileMetadata> {
-  const limits = getProjectLimits();
-  const filename = sanitizeProjectFilename(input.filename);
-  const buffer = input.buffer;
-  if (buffer.length === 0) {
-    throw new ProjectFileError(
-      "empty",
-      "空のファイルはアップロードできません。",
-    );
-  }
-  if (buffer.length > limits.fileMaxBytes) {
-    throw new ProjectFileError(
-      "too_large",
-      `ファイルが大きすぎます。1ファイル ${Math.round(limits.fileMaxBytes / 1024 / 1024)}MB 以下にしてください。`,
-    );
-  }
-
+/**
+ * Detect the file family and extract its text (shared by local uploads and
+ * Google Drive references). Throws ProjectFileError with a Japanese message
+ * for unsupported or unreadable content.
+ */
+export async function extractProjectFileContent(
+  filename: string,
+  buffer: Buffer,
+  limits: ProjectLimits,
+): Promise<{
+  extractedText: string;
+  textChars: number;
+  mimeType: string;
+  filename: string;
+}> {
   // A UTF-16 BOM (FF FE) also matches the MPEG frame-sync heuristic, so a
   // BOM-prefixed buffer that decodes cleanly as UTF-16 is treated as text.
   const hasUtf16Bom =
@@ -297,12 +291,6 @@ export async function addProjectFile(
     hasUtf16Bom && decodeProjectText(buffer) !== null
       ? null
       : detectBinaryFamily(buffer);
-  let extracted: {
-    extractedText: string;
-    textChars: number;
-    mimeType: string;
-    filename: string;
-  };
   if (family === "audio") {
     throw new ProjectFileError(
       "unsupported_type",
@@ -328,9 +316,9 @@ export async function addProjectFile(
       family === "xlsx" ||
       family === "pptx"
     ) {
-      extracted = await asBinaryFile(filename, buffer, family, limits);
+      return await asBinaryFile(filename, buffer, family, limits);
     } else if (family === null) {
-      extracted = asTextFile(filename, buffer, limits);
+      return asTextFile(filename, buffer, limits);
     } else {
       throw new ProjectFileError(
         "unsupported_type",
@@ -344,6 +332,30 @@ export async function addProjectFile(
       "ファイルの内容を抽出できませんでした。",
     );
   }
+}
+
+export async function addProjectFile(
+  userId: string,
+  projectId: number,
+  input: { filename: string; buffer: Buffer },
+): Promise<ProjectFileMetadata> {
+  const limits = getProjectLimits();
+  const filename = sanitizeProjectFilename(input.filename);
+  const buffer = input.buffer;
+  if (buffer.length === 0) {
+    throw new ProjectFileError(
+      "empty",
+      "空のファイルはアップロードできません。",
+    );
+  }
+  if (buffer.length > limits.fileMaxBytes) {
+    throw new ProjectFileError(
+      "too_large",
+      `ファイルが大きすぎます。1ファイル ${Math.round(limits.fileMaxBytes / 1024 / 1024)}MB 以下にしてください。`,
+    );
+  }
+
+  const extracted = await extractProjectFileContent(filename, buffer, limits);
 
   // Lock the project row so the count/quota check and insert are atomic.
   return db.transaction(async (tx) => {

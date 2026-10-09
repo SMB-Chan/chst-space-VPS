@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -108,3 +109,49 @@ export const projectFiles = pgTable(
 );
 
 export type ProjectFile = typeof projectFiles.$inferSelect;
+
+/**
+ * Google Drive file referenced by a project. Only the Drive file id and the
+ * extracted text (capped, refreshed on demand) are stored; the original bytes
+ * stay in Drive, so large files never land in PostgreSQL.
+ */
+export const projectDriveFiles = pgTable(
+  "project_drive_files",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    driveFileId: text("drive_file_id").notNull(),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    /** Size reported by Drive (null for native Google Docs/Sheets/Slides). */
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    /** Drive modifiedTime (RFC 3339) of the revision that was extracted. */
+    driveModifiedTime: text("drive_modified_time"),
+    webViewLink: text("web_view_link"),
+    extractedText: text("extracted_text").notNull().default(""),
+    textChars: integer("text_chars").notNull().default(0),
+    includeInContext: boolean("include_in_context").notNull().default(true),
+    /** Last refresh error (Japanese, user-facing); null when the cache is fresh. */
+    fetchError: text("fetch_error"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("project_drive_files_project_idx").on(table.projectId),
+    index("project_drive_files_user_idx").on(table.userId),
+    uniqueIndex("project_drive_files_project_file_uidx").on(
+      table.projectId,
+      table.driveFileId,
+    ),
+  ],
+);
+
+export type ProjectDriveFile = typeof projectDriveFiles.$inferSelect;

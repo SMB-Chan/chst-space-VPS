@@ -435,6 +435,28 @@ CREATE TABLE IF NOT EXISTS project_files (
 CREATE INDEX IF NOT EXISTS project_files_project_idx ON project_files(project_id);
 CREATE INDEX IF NOT EXISTS project_files_user_idx ON project_files(user_id);
 
+CREATE TABLE IF NOT EXISTS project_drive_files (
+  id serial PRIMARY KEY,
+  project_id integer NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id text NOT NULL,
+  drive_file_id text NOT NULL,
+  name text NOT NULL,
+  mime_type text NOT NULL,
+  size_bytes bigint,
+  drive_modified_time text,
+  web_view_link text,
+  extracted_text text NOT NULL DEFAULT '',
+  text_chars integer NOT NULL DEFAULT 0,
+  include_in_context boolean NOT NULL DEFAULT true,
+  fetch_error text,
+  fetched_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS project_drive_files_project_idx ON project_drive_files(project_id);
+CREATE INDEX IF NOT EXISTS project_drive_files_user_idx ON project_drive_files(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS project_drive_files_project_file_uidx ON project_drive_files(project_id, drive_file_id);
+
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id integer;
 `.trim();
 

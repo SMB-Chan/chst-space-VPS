@@ -6,6 +6,7 @@ import authRouter from "./auth";
 import googleRouter from "./google";
 import devRouter from "./dev";
 import projectsRouter from "./projects";
+import projectDriveRouter from "./project-drive";
 import toolBankRouter from "./tool-bank";
 import filesRouter from "./files";
 
@@ -18,6 +19,7 @@ router.use(adminRouter);
 router.use(googleRouter);
 router.use(devRouter);
 router.use(projectsRouter);
+router.use(projectDriveRouter);
 router.use(toolBankRouter);
 router.use(filesRouter);
 

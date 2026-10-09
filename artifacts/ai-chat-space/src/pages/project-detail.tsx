@@ -55,6 +55,7 @@ import {
   uploadFilesToProject,
   type UploadOutcome,
 } from "@/lib/project-upload";
+import { DriveReferences } from "@/components/projects/drive-references";
 
 export function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
@@ -658,6 +659,8 @@ export function ProjectDetailPage() {
               ))}
             </ul>
           )}
+
+          <DriveReferences projectId={project.id} />
         </Surface>
 
         <Surface

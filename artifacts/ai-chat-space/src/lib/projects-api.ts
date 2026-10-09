@@ -71,6 +71,38 @@ export interface ProjectFile {
   createdAt: string;
 }
 
+export interface DriveStatus {
+  configured: boolean;
+  connected: boolean;
+  hasDriveScope: boolean;
+  accountEmail?: string | null;
+}
+
+export interface DriveSearchFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  modifiedTime: string | null;
+  webViewLink: string | null;
+}
+
+export interface ProjectDriveFile {
+  id: number;
+  projectId: number;
+  driveFileId: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  driveModifiedTime: string | null;
+  webViewLink: string | null;
+  textChars: number;
+  includeInContext: boolean;
+  fetchError: string | null;
+  fetchedAt: string | null;
+  createdAt: string;
+}
+
 export interface ProjectConversation {
   id: number;
   title: string;
@@ -305,6 +337,84 @@ export const projectsApi = {
       `/api/projects/${projectId}/conversations/${conversationId}`,
       { method: "DELETE" },
       "会話をプロジェクトから外せませんでした。",
+    ).then(() => undefined);
+  },
+
+  driveStatus(): Promise<DriveStatus> {
+    return request<DriveStatus>(
+      "/api/project-drive/status",
+      {},
+      "Googleドライブの状態を取得できませんでした。",
+    );
+  },
+
+  driveSearch(q: string): Promise<DriveSearchFile[]> {
+    const query = q.trim();
+    const path = query
+      ? `/api/project-drive/search?q=${encodeURIComponent(query)}`
+      : "/api/project-drive/search";
+    return request<{ files: DriveSearchFile[] }>(
+      path,
+      {},
+      "Googleドライブを検索できませんでした。",
+    ).then((data) => data.files ?? []);
+  },
+
+  listDriveFiles(projectId: number): Promise<ProjectDriveFile[]> {
+    return request<{ files: ProjectDriveFile[]; configured: boolean }>(
+      `/api/projects/${projectId}/drive-files`,
+      {},
+      "ドライブ参照の一覧を取得できませんでした。",
+    ).then((data) => data.files ?? []);
+  },
+
+  addDriveFile(
+    projectId: number,
+    fileIdOrUrl: string,
+  ): Promise<ProjectDriveFile> {
+    return request<{ file: ProjectDriveFile }>(
+      `/api/projects/${projectId}/drive-files`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId: fileIdOrUrl }),
+      },
+      "ドライブ参照を追加できませんでした。",
+    ).then((data) => data.file);
+  },
+
+  refreshDriveFile(
+    projectId: number,
+    refId: number,
+  ): Promise<ProjectDriveFile> {
+    return request<{ file: ProjectDriveFile }>(
+      `/api/projects/${projectId}/drive-files/${refId}/refresh`,
+      { method: "POST" },
+      "ドライブ参照を再取得できませんでした。",
+    ).then((data) => data.file);
+  },
+
+  setDriveFileInclusion(
+    projectId: number,
+    refId: number,
+    includeInContext: boolean,
+  ): Promise<ProjectDriveFile> {
+    return request<{ file: ProjectDriveFile }>(
+      `/api/projects/${projectId}/drive-files/${refId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ includeInContext }),
+      },
+      "ドライブ参照の設定を更新できませんでした。",
+    ).then((data) => data.file);
+  },
+
+  removeDriveFile(projectId: number, refId: number): Promise<void> {
+    return request<{ deleted?: boolean }>(
+      `/api/projects/${projectId}/drive-files/${refId}`,
+      { method: "DELETE" },
+      "ドライブ参照を削除できませんでした。",
     ).then(() => undefined);
   },
 };
