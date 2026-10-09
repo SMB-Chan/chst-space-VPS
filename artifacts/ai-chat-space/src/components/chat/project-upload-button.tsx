@@ -107,7 +107,7 @@ export function ProjectUploadButton({
   };
 
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="contents">
       <input
         ref={inputRef}
         type="file"
@@ -123,7 +123,7 @@ export function ProjectUploadButton({
         aria-label="プロジェクトにファイルを追加"
         onClick={() => inputRef.current?.click()}
         disabled={busy}
-        className="inline-flex h-8 items-center gap-1.5 rounded-[var(--m3-shape-full)] border border-[var(--m3-outline-variant)] px-3 text-xs text-[var(--m3-on-secondary-container)] transition-colors hover:bg-[var(--m3-surface-container-high)] disabled:pointer-events-none disabled:opacity-[var(--m3-state-disabled)]"
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--m3-shape-full)] border border-[var(--m3-outline-variant)] px-3 text-xs text-[var(--m3-on-secondary-container)] transition-colors hover:bg-[var(--m3-surface-container-high)] disabled:pointer-events-none disabled:opacity-[var(--m3-state-disabled)]"
         data-testid="chat-project-upload"
       >
         {busy ? (
@@ -135,7 +135,7 @@ export function ProjectUploadButton({
       </button>
       {inlineStatus ? (
         <span
-          className="whitespace-pre-line text-[11px] text-[var(--m3-on-surface-variant)]"
+          className="basis-full whitespace-pre-line text-[11px] text-[var(--m3-on-surface-variant)]"
           data-testid="chat-project-upload-status"
           role="status"
           aria-live="polite"
