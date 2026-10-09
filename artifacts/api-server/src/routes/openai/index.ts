@@ -44,6 +44,7 @@ import {
   isModelAllowedForRole,
   type GeneratedAsset,
 } from "../../lib/specialist-capabilities";
+import { describeProviderUnavailability } from "../../lib/model-catalog";
 import {
   createResponseCancellation,
   streamChatReply,
@@ -343,7 +344,11 @@ async function resolveSharedChatParams(
     (model) => model.id === requestedModelId,
   );
   if (!modelDef) {
-    res.status(400).json({ error: `未対応のモデルです: ${requestedModelId}` });
+    res.status(400).json({
+      error:
+        describeProviderUnavailability(requestedModelId) ??
+        `未対応のモデルです: ${requestedModelId}`,
+    });
     return null;
   }
   const modelId = modelDef.id;

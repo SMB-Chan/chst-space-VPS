@@ -380,7 +380,7 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
   it("toggles built-in providers and reports the label when disabled", async () => {
     const { isCatalogProviderEnabled } = await import("../lib/model-registry");
     const { getClientForModel } = await import("../lib/ai-clients");
-    const { getCuratedBuiltinChatModels } =
+    const { getCuratedBuiltinChatModels, describeProviderUnavailability } =
       await import("../lib/model-catalog");
     expect(
       (
@@ -413,6 +413,9 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
     expect(() => getClientForModel(BUILTIN_SLASH_MODEL)).toThrow(
       "OpenRouter は管理者により無効化されています。別のモデルを選択してください。",
     );
+    expect(describeProviderUnavailability(BUILTIN_SLASH_MODEL)).toBe(
+      "OpenRouter は管理者により無効化されています。別のモデルを選択してください。",
+    );
     await call("PATCH", "/admin/providers/openrouter", {
       cookie: adminCookie,
       body: { enabled: true },
@@ -425,6 +428,8 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
 
   it("stores and disconnects built-in keys (DB key, env key opt-out, restore)", async () => {
     const { getClientForModel } = await import("../lib/ai-clients");
+    const { describeProviderUnavailability } =
+      await import("../lib/model-catalog");
     const builtinKey = `sk-or-test-${randomBytes(12).toString("hex")}`;
     const providerRow = async () =>
       (
@@ -471,6 +476,9 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
     expect(() => getClientForModel(BUILTIN_SLASH_MODEL)).toThrow(
       "OpenRouter のAPIキーは管理者により解除されています",
     );
+    expect(describeProviderUnavailability(BUILTIN_SLASH_MODEL)).toBe(
+      "OpenRouter のAPIキーは管理者により解除されています。別のモデルを選択してください。",
+    );
 
     // 環境変数のキーを使う: restore the env key opt-in.
     expect(
@@ -482,6 +490,7 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
       ).status,
     ).toBe(204);
     expect(await providerRow()).toMatchObject({ useEnvKey: true });
+    expect(describeProviderUnavailability(BUILTIN_SLASH_MODEL)).toBeNull();
     expect(
       (
         await call("DELETE", "/admin/providers/openrouter/key", {
