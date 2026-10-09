@@ -185,6 +185,71 @@ export function ProjectDetailPage() {
     );
   }, [allConversations, projectConversationsById]);
 
+  // Upload hooks must stay above the early returns below (rules of hooks):
+  // the page renders a loading state first, then the project.
+  const handleFiles = useCallback(
+    async (selected: File[]) => {
+      if (selected.length === 0 || fileBusy || !project) return;
+      if (!limits) {
+        setFileError("上限情報を取得できていません。");
+        return;
+      }
+      setFileBusy(true);
+      setFileError(null);
+      setUploadOutcomes(null);
+      setUploadProgress({ done: 0, total: selected.length, current: null });
+      try {
+        const outcomes = await uploadFilesToProject(
+          project.id,
+          selected,
+          limits,
+          files?.length ?? 0,
+          (p) => setUploadProgress(p),
+        );
+        setUploadOutcomes(outcomes);
+        await refreshFiles();
+        void refreshLimits();
+      } catch (err) {
+        setFileError(
+          err instanceof Error
+            ? err.message
+            : "アップロード中にエラーが発生しました。",
+        );
+      } finally {
+        setFileBusy(false);
+        setUploadProgress(null);
+      }
+    },
+    [project, files?.length, limits, fileBusy],
+  );
+
+  // Page-level drop handler. We swallow dragover/drop so the browser does not
+  // navigate away when the user misses the dropzone; the actual upload is
+  // still routed through handleFiles so the planner / progress UI apply.
+  useEffect(() => {
+    const onWindowDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types?.includes("Files")) {
+        event.preventDefault();
+      }
+    };
+    const onWindowDrop = (event: DragEvent) => {
+      // Drops on the files card are handled (and preventDefault-ed) by its
+      // React onDrop first; skip them here so files are not uploaded twice.
+      if (event.defaultPrevented) return;
+      if (!event.dataTransfer?.types?.includes("Files")) return;
+      event.preventDefault();
+      const dropped = Array.from(event.dataTransfer.files ?? []);
+      if (dropped.length === 0) return;
+      void handleFiles(dropped);
+    };
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [handleFiles]);
+
   if (projectId == null) {
     return <NotFoundState onBack={() => setLocation("/projects")} />;
   }
@@ -256,44 +321,6 @@ export function ProjectDetailPage() {
     }
   };
 
-  const handleFiles = useCallback(
-    async (selected: File[]) => {
-      if (selected.length === 0 || fileBusy) return;
-      if (!limits) {
-        setFileError("上限情報を取得できていません。");
-        return;
-      }
-      setFileBusy(true);
-      setFileError(null);
-      setUploadOutcomes(null);
-      setUploadProgress({ done: 0, total: selected.length, current: null });
-      try {
-        const outcomes = await uploadFilesToProject(
-          project!.id,
-          selected,
-          limits,
-          files?.length ?? 0,
-          (p) => setUploadProgress(p),
-        );
-        setUploadOutcomes(outcomes);
-        await refreshFiles();
-        void refreshLimits();
-      } catch (err) {
-        setFileError(
-          err instanceof Error
-            ? err.message
-            : "アップロード中にエラーが発生しました。",
-        );
-      } finally {
-        setFileBusy(false);
-        setUploadProgress(null);
-      }
-    },
-    // project!/files/limits change mid-flight so we snapshot them here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [project, files?.length, limits, fileBusy],
-  );
-
   const handleFileInputChange = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
@@ -307,33 +334,6 @@ export function ProjectDetailPage() {
   const openFilePicker = () => {
     fileInputRef.current?.click();
   };
-
-  // Page-level drop handler. We swallow dragover/drop so the browser does not
-  // navigate away when the user misses the dropzone; the actual upload is
-  // still routed through handleFiles so the planner / progress UI apply.
-  useEffect(() => {
-    const onWindowDragOver = (event: DragEvent) => {
-      if (event.dataTransfer?.types?.includes("Files")) {
-        event.preventDefault();
-      }
-    };
-    const onWindowDrop = (event: DragEvent) => {
-      // Drops on the files card are handled (and preventDefault-ed) by its
-      // React onDrop first; skip them here so files are not uploaded twice.
-      if (event.defaultPrevented) return;
-      if (!event.dataTransfer?.types?.includes("Files")) return;
-      event.preventDefault();
-      const dropped = Array.from(event.dataTransfer.files ?? []);
-      if (dropped.length === 0) return;
-      void handleFiles(dropped);
-    };
-    window.addEventListener("dragover", onWindowDragOver);
-    window.addEventListener("drop", onWindowDrop);
-    return () => {
-      window.removeEventListener("dragover", onWindowDragOver);
-      window.removeEventListener("drop", onWindowDrop);
-    };
-  }, [handleFiles]);
 
   // Dropzone handlers. dragenter/dragleave fire on every nested child
   // movement, so we count entries vs leaves to ignore those false negatives.
