@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { splitThinkTags } from "./stream-delta";
 import {
   applyGenerationParams,
   getClientForModel,
@@ -87,7 +88,9 @@ export async function describeImagesForTextModel(args: {
     options as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
     { signal: args.signal },
   );
-  const text = completion.choices?.[0]?.message?.content ?? "";
+  const text = splitThinkTags(
+    completion.choices?.[0]?.message?.content ?? "",
+  ).content;
   logger.info(
     { bridgeModelId: modelId, outputCharacters: text.length },
     "Vision bridge transcription completed",
