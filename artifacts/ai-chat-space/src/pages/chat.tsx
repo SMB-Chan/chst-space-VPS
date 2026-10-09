@@ -61,6 +61,7 @@ import {
   projectsApi,
   type ProjectRecord,
 } from "@/lib/projects-api";
+import { ProjectUploadButton } from "@/components/chat/project-upload-button";
 import { FolderKanban, X } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -1670,6 +1671,7 @@ export function ChatPage() {
                   pendingProjectId != null ? clearPendingProject : undefined
                 }
               />
+              <ProjectUploadButton projectId={activeProjectId} />
             </div>
           ) : null}
           <MessageInput

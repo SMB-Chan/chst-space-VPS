@@ -30,9 +30,10 @@ import {
   DEFAULT_JSON_LIMIT,
   LARGE_JSON_LIMIT,
   LARGE_JSON_PATHS,
-  PROJECT_FILE_JSON_LIMIT,
+  projectFileJsonLimitBytes,
   PROJECT_FILE_JSON_PATHS,
 } from "./lib/json-limits";
+import { getProjectLimits } from "./lib/project-limits";
 import { publicHttpError } from "./lib/public-error";
 import { SHELL_CACHE_CONTROL, setStaticCacheHeaders } from "./lib/static-cache";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
@@ -157,12 +158,15 @@ app.post(
   express.urlencoded({ extended: true, limit: LARGE_JSON_LIMIT }),
   tokenPlanQuotaPreflightGuard,
 );
-// Project file uploads carry a base64 payload up to 5 MiB raw. Authenticate
-// before the 8 MiB parser so anonymous clients cannot force large allocations.
+// Project file uploads carry a base64 payload (limit derived from the
+// per-file byte limit). Authenticate before the parser so anonymous clients
+// cannot force large allocations.
 app.post(
   [...PROJECT_FILE_JSON_PATHS],
   requireAuth,
-  express.json({ limit: PROJECT_FILE_JSON_LIMIT }),
+  express.json({
+    limit: projectFileJsonLimitBytes(getProjectLimits().fileMaxBytes),
+  }),
 );
 app.use(express.json({ limit: DEFAULT_JSON_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: DEFAULT_JSON_LIMIT }));

@@ -179,9 +179,53 @@ describePostgres("project files (PostgreSQL)", () => {
     expect(png.status).toBe(415);
   });
 
-  it("returns 415 for invalid UTF-8", async () => {
+  it("accepts Shift_JIS and UTF-16 (BOM) text such as Excel CSV exports", async () => {
     const projectId = ownerProjects[0]!;
-    const invalid = Buffer.from([0xff, 0xfe, 0xfd, 0x00, 0x01]);
+    // "名前,点数\n佐藤,90\n" encoded as Shift_JIS (CP932).
+    const sjis = Buffer.from(
+      "96bc914f2c935f9094" + "0a" + "8db293a12c3930" + "0a",
+      "hex",
+    );
+    const sjisResult = await call(
+      "POST",
+      `/projects/${projectId}/files`,
+      owner,
+      {
+        filename: "scores.csv",
+        dataBase64: sjis.toString("base64"),
+      },
+    );
+    expect(sjisResult.status).toBe(201);
+    expect(sjisResult.body.file.textChars).toBe("名前,点数\n佐藤,90\n".length);
+    fileIds.push(sjisResult.body.file.id);
+
+    const utf16 = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from("見出し\tA\n", "utf16le"),
+    ]);
+    const utf16Result = await call(
+      "POST",
+      `/projects/${projectId}/files`,
+      owner,
+      { filename: "table.txt", dataBase64: utf16.toString("base64") },
+    );
+    expect(utf16Result.status).toBe(201);
+    expect(utf16Result.body.file.textChars).toBe("見出し\tA\n".length);
+    fileIds.push(utf16Result.body.file.id);
+
+    for (const id of [sjisResult.body.file.id, utf16Result.body.file.id]) {
+      const removed = await call(
+        "DELETE",
+        `/projects/${projectId}/files/${id}`,
+        owner,
+      );
+      expect(removed.status).toBe(204);
+    }
+  });
+
+  it("returns 415 for undecodable binary content", async () => {
+    const projectId = ownerProjects[0]!;
+    const invalid = Buffer.from([0x80, 0xa0, 0xfd, 0x00, 0x01]);
     const result = await call("POST", `/projects/${projectId}/files`, owner, {
       filename: "binary.bin",
       dataBase64: invalid.toString("base64"),

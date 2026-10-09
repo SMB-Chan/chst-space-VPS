@@ -11,6 +11,7 @@ import {
   Plus,
   Save,
   Trash2,
+  Upload,
   X,
   MessageSquarePlus,
   Check,
@@ -40,54 +41,20 @@ import {
   useListOpenaiConversations,
   getListOpenaiConversationsQueryKey,
 } from "@workspace/api-client-react";
-import { formatBytes } from "@/lib/compress-image";
+import { formatBytes } from "@/lib/project-upload";
 import { formatDateJa } from "@/lib/projects-format";
 import {
-  fileToBase64,
   projectsApi,
   type ProjectFile,
   type ProjectRecord,
   type ProjectsLimits,
 } from "@/lib/projects-api";
-
-const ACCEPTED_FILE_EXTENSIONS = [
-  "text/*",
-  ".md",
-  ".txt",
-  ".csv",
-  ".json",
-  ".pdf",
-  ".docx",
-  ".xlsx",
-  ".pptx",
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".py",
-  ".rb",
-  ".go",
-  ".rs",
-  ".java",
-  ".kt",
-  ".swift",
-  ".c",
-  ".cpp",
-  ".h",
-  ".hpp",
-  ".cs",
-  ".sh",
-  ".yaml",
-  ".yml",
-  ".toml",
-  ".xml",
-  ".html",
-  ".css",
-  ".scss",
-  ".sql",
-];
-
-const ACCEPT_ATTRIBUTE = ACCEPTED_FILE_EXTENSIONS.join(",");
+import {
+  formatUploadFailures,
+  summarizeUploadOutcomes,
+  uploadFilesToProject,
+  type UploadOutcome,
+} from "@/lib/project-upload";
 
 export function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
@@ -119,6 +86,16 @@ export function ProjectDetailPage() {
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+    current: string | null;
+  } | null>(null);
+  const [uploadOutcomes, setUploadOutcomes] = useState<UploadOutcome[] | null>(
+    null,
+  );
+  const [dragActive, setDragActive] = useState(false);
+  const dragCounterRef = useRef(0);
   const [busyFileId, setBusyFileId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -279,65 +256,115 @@ export function ProjectDetailPage() {
     }
   };
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFiles = useCallback(
+    async (selected: File[]) => {
+      if (selected.length === 0 || fileBusy) return;
+      if (!limits) {
+        setFileError("上限情報を取得できていません。");
+        return;
+      }
+      setFileBusy(true);
+      setFileError(null);
+      setUploadOutcomes(null);
+      setUploadProgress({ done: 0, total: selected.length, current: null });
+      try {
+        const outcomes = await uploadFilesToProject(
+          project!.id,
+          selected,
+          limits,
+          files?.length ?? 0,
+          (p) => setUploadProgress(p),
+        );
+        setUploadOutcomes(outcomes);
+        await refreshFiles();
+        void refreshLimits();
+      } catch (err) {
+        setFileError(
+          err instanceof Error
+            ? err.message
+            : "アップロード中にエラーが発生しました。",
+        );
+      } finally {
+        setFileBusy(false);
+        setUploadProgress(null);
+      }
+    },
+    // project!/files/limits change mid-flight so we snapshot them here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [project, files?.length, limits, fileBusy],
+  );
+
+  const handleFileInputChange = (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const input = event.target;
     const selected = Array.from(input.files ?? []);
     // Allow re-selecting the same file again.
     input.value = "";
-    if (selected.length === 0) return;
-    if (!limits) {
-      setFileError("上限情報を取得できていません。");
-      return;
-    }
-    const oversize = selected.filter((file) => file.size > limits.fileMaxBytes);
-    if (oversize.length > 0) {
-      setFileError(
-        `${oversize[0].name} は1ファイル最大 ${formatBytes(limits.fileMaxBytes)} を超えています。`,
-      );
-      return;
-    }
-    const projectedCount = (files?.length ?? 0) + selected.length;
-    if (projectedCount > limits.maxFiles) {
-      setFileError(
-        `最大 ${limits.maxFiles} ファイルまでです。${
-          files?.length ?? 0
-        } 件登録済みで、追加できるのは ${Math.max(
-          0,
-          limits.maxFiles - (files?.length ?? 0),
-        )} 件です。`,
-      );
-      return;
-    }
-    const projectedBytes = selected.reduce(
-      (sum, file) => sum + file.size,
-      limits.usage?.totalBytes ?? 0,
-    );
-    if (projectedBytes > limits.userMaxTotalBytes) {
-      setFileError(
-        `使用量が上限 (${formatBytes(limits.userMaxTotalBytes)}) を超えます。`,
-      );
-      return;
-    }
-    setFileBusy(true);
-    setFileError(null);
-    let lastError: string | null = null;
-    try {
-      for (const file of selected) {
-        try {
-          const dataBase64 = await fileToBase64(file);
-          await projectsApi.uploadFile(project.id, {
-            filename: file.name,
-            dataBase64,
-          });
-        } catch (err) {
-          lastError = err instanceof Error ? err.message : null;
-        }
+    void handleFiles(selected);
+  };
+
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Page-level drop handler. We swallow dragover/drop so the browser does not
+  // navigate away when the user misses the dropzone; the actual upload is
+  // still routed through handleFiles so the planner / progress UI apply.
+  useEffect(() => {
+    const onWindowDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types?.includes("Files")) {
+        event.preventDefault();
       }
-      await refreshFiles();
-      void refreshLimits();
-      if (lastError) setFileError(lastError);
-    } finally {
-      setFileBusy(false);
+    };
+    const onWindowDrop = (event: DragEvent) => {
+      // Drops on the files card are handled (and preventDefault-ed) by its
+      // React onDrop first; skip them here so files are not uploaded twice.
+      if (event.defaultPrevented) return;
+      if (!event.dataTransfer?.types?.includes("Files")) return;
+      event.preventDefault();
+      const dropped = Array.from(event.dataTransfer.files ?? []);
+      if (dropped.length === 0) return;
+      void handleFiles(dropped);
+    };
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [handleFiles]);
+
+  // Dropzone handlers. dragenter/dragleave fire on every nested child
+  // movement, so we count entries vs leaves to ignore those false negatives.
+  const onFilesDragEnter = (event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    dragCounterRef.current += 1;
+    setDragActive(true);
+  };
+  const onFilesDragOver = (event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const onFilesDragLeave = (event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragActive(false);
+  };
+  const onFilesDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    dragCounterRef.current = 0;
+    setDragActive(false);
+    const dropped = Array.from(event.dataTransfer.files ?? []);
+    void handleFiles(dropped);
+  };
+  const onDropzoneKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openFilePicker();
     }
   };
 
@@ -440,6 +467,198 @@ export function ProjectDetailPage() {
           <MessageSquarePlus className="h-4 w-4" />
           このプロジェクトで新しいチャット
         </Button>
+
+        <Surface
+          tone="low"
+          shape="extraLarge"
+          className="space-y-4 border border-[var(--m3-outline-variant)] p-5 shadow-[var(--m3-elevation-1)] sm:p-6"
+          onDragEnter={onFilesDragEnter}
+          onDragOver={onFilesDragOver}
+          onDragLeave={onFilesDragLeave}
+          onDrop={onFilesDrop}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="space-y-1.5">
+              <h2 className="text-base font-semibold tracking-tight">
+                参考ファイル
+              </h2>
+              <p className="text-sm leading-relaxed text-[var(--m3-on-surface-variant)]">
+                ここに置いたファイルは「チャットで参照」をオンにしたものがこのプロジェクトの全チャットで参照されます。
+              </p>
+              {limits ? (
+                <p className="text-xs text-[var(--m3-on-surface-variant)]">
+                  1ファイル最大 {formatBytes(limits.fileMaxBytes)} / 最大{" "}
+                  {limits.maxFiles} ファイル / 使用量{" "}
+                  {formatBytes(limits.usage?.totalBytes ?? 0)} /{" "}
+                  {formatBytes(limits.userMaxTotalBytes)}
+                </p>
+              ) : null}
+              <p className="text-xs text-[var(--m3-on-surface-variant)]">
+                トークン節約のため、AIに渡すファイル本文は約{" "}
+                {limits?.filesContextMaxChars
+                  ? `${limits.filesContextMaxChars.toLocaleString()} 文字`
+                  : "数KB"}{" "}
+                に制限されます。先頭のファイルから優先されます。
+              </p>
+            </div>
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileInputChange}
+                data-testid="project-file-input"
+              />
+              <Button
+                variant="tonal"
+                onClick={openFilePicker}
+                disabled={fileBusy || !limits}
+                className="gap-1.5"
+                data-testid="project-upload"
+              >
+                {fileBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                ファイルを追加
+              </Button>
+            </div>
+          </div>
+
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="ファイルをドラッグ＆ドロップ または タップして選択"
+            onClick={openFilePicker}
+            onKeyDown={onDropzoneKeyDown}
+            data-testid="project-dropzone"
+            className={
+              "flex min-h-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded-[var(--m3-shape-lg)] border-2 border-dashed px-4 py-5 text-center transition-colors " +
+              (dragActive
+                ? "border-[var(--m3-primary)] bg-[var(--m3-primary-container)]/40 text-[var(--m3-on-primary-container)]"
+                : "border-[var(--m3-outline-variant)] bg-[var(--m3-surface-container)]/40 text-[var(--m3-on-surface-variant)] hover:border-[var(--m3-outline)]")
+            }
+          >
+            <Upload
+              className={
+                "h-6 w-6 " +
+                (dragActive
+                  ? "text-[var(--m3-primary)]"
+                  : "text-[var(--m3-on-surface-variant)]")
+              }
+            />
+            <p className="text-sm font-medium">
+              <span className="hidden sm:inline">
+                ここにファイルをドラッグ＆ドロップ
+              </span>
+              <span className="sm:hidden">タップしてファイルを選択</span>
+            </p>
+            <p className="text-[11px] text-[var(--m3-on-surface-variant)]">
+              対応形式: PDF・Word・Excel・PowerPoint・テキスト / CSV / Markdown
+              / JSON /
+              コード（UTF-8・Shift_JIS）。画像・音声・ZIPは未対応。複数選択できます。
+            </p>
+          </div>
+
+          {fileBusy && uploadProgress ? (
+            <p
+              className="flex items-center gap-2 text-xs text-[var(--m3-on-surface-variant)]"
+              data-testid="project-upload-progress"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              アップロード中 ({uploadProgress.done}/{uploadProgress.total})
+              {uploadProgress.current ? `: ${uploadProgress.current}` : ""}
+            </p>
+          ) : null}
+          {uploadOutcomes ? (
+            <div className="space-y-1.5" data-testid="project-upload-results">
+              <p className="text-xs text-[var(--m3-on-surface-variant)]">
+                {summarizeUploadOutcomes(uploadOutcomes)}
+              </p>
+              {uploadOutcomes.some((o) => !o.ok) ? (
+                <ul className="space-y-0.5 text-xs text-[var(--m3-error)]">
+                  {formatUploadFailures(
+                    uploadOutcomes,
+                    uploadOutcomes.length,
+                  ).map((line, index) => (
+                    <li key={index}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {fileError ? (
+            <p className="text-xs text-[var(--m3-error)]">{fileError}</p>
+          ) : null}
+          {files === null ? (
+            <p className="py-4 text-sm text-[var(--m3-on-surface-variant)]">
+              読み込み中...
+            </p>
+          ) : files.length === 0 ? (
+            <EmptyState
+              compact
+              icon={<FileText className="h-5 w-5" />}
+              title="参考ファイルはまだありません"
+              description="上のエリアにファイルをドロップするか、「ファイルを追加」から仕様書や議事録を追加すると、すべてのチャットで参照できます。"
+            />
+          ) : (
+            <ul className="divide-y divide-[var(--m3-outline-variant)]/40">
+              {files.map((file) => (
+                <li
+                  key={file.id}
+                  className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />
+                      <span className="truncate text-sm font-medium">
+                        {file.filename}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-[var(--m3-on-surface-variant)]">
+                      {formatBytes(file.sizeBytes)} ・ 抽出{" "}
+                      {file.textChars.toLocaleString()} 文字 ・{" "}
+                      {formatDateJa(file.createdAt)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <label className="flex items-center gap-2 text-xs text-[var(--m3-on-surface-variant)]">
+                      <Switch
+                        checked={file.includeInContext}
+                        onCheckedChange={(value) =>
+                          void handleToggleInclusion(file, value)
+                        }
+                        disabled={busyFileId === file.id}
+                        aria-label="チャットで参照"
+                      />
+                      <span>チャットで参照</span>
+                    </label>
+                    <a
+                      href={projectsApi.fileDownloadUrl(project.id, file.id)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-[var(--m3-shape-md)] border border-[var(--m3-outline-variant)] px-3 text-xs hover:bg-[var(--m3-surface-container)]"
+                      data-testid={`project-file-download-${file.id}`}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      ダウンロード
+                    </a>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleDeleteFile(file)}
+                      disabled={busyFileId === file.id}
+                      aria-label="ファイルを削除"
+                      className="h-9 w-9 p-0 text-[var(--m3-error)]"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Surface>
 
         <Surface
           tone="low"
@@ -563,132 +782,6 @@ export function ProjectDetailPage() {
               {instructionsError}
             </p>
           ) : null}
-        </Surface>
-
-        <Surface
-          tone="low"
-          shape="extraLarge"
-          className="space-y-4 border border-[var(--m3-outline-variant)] p-5 shadow-[var(--m3-elevation-1)] sm:p-6"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="space-y-1.5">
-              <h2 className="text-base font-semibold tracking-tight">
-                参考ファイル
-              </h2>
-              <p className="text-sm leading-relaxed text-[var(--m3-on-surface-variant)]">
-                ここに置いたファイルは「チャットで参照」をオンにしたものがこのプロジェクトの全チャットで参照されます。
-              </p>
-              {limits ? (
-                <p className="text-xs text-[var(--m3-on-surface-variant)]">
-                  1ファイル最大 {formatBytes(limits.fileMaxBytes)} / 最大{" "}
-                  {limits.maxFiles} ファイル / 使用量{" "}
-                  {formatBytes(limits.usage?.totalBytes ?? 0)} /{" "}
-                  {formatBytes(limits.userMaxTotalBytes)}
-                </p>
-              ) : null}
-              <p className="text-xs text-[var(--m3-on-surface-variant)]">
-                トークン節約のため、AIに渡すファイル本文は約{" "}
-                {limits?.filesContextMaxChars
-                  ? `${limits.filesContextMaxChars.toLocaleString()} 文字`
-                  : "数KB"}{" "}
-                に制限されます。先頭のファイルから優先されます。
-              </p>
-            </div>
-            <div className="flex flex-col items-stretch gap-2 sm:items-end">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={ACCEPT_ATTRIBUTE}
-                className="hidden"
-                onChange={(event) => void handleUpload(event)}
-                data-testid="project-file-input"
-              />
-              <Button
-                variant="tonal"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={fileBusy || !limits}
-                className="gap-1.5"
-                data-testid="project-upload"
-              >
-                {fileBusy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-                ファイルを追加
-              </Button>
-            </div>
-          </div>
-          {fileError ? (
-            <p className="text-xs text-[var(--m3-error)]">{fileError}</p>
-          ) : null}
-          {files === null ? (
-            <p className="py-4 text-sm text-[var(--m3-on-surface-variant)]">
-              読み込み中...
-            </p>
-          ) : files.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<FileText className="h-5 w-5" />}
-              title="参考ファイルはまだありません"
-              description="上のボタンから仕様書や議事録を追加すると、すべてのチャットで参照できます。"
-            />
-          ) : (
-            <ul className="divide-y divide-[var(--m3-outline-variant)]/40">
-              {files.map((file) => (
-                <li
-                  key={file.id}
-                  className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 shrink-0 text-[var(--m3-on-surface-variant)]" />
-                      <span className="truncate text-sm font-medium">
-                        {file.filename}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-[var(--m3-on-surface-variant)]">
-                      {formatBytes(file.sizeBytes)} ・ 抽出{" "}
-                      {file.textChars.toLocaleString()} 文字 ・{" "}
-                      {formatDateJa(file.createdAt)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                    <label className="flex items-center gap-2 text-xs text-[var(--m3-on-surface-variant)]">
-                      <Switch
-                        checked={file.includeInContext}
-                        onCheckedChange={(value) =>
-                          void handleToggleInclusion(file, value)
-                        }
-                        disabled={busyFileId === file.id}
-                        aria-label="チャットで参照"
-                      />
-                      <span>チャットで参照</span>
-                    </label>
-                    <a
-                      href={projectsApi.fileDownloadUrl(project.id, file.id)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-[var(--m3-shape-md)] border border-[var(--m3-outline-variant)] px-3 text-xs hover:bg-[var(--m3-surface-container)]"
-                      data-testid={`project-file-download-${file.id}`}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      ダウンロード
-                    </a>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void handleDeleteFile(file)}
-                      disabled={busyFileId === file.id}
-                      aria-label="ファイルを削除"
-                      className="h-9 w-9 p-0 text-[var(--m3-error)]"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
         </Surface>
 
         <Surface
