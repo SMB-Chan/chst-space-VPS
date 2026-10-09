@@ -9,6 +9,31 @@ let googleAuthPromise: Promise<{
   googleAuth: SchemaModule["googleAuth"];
 }> | null = null;
 
+/**
+ * Tokens are stored AES-256-GCM encrypted (same key as provider
+ * credentials). Rows written before encryption are plaintext and are still
+ * read as-is; they are re-encrypted on the next save/refresh.
+ */
+const TOKEN_PREFIX = "enc1:";
+
+async function sealToken(value: string | null): Promise<string | null> {
+  if (!value) return value;
+  const { encryptSecret } = await import("./provider-credentials");
+  return TOKEN_PREFIX + encryptSecret(value);
+}
+
+async function openToken(value: string | null): Promise<string | null> {
+  if (!value || !value.startsWith(TOKEN_PREFIX)) return value;
+  const { decryptSecret } = await import("./provider-credentials");
+  try {
+    return decryptSecret(value.slice(TOKEN_PREFIX.length));
+  } catch {
+    // Key changed (e.g. PROVIDER_CREDENTIALS_SECRET rotated): treat as
+    // disconnected so the user is asked to reconnect.
+    return null;
+  }
+}
+
 async function loadDb() {
   googleAuthPromise ??= Promise.all([
     import("@workspace/db"),
@@ -27,6 +52,29 @@ export const GOOGLE_AUTH_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/drive.readonly",
 ] as const;
+
+const GOOGLE_SCOPE_ALIASES: Record<string, string> = {
+  calendar: "https://www.googleapis.com/auth/calendar",
+  gmail: "https://www.googleapis.com/auth/gmail.readonly",
+  drive: "https://www.googleapis.com/auth/drive.readonly",
+};
+
+/**
+ * Scopes requested on the consent screen. GOOGLE_OAUTH_SCOPES (optional,
+ * comma/space separated: calendar, gmail, drive) narrows the request, e.g.
+ * "drive" for Drive-only access. Unknown names are ignored; the default is
+ * all three (GOOGLE_AUTH_SCOPES).
+ */
+export function getGoogleAuthScopes(): string[] {
+  const raw = process.env.GOOGLE_OAUTH_SCOPES?.trim();
+  if (!raw) return [...GOOGLE_AUTH_SCOPES];
+  const picked = raw
+    .split(/[\s,]+/)
+    .map((name) => GOOGLE_SCOPE_ALIASES[name.toLowerCase()])
+    .filter((scope): scope is string => Boolean(scope));
+  if (picked.length === 0) return [...GOOGLE_AUTH_SCOPES];
+  return ["openid", "email", ...new Set(picked)];
+}
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -71,7 +119,13 @@ export async function getGoogleAuthRow(
     .from(googleAuth)
     .where(eq(googleAuth.userId, userId))
     .limit(1);
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    ...row,
+    accessToken: await openToken(row.accessToken),
+    refreshToken: await openToken(row.refreshToken),
+  };
 }
 
 export async function isGoogleConnected(userId: string): Promise<boolean> {
@@ -91,12 +145,15 @@ export async function saveGoogleAuth(row: {
   const expiresAt = new Date(Date.now() + row.expiresIn * 1000);
   const existing = await getGoogleAuthRow(row.userId);
   // Google omits refresh_token on re-consent; keep the previous one.
-  const refreshToken = row.refreshToken || existing?.refreshToken || null;
+  const refreshToken = await sealToken(
+    row.refreshToken || existing?.refreshToken || null,
+  );
+  const accessToken = (await sealToken(row.accessToken)) ?? row.accessToken;
   await db
     .insert(googleAuth)
     .values({
       userId: row.userId,
-      accessToken: row.accessToken,
+      accessToken,
       refreshToken,
       tokenExpiresAt: expiresAt,
       scope: row.scope ?? existing?.scope ?? null,
@@ -106,7 +163,7 @@ export async function saveGoogleAuth(row: {
     .onConflictDoUpdate({
       target: googleAuth.userId,
       set: {
-        accessToken: row.accessToken,
+        accessToken,
         refreshToken,
         tokenExpiresAt: expiresAt,
         scope: row.scope ?? existing?.scope ?? null,
@@ -182,7 +239,7 @@ export function buildGoogleAuthUrl(state: string, redirectUri: string): string {
     client_id: process.env.GOOGLE_CLIENT_ID!,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: GOOGLE_AUTH_SCOPES.join(" "),
+    scope: getGoogleAuthScopes().join(" "),
     access_type: "offline",
     prompt: "consent",
     state,

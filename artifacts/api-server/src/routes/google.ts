@@ -3,7 +3,9 @@ import { requireAuth, resolveAuthMode } from "../middlewares/requireAuth";
 import {
   createGoogleOAuthState,
   GOOGLE_OAUTH_COOKIE,
+  GOOGLE_RETURN_COOKIE,
   googleOAuthCookie,
+  googleReturnCookie,
   readCookie,
   verifyGoogleOAuthState,
 } from "../lib/google-oauth-state";
@@ -19,6 +21,19 @@ import {
 } from "../lib/google-auth";
 
 const router = Router();
+
+export function sanitizeReturnTo(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  if (!/^\/[A-Za-z0-9/_\-?=&.]*$/.test(raw)) return null;
+  if (raw.startsWith("//") || raw.includes("/..") || raw.length > 200) {
+    return null;
+  }
+  return raw;
+}
+
+function withGoogleResult(path: string, result: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}google=${result}`;
+}
 
 const handle =
   (handler: RequestHandler): RequestHandler =>
@@ -45,14 +60,17 @@ router.get(
     const frontend =
       process.env.FRONTEND_URL?.replace(/\/$/, "") ||
       `${req.protocol}://${req.get("host") ?? ""}`;
+    const returnTo =
+      sanitizeReturnTo(readCookie(req.headers.cookie, GOOGLE_RETURN_COOKIE)) ??
+      "/settings";
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const stateRaw = typeof req.query.state === "string" ? req.query.state : "";
     if (req.query.error) {
-      res.redirect(`${frontend}/settings?google=denied`);
+      res.redirect(`${frontend}${withGoogleResult(returnTo, "denied")}`);
       return;
     }
     if (!code || !stateRaw) {
-      res.redirect(`${frontend}/settings?google=error`);
+      res.redirect(`${frontend}${withGoogleResult(returnTo, "error")}`);
       return;
     }
     // AUTH_MODE=local has a single operator account, so there is no other
@@ -61,9 +79,12 @@ router.get(
       cookieNonce: readCookie(req.headers.cookie, GOOGLE_OAUTH_COOKIE),
       requireCookie: resolveAuthMode() !== "local",
     });
-    res.setHeader("Set-Cookie", googleOAuthCookie(null));
+    res.setHeader("Set-Cookie", [
+      googleOAuthCookie(null),
+      googleReturnCookie(null),
+    ]);
     if (!userId) {
-      res.redirect(`${frontend}/settings?google=error`);
+      res.redirect(`${frontend}${withGoogleResult(returnTo, "error")}`);
       return;
     }
     try {
@@ -78,9 +99,9 @@ router.get(
         scope: tokens.scope ?? null,
         accountEmail,
       });
-      res.redirect(`${frontend}/settings?google=connected`);
+      res.redirect(`${frontend}${withGoogleResult(returnTo, "connected")}`);
     } catch {
-      res.redirect(`${frontend}/settings?google=error`);
+      res.redirect(`${frontend}${withGoogleResult(returnTo, "error")}`);
     }
   }),
 );
@@ -115,7 +136,11 @@ router.get(
     const userId = resolveUserId(req);
     const redirectUri = getGoogleRedirectUri(req.headers.origin as string);
     const { state, nonce } = createGoogleOAuthState(userId);
-    res.setHeader("Set-Cookie", googleOAuthCookie(nonce));
+    const returnTo = sanitizeReturnTo(req.query.returnTo);
+    res.setHeader("Set-Cookie", [
+      googleOAuthCookie(nonce),
+      googleReturnCookie(returnTo),
+    ]);
     res.redirect(buildGoogleAuthUrl(state, redirectUri));
   }),
 );

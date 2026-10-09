@@ -38,6 +38,12 @@ vi.mock("@/lib/projects-api", async (importOriginal) => {
       })),
       listFiles: vi.fn(async () => []),
       listConversations: vi.fn(async () => []),
+      driveStatus: vi.fn(async () => ({
+        configured: false,
+        connected: false,
+        hasDriveScope: false,
+      })),
+      listDriveFiles: vi.fn(async () => []),
     },
   };
 });
@@ -88,6 +94,10 @@ describe("ProjectDetailPage", () => {
     expect(
       container.querySelector('[data-testid="project-file-input"]'),
     ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="drive-add-open"]'),
+    ).toBeNull();
+    expect(container.querySelector('[data-testid="drive-connect"]')).toBeNull();
     expect(String(errors)).not.toMatch(/Rendered more hooks|#310/);
     await act(async () => root.unmount());
   });

@@ -363,7 +363,7 @@ export function SettingsPage() {
 
         <SettingsSection
           title="Google 連携"
-          description="Googleカレンダーの予定管理、Gmailの検索・閲覧、Googleドライブのファイル検索をチャットから行えるようにします。連携すると、チャットでAIが必要に応じてこれらのツールを利用します。"
+          description="Googleカレンダーの予定管理、Gmailの検索・閲覧、Googleドライブのファイル検索をチャットから行えるようにします。プロジェクトの参考ファイルにGoogleドライブのファイルを追加することもできます。連携すると、チャットでAIが必要に応じてこれらのツールを利用します。"
         >
           {googleStatus === null ? (
             <p className="text-sm text-[var(--m3-on-surface-variant)]">

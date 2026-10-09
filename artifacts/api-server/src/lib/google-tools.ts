@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  clipDriveTextForTool,
+  escapeDriveQueryLiteral,
+  parseDriveFileId,
+} from "./google-drive-utils";
 import type {
   SpecialistToolCall,
   SpecialistToolDefinition,
@@ -219,6 +224,25 @@ export function getGoogleToolDefinitions(): SpecialistToolDefinition[] {
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "google_drive_read_file",
+        description:
+          "Googleドライブのファイル本文をテキストで読み込みます（Googleドキュメント/スプレッドシート/スライド、PDF、Word、Excel、PowerPoint、テキスト）。長い場合は先頭から一部のみ返します。fileId は google_drive_search_files の結果のIDか共有URL。",
+        parameters: {
+          type: "object",
+          properties: {
+            fileId: {
+              type: "string",
+              description: "DriveファイルIDまたは共有URL。",
+            },
+          },
+          required: ["fileId"],
+          additionalProperties: false,
+        },
+      },
+    },
   ];
 }
 
@@ -346,6 +370,10 @@ const gmailReadArgs = z.object({
 const driveSearchArgs = z.object({
   query: z.string().trim().min(1).max(500),
   maxResults: z.number().int().min(1).max(25).optional(),
+});
+
+const driveReadArgs = z.object({
+  fileId: z.string().trim().min(1).max(500),
 });
 
 export async function executeGoogleTool(
@@ -572,7 +600,7 @@ export async function executeGoogleTool(
 
     if (call.name === "google_drive_search_files") {
       const args = parseArgs(driveSearchArgs, call.arguments);
-      const escaped = args.query.replace(/'/g, "\\'");
+      const escaped = escapeDriveQueryLiteral(args.query);
       const params = new URLSearchParams({
         q: `fullText contains '${escaped}' or name contains '${escaped}'`,
         pageSize: String(args.maxResults ?? 10),
@@ -602,6 +630,31 @@ export async function executeGoogleTool(
         capability: "web-search",
         summary: `Googleドライブで${files.length}件のファイルを取得しました。`,
         text,
+      };
+    }
+
+    if (call.name === "google_drive_read_file") {
+      const args = parseArgs(driveReadArgs, call.arguments);
+      const fileId = parseDriveFileId(args.fileId);
+      if (!fileId) {
+        throw new Error("DriveファイルIDまたは共有URLが不正です");
+      }
+      // Lazy: google-drive pulls in the DB-backed extraction pipeline.
+      const { fetchDriveFileText } = await import("./google-drive");
+      const extraction = await fetchDriveFileText(userId, fileId, { signal });
+      const text = clipDriveTextForTool(extraction.extractedText);
+      return {
+        ok: true,
+        capability: "web-search",
+        summary: `Googleドライブの「${extraction.info.name}」を読み込みました（${extraction.textChars.toLocaleString()}文字）。`,
+        text: [
+          `ファイル: ${extraction.info.name}`,
+          `種類: ${extraction.info.mimeType}`,
+          `更新: ${extraction.info.modifiedTime ?? "?"}`,
+          "<untrusted_drive_file>",
+          text || "(テキストを抽出できませんでした)",
+          "</untrusted_drive_file>",
+        ].join("\n"),
       };
     }
 

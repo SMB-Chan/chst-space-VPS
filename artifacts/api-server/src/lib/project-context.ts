@@ -1,4 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
+import { loadProjectDriveContextEntries } from "./project-drive-store";
 import { clipHeadUtf8Safe } from "./text-truncation";
 import { db, projectFiles, projects } from "@workspace/db";
 import {
@@ -182,6 +183,13 @@ export async function loadProjectContext(
   const files: ProjectFileContextEntry[] = rows
     .filter((row) => row.includeInContext && row.text)
     .map((row) => ({ id: row.id, filename: row.filename, text: row.text }));
+  // Google Drive references come after uploaded files (cached text; stale
+  // entries refresh in the background, never blocking the chat turn).
+  try {
+    files.push(...(await loadProjectDriveContextEntries(userId, projectId)));
+  } catch {
+    // Drive references are optional context; never fail the chat on them.
+  }
 
   const instructions = project.instructions ?? "";
   if (!instructions.trim() && !memoryContext && files.length === 0) {
