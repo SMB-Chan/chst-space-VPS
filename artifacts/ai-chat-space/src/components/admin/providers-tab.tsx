@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, Plus, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,18 +26,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { adminApi, type AdminProvider } from "./admin-api";
-
-function renderKeyStatus(provider: AdminProvider): string {
-  if (provider.keyHint) return provider.keyHint;
-  if (provider.kind === "builtin" && provider.configured)
-    return "サーバー環境変数";
-  return "未設定";
-}
+import { providerKeyStatusLabel } from "./provider-key-status";
 
 interface ProvidersTabProps {
   /** Callback fired when model list references need invalidating. */
   onInvalidateModels: () => void;
 }
+
+type Confirm =
+  | { kind: "unlock"; provider: AdminProvider }
+  | { kind: "softDelete"; provider: AdminProvider }
+  | null;
 
 export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
   const [providers, setProviders] = useState<AdminProvider[] | null>(null);
@@ -45,6 +57,15 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
 
   const [deleteFor, setDeleteFor] = useState<AdminProvider | null>(null);
 
+  const [confirm, setConfirm] = useState<Confirm>(null);
+  const [builtinKeyFor, setBuiltinKeyFor] = useState<AdminProvider | null>(
+    null,
+  );
+  const [builtinKeyValue, setBuiltinKeyValue] = useState("");
+  const [builtinKeyError, setBuiltinKeyError] = useState<string | null>(null);
+
+  const [deletedOpen, setDeletedOpen] = useState(false);
+
   const load = useCallback(async () => {
     setError(null);
     const result = await adminApi.fetchProviders();
@@ -59,19 +80,21 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
     void load();
   }, [load]);
 
-  const customProviders = useMemo(
-    () =>
-      providers
-        ? providers.filter((provider) => provider.kind === "custom")
-        : [],
+  const visibleProviders = useMemo(
+    () => (providers ? providers.filter((p) => !p.deleted) : []),
     [providers],
   );
-  const builtinProviders = useMemo(
-    () =>
-      providers
-        ? providers.filter((provider) => provider.kind === "builtin")
-        : [],
+  const deletedProviders = useMemo(
+    () => (providers ? providers.filter((p) => p.deleted) : []),
     [providers],
+  );
+  const customProviders = useMemo(
+    () => visibleProviders.filter((provider) => provider.kind === "custom"),
+    [visibleProviders],
+  );
+  const builtinProviders = useMemo(
+    () => visibleProviders.filter((provider) => provider.kind === "builtin"),
+    [visibleProviders],
   );
 
   const handleToggle = async (provider: AdminProvider, enabled: boolean) => {
@@ -164,8 +187,91 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
     onInvalidateModels();
   };
 
+  const handleUnlock = async (provider: AdminProvider) => {
+    setBusy(true);
+    const result = await adminApi.deleteProviderKey(provider.id);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await load();
+    onInvalidateModels();
+  };
+
+  const handleSoftDelete = async (provider: AdminProvider) => {
+    setBusy(true);
+    const result = await adminApi.deleteProvider(provider.id);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await load();
+    onInvalidateModels();
+  };
+
+  const handleUseEnvKey = async (provider: AdminProvider) => {
+    setBusy(true);
+    const result = await adminApi.updateProvider(provider.id, {
+      useEnvKey: true,
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await load();
+    onInvalidateModels();
+  };
+
+  const openBuiltinKey = (provider: AdminProvider) => {
+    setBuiltinKeyFor(provider);
+    setBuiltinKeyValue("");
+    setBuiltinKeyError(null);
+  };
+
+  const submitBuiltinKey = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!builtinKeyFor) return;
+    if (!builtinKeyValue) {
+      setBuiltinKeyError("APIキーを入力してください。");
+      return;
+    }
+    setBusy(true);
+    const result = await adminApi.updateProvider(builtinKeyFor.id, {
+      apiKey: builtinKeyValue,
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setBuiltinKeyError(result.error);
+      return;
+    }
+    setBuiltinKeyFor(null);
+    setBuiltinKeyValue("");
+    setBuiltinKeyError(null);
+    await load();
+    onInvalidateModels();
+  };
+
+  const handleRestore = async (provider: AdminProvider) => {
+    setBusy(true);
+    const result = await adminApi.restoreProvider(provider.id);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await load();
+    onInvalidateModels();
+  };
+
   const renderProviderRow = (provider: AdminProvider) => {
     const disabled = busy;
+    const isBuiltin = provider.kind === "builtin";
+    const showUnlock = provider.keySource !== "none";
+    const showUseEnvKey =
+      isBuiltin && !provider.useEnvKey && provider.envKeyPresent;
     return (
       <div
         key={provider.id}
@@ -196,7 +302,9 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
           ) : null}
           <p className="text-xs text-muted-foreground">
             APIキー:{" "}
-            <span className="font-mono">{renderKeyStatus(provider)}</span>
+            <span className="font-mono">
+              {providerKeyStatusLabel(provider)}
+            </span>
             {" ・ "}
             モデル数: <span className="font-mono">{provider.modelCount}</span>
           </p>
@@ -213,8 +321,66 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
               aria-label={`${provider.label} を${provider.enabled ? "無効化" : "有効化"}`}
             />
           </div>
-          {provider.kind === "custom" ? (
+          {isBuiltin ? (
             <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => openBuiltinKey(provider)}
+                className="gap-1.5"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                APIキーを設定
+              </Button>
+              {showUnlock ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => setConfirm({ kind: "unlock", provider })}
+                >
+                  キーを解除
+                </Button>
+              ) : null}
+              {showUseEnvKey ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => void handleUseEnvKey(provider)}
+                >
+                  環境変数のキーを使う
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                disabled={disabled}
+                onClick={() => setConfirm({ kind: "softDelete", provider })}
+                className="gap-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                削除
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {showUnlock ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => setConfirm({ kind: "unlock", provider })}
+                >
+                  キーを解除
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
@@ -236,7 +402,7 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
                 削除
               </Button>
             </div>
-          ) : null}
+          )}
         </div>
       </div>
     );
@@ -436,6 +602,59 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
         </div>
       ) : null}
 
+      {deletedProviders.length > 0 ? (
+        <Collapsible
+          open={deletedOpen}
+          onOpenChange={setDeletedOpen}
+          className="rounded-[var(--m3-shape-sm)] border border-border/60 bg-card/30"
+        >
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <span>
+                削除済みの組み込みプロバイダー ({deletedProviders.length})
+              </span>
+              <span className="text-[10px]">{deletedOpen ? "▲" : "▼"}</span>
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2 px-3 pb-3">
+            {deletedProviders.map((provider) => (
+              <div
+                key={provider.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--m3-shape-sm)] border border-border/40 bg-background/40 p-2"
+              >
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">
+                      {provider.label}
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {provider.id}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    復元すると有効状態で再び表示されます。
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void handleRestore(provider)}
+                  className="gap-1.5"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  復元
+                </Button>
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+
       <AlertDialog
         open={deleteFor !== null}
         onOpenChange={(open) => {
@@ -448,7 +667,7 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
               {deleteFor?.label} を削除しますか？
             </AlertDialogTitle>
             <AlertDialogDescription>
-              このプロバイダーと配下のモデルを削除します。
+              このプロバイダーと配下のモデルを削除します。元に戻すことはできません。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -466,6 +685,132 @@ export function ProvidersTab({ onInvalidateModels }: ProvidersTabProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        open={confirm?.kind === "unlock"}
+        onOpenChange={(open) => {
+          if (!open) setConfirm(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirm?.kind === "unlock" ? confirm.provider.label : ""}{" "}
+              のキーを解除しますか？
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm?.kind === "unlock" && confirm.provider.kind === "builtin"
+                ? "管理画面のキーを削除し、サーバー環境変数のキーも使わなくなります。「環境変数のキーを使う」でいつでも戻せます。"
+                : "保存済みのAPIキーを削除します。再度使うにはAPIキーを設定してください。"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                const target =
+                  confirm?.kind === "unlock" ? confirm.provider : null;
+                setConfirm(null);
+                if (target) void handleUnlock(target);
+              }}
+              disabled={busy}
+              className="bg-[var(--m3-error)] text-[var(--m3-on-error)] hover:brightness-[0.96]"
+            >
+              キーを解除する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirm?.kind === "softDelete"}
+        onOpenChange={(open) => {
+          if (!open) setConfirm(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirm?.kind === "softDelete" ? confirm.provider.label : ""}{" "}
+              を削除しますか？
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              モデル一覧から非表示になり、全員が使えなくなります。下の「削除済みの組み込みプロバイダー」からいつでも復元できます。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                const target =
+                  confirm?.kind === "softDelete" ? confirm.provider : null;
+                setConfirm(null);
+                if (target) void handleSoftDelete(target);
+              }}
+              disabled={busy}
+              className="bg-[var(--m3-error)] text-[var(--m3-on-error)] hover:brightness-[0.96]"
+            >
+              削除する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={builtinKeyFor !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBuiltinKeyFor(null);
+            setBuiltinKeyValue("");
+            setBuiltinKeyError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{builtinKeyFor?.label} のAPIキーを設定</DialogTitle>
+            <DialogDescription>
+              サーバー環境変数のキーより優先して使用されます。空欄にはできません。
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitBuiltinKey} className="space-y-3">
+            <label className="block space-y-1 text-xs">
+              <span className="font-medium text-muted-foreground">
+                新しいAPIキー
+              </span>
+              <input
+                type="password"
+                autoComplete="off"
+                value={builtinKeyValue}
+                onChange={(event) => setBuiltinKeyValue(event.target.value)}
+                className="h-9 w-full rounded-[var(--m3-shape-sm)] border border-border/60 bg-background px-2 font-mono text-sm text-foreground"
+              />
+            </label>
+            {builtinKeyError ? (
+              <p className="text-xs text-destructive">{builtinKeyError}</p>
+            ) : null}
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setBuiltinKeyFor(null);
+                  setBuiltinKeyValue("");
+                  setBuiltinKeyError(null);
+                }}
+              >
+                キャンセル
+              </Button>
+              <Button type="submit" disabled={busy}>
+                保存
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

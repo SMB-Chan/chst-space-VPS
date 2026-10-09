@@ -25,6 +25,10 @@ export const llmProviders = pgTable("llm_providers", {
   /** Last 4 chars of the plaintext key, for the admin UI. */
   keyHint: text("key_hint"),
   enabled: boolean("enabled").notNull().default(true),
+  /** Built-in providers only: when false, the server env key is ignored (the "disconnect"). */
+  useEnvKey: boolean("use_env_key").notNull().default(true),
+  /** Built-in providers only: soft delete; survives re-seeding. */
+  deleted: boolean("deleted").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

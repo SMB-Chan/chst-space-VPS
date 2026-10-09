@@ -83,6 +83,14 @@ export interface AdminProvider {
   hasKey: boolean;
   keyHint: string | null;
   configured: boolean;
+  /** Built-in only: whether the env key is currently used. */
+  useEnvKey: boolean;
+  /** Built-in only: whether the env key is present. */
+  envKeyPresent: boolean;
+  /** Where the live key comes from for this provider. */
+  keySource: "db" | "env" | "none";
+  /** Soft delete (built-in only). */
+  deleted: boolean;
   modelCount: number;
 }
 
@@ -175,6 +183,7 @@ export const adminApi = {
       baseUrl?: string;
       apiKey?: string;
       enabled?: boolean;
+      useEnvKey?: boolean;
     },
   ) =>
     adminRequest<null>(
@@ -185,6 +194,16 @@ export const adminApi = {
     adminRequest<null>(
       `/api/admin/providers/${encodeURIComponent(id)}`,
       jsonInit("DELETE"),
+    ),
+  deleteProviderKey: (id: string) =>
+    adminRequest<null>(
+      `/api/admin/providers/${encodeURIComponent(id)}/key`,
+      jsonInit("DELETE"),
+    ),
+  restoreProvider: (id: string) =>
+    adminRequest<null>(
+      `/api/admin/providers/${encodeURIComponent(id)}/restore`,
+      jsonInit("POST"),
     ),
 
   fetchModels: () => adminRequest<AdminModel[]>(`/api/admin/models`),

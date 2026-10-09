@@ -1,3 +1,4 @@
+import { splitThinkTags } from "./stream-delta";
 import {
   Agent,
   fetch as undiciFetch,
@@ -1000,7 +1001,9 @@ export async function decideSearch(
       signal: controller.signal,
     })) as OpenAI.Chat.Completions.ChatCompletion;
 
-    const text = resp.choices[0]?.message?.content ?? "";
+    const text = splitThinkTags(
+      resp.choices[0]?.message?.content ?? "",
+    ).content;
     const parsed = extractJsonObject(text);
     if (parsed) {
       // The model's structured output is untrusted. The primary query and
@@ -1118,7 +1121,9 @@ export async function decideFollowUpSearch(
       signal: controller.signal,
     })) as OpenAI.Chat.Completions.ChatCompletion;
 
-    const text = resp.choices[0]?.message?.content ?? "";
+    const text = splitThinkTags(
+      resp.choices[0]?.message?.content ?? "",
+    ).content;
     const parsed = extractJsonObject(text);
     if (parsed) {
       // The model's query is untrusted output: single-line, length-capped,

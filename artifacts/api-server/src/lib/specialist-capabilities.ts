@@ -9,6 +9,9 @@ import {
 } from "./model-catalog";
 import {
   findCatalogModel,
+  getBuiltinProviderDbKey,
+  isBuiltinEnvKeyAllowed,
+  isBuiltinProviderActive,
   isCatalogModelUsable,
   isCatalogProviderEnabled,
 } from "./model-registry";
@@ -329,17 +332,31 @@ function capabilityStatus(
     : "catalog-only";
 }
 
+/**
+ * A built-in provider is configured when it is active (enabled, not hidden)
+ * and has a usable key: an admin-stored DB key, or the server env key while
+ * the admin has not disconnected it (use_env_key).
+ */
+function builtinConfigured(
+  providerId: string,
+  envKeyPresent: boolean,
+): boolean {
+  if (!isBuiltinProviderActive(providerId)) return false;
+  if (getBuiltinProviderDbKey(providerId)) return true;
+  return envKeyPresent && isBuiltinEnvKeyAllowed(providerId);
+}
+
 function providerConfigured(provider: ModelProvider): boolean {
   if (isProviderFrozen(provider)) return false;
   switch (provider) {
     case "openai":
-      return Boolean(openaiClient);
+      return builtinConfigured("openai", Boolean(openaiClient));
     case "dashscope":
-      return Boolean(dashscopeClient);
+      return builtinConfigured("dashscope", Boolean(dashscopeClient));
     case "openrouter":
-      return openRouterConfigured();
+      return builtinConfigured("openrouter", openRouterConfigured());
     case "xiaomi":
-      return Boolean(xiaomiClient);
+      return builtinConfigured("xiaomi", Boolean(xiaomiClient));
     case "custom":
       // Custom providers are listed via getCustomChatModels(), which only
       // returns models whose provider has a ready client.

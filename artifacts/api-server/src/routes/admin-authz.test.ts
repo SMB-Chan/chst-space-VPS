@@ -22,6 +22,8 @@ const ADMIN_ROUTES: Array<{ method: string; path: string }> = [
   { method: "POST", path: "/admin/providers" },
   { method: "PATCH", path: "/admin/providers/:id" },
   { method: "DELETE", path: "/admin/providers/:id" },
+  { method: "DELETE", path: "/admin/providers/:id/key" },
+  { method: "POST", path: "/admin/providers/:id/restore" },
   { method: "GET", path: "/admin/models" },
   { method: "POST", path: "/admin/models" },
   { method: "PATCH", path: "/admin/models/:id" },

@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { splitThinkTags } from "./stream-delta";
 import {
   getClientForModel,
   resolveConfiguredVisionModel,
@@ -111,7 +112,9 @@ export async function reviewLayout(args: {
     { signal },
   );
 
-  const text = response.choices[0]?.message?.content?.trim() ?? "";
+  const text = splitThinkTags(
+    response.choices[0]?.message?.content ?? "",
+  ).content.trim();
   if (!text) {
     logger.warn(
       { stage: "layout-review-model", modelId, format },

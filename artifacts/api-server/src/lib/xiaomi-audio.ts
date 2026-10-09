@@ -11,6 +11,7 @@ import {
 } from "./audio-format";
 import type { GeneratedAsset } from "./generated-assets";
 import { logger } from "./logger";
+import { isBuiltinEnvUsable } from "./model-registry";
 import { isProviderFrozen } from "./provider-policy";
 
 /**
@@ -85,7 +86,11 @@ export class XiaomiAudioError extends Error {
 export function isXiaomiAudioConfigured(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return Boolean(xiaomiClient) && !isProviderFrozen("xiaomi", env);
+  return (
+    Boolean(xiaomiClient) &&
+    !isProviderFrozen("xiaomi", env) &&
+    isBuiltinEnvUsable("xiaomi")
+  );
 }
 
 export interface XiaomiTtsRequest {

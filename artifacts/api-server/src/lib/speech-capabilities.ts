@@ -1,4 +1,5 @@
 import { dashscopeClient } from "./ai-clients";
+import { isBuiltinEnvUsable } from "./model-registry";
 import {
   isAlibabaSpecialistConfigured,
   isAlibabaTokenPlanKey,
@@ -167,6 +168,7 @@ export function isRegularDashScopeTranscriptionConfigured(
   return Boolean(
     !isProviderFrozen("dashscope", env) &&
     dashscopeClient &&
+    isBuiltinEnvUsable("dashscope") &&
     key &&
     !isAlibabaTokenPlanKey(key),
   );

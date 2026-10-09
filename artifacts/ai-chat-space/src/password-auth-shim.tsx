@@ -293,6 +293,12 @@ export function Show({
 
 type SignInButtonProps = {
   loading?: boolean;
+  /**
+   * Inside the sign-in <form> this MUST be "submit": a type="button" with no
+   * onClick does nothing on tap and also disables Enter-to-submit (a form
+   * with several fields only submits implicitly when it has a submit button).
+   */
+  type?: "button" | "submit";
   onClick?: () => void;
   children: ReactNode;
   className?: string;
@@ -300,13 +306,14 @@ type SignInButtonProps = {
 
 function SignInButton({
   loading,
+  type = "button",
   onClick,
   children,
   className,
 }: SignInButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       onClick={onClick}
       disabled={loading}
       className={
@@ -401,7 +408,7 @@ export function SignIn(_props: SignInProps) {
             {error}
           </p>
         ) : null}
-        <SignInButton loading={busy}>
+        <SignInButton type="submit" loading={busy}>
           {busy ? "ログイン中..." : "ログイン"}
         </SignInButton>
       </form>

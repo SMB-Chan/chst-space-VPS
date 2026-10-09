@@ -10,6 +10,7 @@ import {
   userSettings,
 } from "@workspace/db";
 import {
+  getCatalogDeletedProviders,
   getCatalogModels,
   getCatalogProviders,
   isBuiltinProviderId,
@@ -106,25 +107,65 @@ function sendServerError(
 
 // ---------- Providers ----------
 
+interface ProviderResponse {
+  id: string;
+  label: string;
+  kind: "builtin" | "custom";
+  baseUrl: string | null;
+  enabled: boolean;
+  hasKey: boolean;
+  keyHint: string | null;
+  configured: boolean;
+  useEnvKey: boolean;
+  envKeyPresent: boolean;
+  keySource: "db" | "env" | "none";
+  deleted: boolean;
+  modelCount: number;
+}
+
+function serializeProvider(
+  provider: ReturnType<typeof getCatalogProviders>[number],
+  modelCount: number,
+): ProviderResponse {
+  const envPresent = isBuiltinProviderId(provider.id)
+    ? envKeyPresent(provider.id)
+    : false;
+  // The key itself never leaves the server; only where it comes from.
+  const keySource: ProviderResponse["keySource"] = provider.hasKey
+    ? "db"
+    : envPresent && provider.useEnvKey
+      ? "env"
+      : "none";
+  const configured = keySource !== "none";
+  return {
+    id: provider.id,
+    label: provider.label,
+    kind: provider.kind,
+    baseUrl: provider.baseUrl,
+    enabled: provider.enabled,
+    hasKey: provider.hasKey,
+    keyHint: provider.keyHint,
+    configured,
+    useEnvKey: provider.useEnvKey,
+    envKeyPresent: envPresent,
+    keySource,
+    deleted: provider.deleted,
+    modelCount,
+  };
+}
+
 router.get("/admin/providers", (_req, res) => {
   const counts = new Map<string, number>();
   for (const model of getCatalogModels()) {
     counts.set(model.providerId, (counts.get(model.providerId) ?? 0) + 1);
   }
+  // The hidden section is included so the admin UI can list deleted
+  // built-ins; the UI filters them into the restore section itself.
+  const providers = [...getCatalogProviders(), ...getCatalogDeletedProviders()];
   res.json(
-    getCatalogProviders().map((provider) => ({
-      id: provider.id,
-      label: provider.label,
-      kind: provider.kind,
-      baseUrl: provider.baseUrl,
-      enabled: provider.enabled,
-      hasKey: provider.hasKey,
-      keyHint: provider.keyHint,
-      configured: isBuiltinProviderId(provider.id)
-        ? envKeyPresent(provider.id)
-        : provider.hasKey,
-      modelCount: counts.get(provider.id) ?? 0,
-    })),
+    providers.map((provider) =>
+      serializeProvider(provider, counts.get(provider.id) ?? 0),
+    ),
   );
 });
 
@@ -182,6 +223,7 @@ const patchProviderBody = z
     baseUrl: baseUrlSchema.optional(),
     apiKey: apiKeySchema.optional(),
     enabled: z.boolean().optional(),
+    useEnvKey: z.boolean().optional(),
   })
   .strict();
 
@@ -194,14 +236,29 @@ router.patch("/admin/providers/:id", async (req, res) => {
       .json({ error: parsed.success ? BAD_REQUEST : firstIssue(parsed.error) });
     return;
   }
-  const { label, baseUrl, apiKey, enabled } = parsed.data;
+  const { label, baseUrl, apiKey, enabled, useEnvKey } = parsed.data;
   if (
     isBuiltinProviderId(id) &&
-    (label !== undefined || baseUrl !== undefined || apiKey !== undefined)
+    (label !== undefined || baseUrl !== undefined)
   ) {
     res.status(400).json({
       error:
-        "組み込みプロバイダーは有効/無効のみ変更できます（APIキーは環境変数で設定します）。",
+        "組み込みプロバイダーは表示名・ベースURLを変更できません（APIキー・有効/無効・環境変数キーの利用は変更できます）。",
+    });
+    return;
+  }
+  if (
+    isBuiltinProviderId(id) &&
+    getCatalogDeletedProviders().some((provider) => provider.id === id)
+  ) {
+    res.status(409).json({
+      error: "削除済みのプロバイダーです。先に「復元」してください。",
+    });
+    return;
+  }
+  if (!isBuiltinProviderId(id) && useEnvKey !== undefined) {
+    res.status(400).json({
+      error: "環境変数キーの利用設定は組み込みプロバイダー専用です。",
     });
     return;
   }
@@ -212,6 +269,7 @@ router.patch("/admin/providers/:id", async (req, res) => {
         ...(label !== undefined ? { label } : {}),
         ...(baseUrl !== undefined ? { baseUrl } : {}),
         ...(enabled !== undefined ? { enabled } : {}),
+        ...(useEnvKey !== undefined ? { useEnvKey } : {}),
         ...(apiKey !== undefined
           ? { apiKeyEncrypted: encryptSecret(apiKey), keyHint: keyHint(apiKey) }
           : {}),
@@ -232,21 +290,29 @@ router.patch("/admin/providers/:id", async (req, res) => {
 
 router.delete("/admin/providers/:id", async (req, res) => {
   const id = routeParam(req, "id");
-  if (isBuiltinProviderId(id)) {
-    res.status(400).json({
-      error: "組み込みプロバイダーは削除できません。無効化してください。",
-    });
-    return;
-  }
   try {
-    // llm_models rows cascade with the provider.
-    const deleted = await db
-      .delete(llmProviders)
-      .where(eq(llmProviders.id, id))
-      .returning({ id: llmProviders.id });
-    if (deleted.length === 0) {
-      res.status(404).json({ error: "プロバイダーが見つかりません。" });
-      return;
+    if (isBuiltinProviderId(id)) {
+      // Built-ins hide instead of hard-delete so the seed's
+      // onConflictDoNothing keeps the tombstone and the operator can restore.
+      const updated = await db
+        .update(llmProviders)
+        .set({ deleted: true, enabled: false, updatedAt: new Date() })
+        .where(eq(llmProviders.id, id))
+        .returning({ id: llmProviders.id });
+      if (updated.length === 0) {
+        res.status(404).json({ error: "プロバイダーが見つかりません。" });
+        return;
+      }
+    } else {
+      // llm_models rows cascade with the provider.
+      const deleted = await db
+        .delete(llmProviders)
+        .where(eq(llmProviders.id, id))
+        .returning({ id: llmProviders.id });
+      if (deleted.length === 0) {
+        res.status(404).json({ error: "プロバイダーが見つかりません。" });
+        return;
+      }
     }
     await refreshModelCatalog();
     res.status(204).send();
@@ -255,24 +321,93 @@ router.delete("/admin/providers/:id", async (req, res) => {
   }
 });
 
+router.delete("/admin/providers/:id/key", async (req, res) => {
+  const id = routeParam(req, "id");
+  if (!id) {
+    res.status(400).json({ error: BAD_REQUEST });
+    return;
+  }
+  try {
+    // Built-ins get the "disconnect" semantics: drop the DB key AND stop
+    // using the env key so neither path can serve traffic until the admin
+    // opts back in with PATCH {useEnvKey: true} or sets a fresh apiKey.
+    const next: Partial<typeof llmProviders.$inferInsert> = {
+      apiKeyEncrypted: null,
+      keyHint: null,
+      updatedAt: new Date(),
+    };
+    if (isBuiltinProviderId(id)) {
+      next.useEnvKey = false;
+    }
+    const updated = await db
+      .update(llmProviders)
+      .set(next)
+      .where(eq(llmProviders.id, id))
+      .returning({ id: llmProviders.id });
+    if (updated.length === 0) {
+      res.status(404).json({ error: "プロバイダーが見つかりません。" });
+      return;
+    }
+    await refreshModelCatalog();
+    res.status(204).send();
+  } catch (err) {
+    sendServerError(req, res, err, "APIキーを解除できませんでした。");
+  }
+});
+
+router.post("/admin/providers/:id/restore", async (req, res) => {
+  const id = routeParam(req, "id");
+  if (!id) {
+    res.status(400).json({ error: BAD_REQUEST });
+    return;
+  }
+  if (!isBuiltinProviderId(id)) {
+    res.status(400).json({
+      error: "復元の対象は組み込みプロバイダーだけです。",
+    });
+    return;
+  }
+  try {
+    const updated = await db
+      .update(llmProviders)
+      .set({ deleted: false, enabled: true, updatedAt: new Date() })
+      .where(eq(llmProviders.id, id))
+      .returning({ id: llmProviders.id });
+    if (updated.length === 0) {
+      res.status(404).json({ error: "プロバイダーが見つかりません。" });
+      return;
+    }
+    await refreshModelCatalog();
+    res.status(204).send();
+  } catch (err) {
+    sendServerError(req, res, err, "プロバイダーを復元できませんでした。");
+  }
+});
+
 // ---------- Models ----------
 
 router.get("/admin/models", (_req, res) => {
+  // Models of soft-deleted built-in providers are hidden with them.
+  const hiddenProviderIds = new Set(
+    getCatalogDeletedProviders().map((provider) => provider.id),
+  );
   const labels = new Map(getCatalogProviders().map((p) => [p.id, p.label]));
   res.json(
-    getCatalogModels().map((model) => ({
-      id: model.id,
-      providerId: model.providerId,
-      providerLabel: labels.get(model.providerId) ?? model.providerId,
-      label: model.label,
-      description: model.description,
-      supportsVision: model.supportsVision,
-      supportsReasoning: model.supportsReasoning,
-      enabled: model.enabled,
-      userVisible: model.userVisible,
-      builtin: model.builtin,
-      sortOrder: model.sortOrder,
-    })),
+    getCatalogModels()
+      .filter((model) => !hiddenProviderIds.has(model.providerId))
+      .map((model) => ({
+        id: model.id,
+        providerId: model.providerId,
+        providerLabel: labels.get(model.providerId) ?? model.providerId,
+        label: model.label,
+        description: model.description,
+        supportsVision: model.supportsVision,
+        supportsReasoning: model.supportsReasoning,
+        enabled: model.enabled,
+        userVisible: model.userVisible,
+        builtin: model.builtin,
+        sortOrder: model.sortOrder,
+      })),
   );
 });
 

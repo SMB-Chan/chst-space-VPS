@@ -13,6 +13,7 @@ import {
 import {
   extractTextToolCalls,
   mergeStreamDelta,
+  splitLeadingThink,
   splitThinkTags,
   readReasoningDelta,
   readContentDelta,
@@ -1941,6 +1942,9 @@ export async function streamModelText(
 
   let full = "";
   let emittedContent = "";
+  // Raw streamed content including any leading inline <think> block.
+  let rawContent = "";
+  let inlineReasoningLength = 0;
   let reasoning = "";
   let usagePromptTokens = 0;
   let usageCompletionTokens = 0;
@@ -2076,8 +2080,20 @@ export async function streamModelText(
         }
         const contentDelta = readContentDelta(delta);
         if (contentDelta) {
-          const merged = mergeStreamDelta(full, contentDelta);
-          full = merged;
+          rawContent = mergeStreamDelta(rawContent, contentDelta);
+          // Leading inline <think> blocks are reasoning, not answer text.
+          const split = splitLeadingThink(rawContent);
+          if (split.reasoning.length > inlineReasoningLength) {
+            const addedReasoning = split.reasoning.slice(inlineReasoningLength);
+            inlineReasoningLength = split.reasoning.length;
+            // Providers that also send a native reasoning field already
+            // reported this phase above.
+            if (!reasoningDelta) {
+              reasoning += addedReasoning;
+              args.onDelta(addedReasoning, "reasoning");
+            }
+          }
+          full = split.visible;
           const safeVisibleContent = visibleTextBeforeToolMarkup(full);
           if (safeVisibleContent.startsWith(emittedContent)) {
             const added = safeVisibleContent.slice(emittedContent.length);
@@ -2156,6 +2172,8 @@ export async function streamModelText(
         allowedToolNames.clear();
         full = "";
         emittedContent = "";
+        rawContent = "";
+        inlineReasoningLength = 0;
         usagePromptTokens = 0;
         usageCompletionTokens = 0;
         sawProviderUsage = false;
@@ -2211,6 +2229,8 @@ export async function streamModelText(
       toolCalls.clear();
       full = "";
       emittedContent = "";
+      rawContent = "";
+      inlineReasoningLength = 0;
       usagePromptTokens = 0;
       usageCompletionTokens = 0;
       sawProviderUsage = false;

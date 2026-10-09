@@ -34,6 +34,7 @@ import {
   PROJECT_FILE_JSON_PATHS,
 } from "./lib/json-limits";
 import { publicHttpError } from "./lib/public-error";
+import { SHELL_CACHE_CONTROL, setStaticCacheHeaders } from "./lib/static-cache";
 import { apiSecurityHeaders } from "./middlewares/apiSecurityHeaders";
 import { chatRunTrackingMiddleware } from "./middlewares/chatRunTrackingMiddleware";
 import { requireAuth, resolveAuthMode } from "./middlewares/requireAuth";
@@ -188,13 +189,15 @@ app.use("/api", (_req, res) => {
 // SERVE_STATIC_DIR points at the Vite build output (dist/public).
 const staticDir = process.env.SERVE_STATIC_DIR;
 if (staticDir) {
-  app.use(express.static(staticDir));
+  app.use(express.static(staticDir, { setHeaders: setStaticCacheHeaders }));
   app.use((req, res, next) => {
     if (req.method !== "GET" || req.path.startsWith("/api")) {
       next();
       return;
     }
-    res.sendFile(path.join(staticDir, "index.html"));
+    res.sendFile(path.join(staticDir, "index.html"), {
+      headers: { "Cache-Control": SHELL_CACHE_CONTROL },
+    });
   });
 }
 
