@@ -641,7 +641,8 @@ components:
       enum: [openai, dashscope, openrouter, xiaomi]
     ProviderCredential:
       type: object
-      required: [provider, label, configured, source, keyHint, baseUrl, updatedAt]
+      required:
+        [provider, label, configured, source, keyHint, baseUrl, updatedAt]
       properties:
         provider:
           $ref: "#/components/schemas/ProviderId"
@@ -858,6 +859,9 @@ components:
           type: integer
         title:
           type: string
+        projectId:
+          type: [integer, "null"]
+          description: Project this conversation belongs to (owned by the same user)
         createdAt:
           type: string
           format: date-time
@@ -1098,6 +1102,10 @@ components:
           type: string
           minLength: 1
           maxLength: 80
+        projectId:
+          type: [integer, "null"]
+          minimum: 1
+          description: Optional project to file the new conversation under (must be the caller's)
       required:
         - title
     OpenaiAttachment:
@@ -1188,6 +1196,8 @@ components:
           type: integer
         title:
           type: string
+        projectId:
+          type: [integer, "null"]
         createdAt:
           type: string
           format: date-time

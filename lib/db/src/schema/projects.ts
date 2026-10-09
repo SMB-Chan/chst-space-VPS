@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   pgTable,
@@ -21,6 +22,11 @@ export const projects = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     description: text("description"),
+    /**
+     * User-authored system prompt injected at the start of every
+     * conversation bound to this project. Empty string = no instructions.
+     */
+    instructions: text("instructions").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -63,3 +69,42 @@ export const projectMemory = pgTable("project_memory", {
 });
 
 export type ProjectMemoryRow = typeof projectMemory.$inferSelect;
+
+/**
+ * Reference files attached to a project. Their extracted text (PDF / DOCX /
+ * XLSX / PPTX / plain UTF-8) is injected into the context of every
+ * conversation bound to that project. Raw bytes are kept base64-encoded in
+ * PostgreSQL text so we can stay on the existing text-storage pattern.
+ */
+export const projectFiles = pgTable(
+  "project_files",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** Base64-encoded file bytes; mirrors the assets table convention. */
+    data: text("data").notNull(),
+    /** Server-extracted text (capped) — empty when extraction was unsupported. */
+    extractedText: text("extracted_text").notNull().default(""),
+    /** Number of UTF-8 characters actually persisted in extractedText. */
+    textChars: integer("text_chars").notNull().default(0),
+    includeInContext: boolean("include_in_context").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("project_files_project_idx").on(table.projectId),
+    index("project_files_user_idx").on(table.userId),
+  ],
+);
+
+export type ProjectFile = typeof projectFiles.$inferSelect;

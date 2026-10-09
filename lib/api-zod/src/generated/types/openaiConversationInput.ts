@@ -12,4 +12,10 @@ export interface OpenaiConversationInput {
      * @maxLength 80
      */
   title: string;
+  /**
+     * Optional project to file the new conversation under (must be the caller's)
+     * @minimum 1
+     * @nullable
+     */
+  projectId?: number | null;
 }

@@ -8,6 +8,10 @@ import {
   type ProjectMemorySection,
 } from "@workspace/db";
 import type { ProjectMemoryRow } from "@workspace/db";
+import {
+  PROJECT_INSTRUCTIONS_MAX_CHARS,
+  getProjectLimits,
+} from "./project-limits";
 
 export { PROJECT_MEMORY_SECTIONS };
 export type { ProjectMemorySection };
@@ -17,6 +21,7 @@ export interface ProjectSummary {
   name: string;
   slug: string;
   description: string | null;
+  instructions: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -85,6 +90,7 @@ export async function listProjects(userId: string): Promise<ProjectSummary[]> {
     name: row.name,
     slug: row.slug,
     description: row.description,
+    instructions: row.instructions ?? "",
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }));
@@ -110,6 +116,7 @@ export async function getProject(
     name: row.name,
     slug: row.slug,
     description: row.description,
+    instructions: row.instructions ?? "",
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     memory: toMemorySections(mem),
@@ -119,11 +126,22 @@ export async function getProject(
 
 export async function createProject(
   userId: string,
-  input: { name: string; slug?: string; description?: string | null },
+  input: {
+    name: string;
+    slug?: string;
+    description?: string | null;
+    instructions?: string | null;
+  },
 ): Promise<ProjectWithMemory> {
   const name = input.name.trim();
   if (!name) throw new Error("プロジェクト名を入力してください。");
   const slug = (input.slug?.trim() || slugifyProjectName(name)).toLowerCase();
+  const instructions = (input.instructions ?? "").trim();
+  if (instructions.length > PROJECT_INSTRUCTIONS_MAX_CHARS) {
+    throw new Error(
+      `プロジェクト指示は${PROJECT_INSTRUCTIONS_MAX_CHARS}文字以下にしてください。`,
+    );
+  }
   const [row] = await db
     .insert(projects)
     .values({
@@ -131,6 +149,7 @@ export async function createProject(
       name,
       slug,
       description: input.description?.trim() || null,
+      instructions,
       updatedAt: new Date(),
     })
     .returning();
@@ -144,19 +163,31 @@ export async function createProject(
 export async function updateProject(
   userId: string,
   projectId: number,
-  input: { name?: string; description?: string | null },
+  input: {
+    name?: string;
+    description?: string | null;
+    instructions?: string | null;
+  },
 ): Promise<ProjectWithMemory | null> {
   const existing = await getProject(userId, projectId);
   if (!existing) return null;
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.name != null) patch.name = input.name.trim();
+  if (input.description !== undefined) {
+    patch.description = input.description?.trim() || null;
+  }
+  if (input.instructions !== undefined) {
+    const trimmed = (input.instructions ?? "").trim();
+    if (trimmed.length > PROJECT_INSTRUCTIONS_MAX_CHARS) {
+      throw new Error(
+        `プロジェクト指示は${PROJECT_INSTRUCTIONS_MAX_CHARS}文字以下にしてください。`,
+      );
+    }
+    patch.instructions = trimmed;
+  }
   await db
     .update(projects)
-    .set({
-      ...(input.name != null ? { name: input.name.trim() } : {}),
-      ...(input.description !== undefined
-        ? { description: input.description?.trim() || null }
-        : {}),
-      updatedAt: new Date(),
-    })
+    .set(patch)
     .where(and(eq(projects.userId, userId), eq(projects.id, projectId)));
   return getProject(userId, projectId);
 }
@@ -239,3 +270,6 @@ export async function loadProjectMemoryContext(
   if (!project) return null;
   return formatProjectMemoryContext(project.name, project.memory);
 }
+
+/** Re-export limits so existing tests that import from this module keep working. */
+export { getProjectLimits };

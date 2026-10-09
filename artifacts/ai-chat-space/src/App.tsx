@@ -25,6 +25,8 @@ import { ChatPage } from "@/pages/chat";
 import { HomePage } from "@/pages/home";
 import { SettingsPage } from "@/pages/settings";
 import { FilesPage } from "@/pages/files";
+import { ProjectsPage } from "@/pages/projects";
+import { ProjectDetailPage } from "@/pages/project-detail";
 import { loadSettings, saveSettings } from "@/lib/settings";
 import { shouldResetTranslationOnNavigation } from "@/lib/translation-route-policy";
 import {
@@ -295,6 +297,16 @@ function Router() {
       <Route path="/files">
         <ProtectedChat>
           <FilesPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/projects">
+        <ProtectedChat>
+          <ProjectsPage />
+        </ProtectedChat>
+      </Route>
+      <Route path="/projects/:id">
+        <ProtectedChat>
+          <ProjectDetailPage />
         </ProtectedChat>
       </Route>
       <Route path="/conversations/:id">

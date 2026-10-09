@@ -1,5 +1,8 @@
 import { FileBrowser } from "@/components/files/file-browser";
-import { ProjectPanel } from "@/components/projects/project-panel";
+import {
+  ProjectPanel,
+  type ProjectSummary,
+} from "@/components/projects/project-panel";
 import { useEffect, useState } from "react";
 
 export function FilesPage() {
@@ -14,7 +17,11 @@ export function FilesPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
       <div className="mx-auto w-full max-w-5xl">
-        <ProjectPanel onOpenFiles={(folder) => setPath(folder)} />
+        <ProjectPanel
+          onOpenProject={(project: ProjectSummary) =>
+            setPath(project.slug || project.name)
+          }
+        />
       </div>
       <div className="mx-auto min-h-0 w-full max-w-5xl flex-1">
         <FileBrowser initialPath={path} className="h-full" />
