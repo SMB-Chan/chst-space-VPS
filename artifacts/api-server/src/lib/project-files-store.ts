@@ -99,16 +99,41 @@ function looksLikeImage(buffer: Buffer): boolean {
   );
 }
 
+/**
+ * Decode a text upload. UTF-8 (with or without BOM) first, then UTF-16 when a
+ * BOM says so, then Shift_JIS/CP932 — the default encoding of CSVs saved by
+ * Japanese Excel. Fatal decoding throughout so binary data is never accepted
+ * as mojibake.
+ */
+export function decodeProjectText(buffer: Buffer): string | null {
+  const tryDecode = (label: string, bytes: Uint8Array): string | null => {
+    try {
+      return new TextDecoder(label, { fatal: true, ignoreBOM: false }).decode(
+        bytes,
+      );
+    } catch {
+      return null;
+    }
+  };
+  if (buffer.length >= 2) {
+    const b0 = buffer[0];
+    const b1 = buffer[1];
+    if (b0 === 0xff && b1 === 0xfe) return tryDecode("utf-16le", buffer);
+    if (b0 === 0xfe && b1 === 0xff) return tryDecode("utf-16be", buffer);
+  }
+  const utf8 = tryDecode("utf-8", buffer);
+  if (utf8 !== null) return utf8;
+  return tryDecode("shift_jis", buffer);
+}
+
 function asTextFile(filename: string, buffer: Buffer, limits: ProjectLimits) {
-  // Fatal UTF-8 decoding rejects mojibake early; NULs mark binary content
+  // Fatal decoding rejects mojibake early; NULs mark binary content
   // (CSV/text imports must not smuggle past detection via a fake extension).
-  let decoded: string;
-  try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-  } catch {
+  const decoded = decodeProjectText(buffer);
+  if (decoded === null) {
     throw new ProjectFileError(
       "unsupported_type",
-      "テキストとして解釈できないファイルです。UTF-8 として読み込めるファイルのみアップロードできます。",
+      "テキストとして解釈できないファイルです。UTF-8 / Shift_JIS / UTF-16 のテキスト、または PDF / Office 文書をアップロードしてください。",
     );
   }
   if (decoded.includes("\u0000")) {
@@ -262,7 +287,16 @@ export async function addProjectFile(
     );
   }
 
-  const family = detectBinaryFamily(buffer);
+  // A UTF-16 BOM (FF FE) also matches the MPEG frame-sync heuristic, so a
+  // BOM-prefixed buffer that decodes cleanly as UTF-16 is treated as text.
+  const hasUtf16Bom =
+    buffer.length >= 2 &&
+    ((buffer[0] === 0xff && buffer[1] === 0xfe) ||
+      (buffer[0] === 0xfe && buffer[1] === 0xff));
+  const family =
+    hasUtf16Bom && decodeProjectText(buffer) !== null
+      ? null
+      : detectBinaryFamily(buffer);
   let extracted: {
     extractedText: string;
     textChars: number;
@@ -284,7 +318,7 @@ export async function addProjectFile(
   if (looksLikeImage(buffer)) {
     throw new ProjectFileError(
       "unsupported_type",
-      "画像ファイルはまだ未対応です。PDF / Office文書 / UTF-8テキストをアップロードしてください。",
+      "画像ファイルはプロジェクトの参考ファイルには未対応です。画像はチャットの添付 (＋) から送ってください。",
     );
   }
   try {

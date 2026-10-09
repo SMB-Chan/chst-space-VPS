@@ -240,9 +240,9 @@ describePostgres(
     it("exposes limits + usage", async () => {
       const limits = await call("GET", "/projects/limits", userId);
       expect(limits.status).toBe(200);
-      expect(limits.body.limits.fileMaxBytes).toBe(5 * 1024 * 1024);
-      expect(limits.body.limits.maxFilesPerProject).toBe(20);
-      expect(limits.body.limits.userTotalMaxBytes).toBe(100 * 1024 * 1024);
+      expect(limits.body.limits.fileMaxBytes).toBe(20 * 1024 * 1024);
+      expect(limits.body.limits.maxFilesPerProject).toBe(50);
+      expect(limits.body.limits.userTotalMaxBytes).toBe(500 * 1024 * 1024);
       expect(limits.body.limits.instructionsMaxChars).toBe(4000);
       expect(limits.body.usage).toEqual(
         expect.objectContaining({

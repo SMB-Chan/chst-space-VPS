@@ -401,7 +401,7 @@ router.post(
       return;
     }
     // Length bound BEFORE decoding so a hostile client can't trick us into
-    // allocating >5 MiB then rejecting it.
+    // allocating more than the per-file limit then rejecting it.
     const limits = getProjectLimits();
     const maxEncoded = Math.ceil((limits.fileMaxBytes * 4) / 3) + 4;
     if (dataBase64.length > maxEncoded) {

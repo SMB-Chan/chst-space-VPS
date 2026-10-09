@@ -7,9 +7,9 @@ import {
 describe("project limits", () => {
   it("returns defaults matching the documented values", () => {
     const limits = getProjectLimits();
-    expect(limits.fileMaxBytes).toBe(5 * 1024 * 1024);
-    expect(limits.maxFilesPerProject).toBe(20);
-    expect(limits.userTotalMaxBytes).toBe(100 * 1024 * 1024);
+    expect(limits.fileMaxBytes).toBe(20 * 1024 * 1024);
+    expect(limits.maxFilesPerProject).toBe(50);
+    expect(limits.userTotalMaxBytes).toBe(500 * 1024 * 1024);
     expect(limits.fileTextMaxChars).toBe(100_000);
     expect(limits.instructionsMaxChars).toBe(4000);
     expect(limits.filesContextMaxChars).toBe(8000);
