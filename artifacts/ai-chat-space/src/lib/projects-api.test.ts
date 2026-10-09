@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ProjectsApiError,
   base64ToString,
+  hasPendingDescriptions,
   normalizeProjectsLimits,
   fileToBase64,
   parseProjectIdFromSearch,
@@ -180,5 +181,233 @@ describe("normalizeProjectsLimits", () => {
       perFileContextMaxChars: 4000,
       usage: { totalBytes: 12, fileCount: 1 },
     });
+  });
+});
+
+describe("image-aware project files", () => {
+  const originalFetch = globalThis.fetch;
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("listFilesWithMeta unwraps the files array and exposes imageDescriptionAvailable=true", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        files: [
+          {
+            id: 1,
+            filename: "a.png",
+            mimeType: "image/png",
+            sizeBytes: 1234,
+            textChars: 12,
+            includeInContext: true,
+            createdAt: "2026-01-01T00:00:00Z",
+            kind: "image",
+            hasThumbnail: true,
+            imageWidth: 800,
+            imageHeight: 600,
+            sendImage: false,
+            descriptionStatus: "ready",
+            descriptionModel: "gpt-4o-mini",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+        imageDescription: { available: true },
+      }),
+    ) as typeof fetch;
+    const meta = await projectsApi.listFilesWithMeta(7);
+    expect(meta.imageDescriptionAvailable).toBe(true);
+    expect(meta.files).toHaveLength(1);
+    expect(meta.files[0].kind).toBe("image");
+  });
+
+  it("listFilesWithMeta defaults imageDescriptionAvailable to true when the server omits it", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        files: [],
+        // no imageDescription key (older server)
+      }),
+    ) as typeof fetch;
+    const meta = await projectsApi.listFilesWithMeta(1);
+    expect(meta.imageDescriptionAvailable).toBe(true);
+    expect(meta.files).toEqual([]);
+  });
+
+  it("listFilesWithMeta honours imageDescription.available=false", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        files: [],
+        imageDescription: { available: false },
+      }),
+    ) as typeof fetch;
+    const meta = await projectsApi.listFilesWithMeta(1);
+    expect(meta.imageDescriptionAvailable).toBe(false);
+  });
+
+  it("setFileSendImage sends PATCH {sendImage:true} and unwraps the file", async () => {
+    const updated = {
+      id: 3,
+      filename: "photo.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 1,
+      textChars: 0,
+      includeInContext: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      kind: "image" as const,
+      hasThumbnail: true,
+      imageWidth: 100,
+      imageHeight: 100,
+      sendImage: true,
+      descriptionStatus: "ready" as const,
+      descriptionModel: "gpt-4o-mini",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        jsonResponse({ file: updated }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const result = await projectsApi.setFileSendImage(5, 3, true);
+    expect(result.sendImage).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, initArg] = fetchMock.mock.calls[0]!;
+    expect(initArg?.method).toBe("PATCH");
+    expect(JSON.parse(String(initArg?.body))).toEqual({ sendImage: true });
+  });
+
+  it("describeFile POSTs to the describe endpoint and unwraps the file", async () => {
+    const updated = {
+      id: 9,
+      filename: "scan.png",
+      mimeType: "image/png",
+      sizeBytes: 9,
+      textChars: 0,
+      includeInContext: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      kind: "image" as const,
+      hasThumbnail: true,
+      imageWidth: 1,
+      imageHeight: 1,
+      sendImage: false,
+      descriptionStatus: "pending" as const,
+      descriptionModel: null,
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        jsonResponse({ file: updated }, 202),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    const result = await projectsApi.describeFile(2, 9);
+    expect(result.descriptionStatus).toBe("pending");
+    const [urlArg, initArg] = fetchMock.mock.calls[0]!;
+    expect(String(urlArg)).toContain("/api/projects/2/files/9/describe");
+    expect(initArg?.method).toBe("POST");
+  });
+
+  it("fileThumbnailUrl mirrors fileDownloadUrl with a /thumbnail suffix", () => {
+    expect(projectsApi.fileThumbnailUrl(12, 34)).toBe(
+      projectsApi.fileDownloadUrl(12, 34).replace(/\/download$/, "/thumbnail"),
+    );
+  });
+});
+
+describe("hasPendingDescriptions", () => {
+  it("returns false for null / empty lists", () => {
+    expect(hasPendingDescriptions(null)).toBe(false);
+    expect(hasPendingDescriptions([])).toBe(false);
+  });
+
+  it("returns false when there are no images at all", () => {
+    expect(
+      hasPendingDescriptions([
+        {
+          id: 1,
+          filename: "doc.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 1,
+          textChars: 10,
+          includeInContext: true,
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("returns false when images are all ready", () => {
+    expect(
+      hasPendingDescriptions([
+        {
+          id: 1,
+          filename: "a.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+          textChars: 0,
+          includeInContext: true,
+          createdAt: "2026-01-01T00:00:00Z",
+          kind: "image",
+          descriptionStatus: "ready",
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("returns true when at least one image is pending", () => {
+    expect(
+      hasPendingDescriptions([
+        {
+          id: 1,
+          filename: "a.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+          textChars: 0,
+          includeInContext: true,
+          createdAt: "2026-01-01T00:00:00Z",
+          kind: "image",
+          descriptionStatus: "ready",
+        },
+        {
+          id: 2,
+          filename: "b.jpg",
+          mimeType: "image/jpeg",
+          sizeBytes: 1,
+          textChars: 0,
+          includeInContext: true,
+          createdAt: "2026-01-01T00:00:00Z",
+          kind: "image",
+          descriptionStatus: "pending",
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores document entries even when their descriptionStatus is pending (defensive)", () => {
+    expect(
+      hasPendingDescriptions([
+        {
+          id: 1,
+          filename: "doc.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 1,
+          textChars: 10,
+          includeInContext: true,
+          createdAt: "2026-01-01T00:00:00Z",
+          // @ts-expect-error documents shouldn't have descriptionStatus, but if
+          // a server bug ever returns one we should still treat it as not-pending.
+          descriptionStatus: "pending",
+        },
+      ]),
+    ).toBe(false);
   });
 });

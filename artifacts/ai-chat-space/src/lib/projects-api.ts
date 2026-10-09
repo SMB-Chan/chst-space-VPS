@@ -69,6 +69,30 @@ export interface ProjectFile {
   textChars: number;
   includeInContext: boolean;
   createdAt: string;
+  /** Discriminator. Older servers omit it — treat missing as "document". */
+  kind?: "document" | "image";
+  /** Pixel dimensions for images (null for documents). */
+  imageWidth?: number | null;
+  imageHeight?: number | null;
+  /** Whether a thumbnail blob is available on the server. */
+  hasThumbnail?: boolean;
+  /** User preference: include the raw image (not just the description) in chat. */
+  sendImage?: boolean;
+  /** Background description / OCR job status. "none" for documents. */
+  descriptionStatus?: "none" | "pending" | "ready" | "unavailable" | "failed";
+  descriptionModel?: string | null;
+  updatedAt?: string;
+}
+
+/** Result of listFilesWithMeta — list + a flag about description availability. */
+export interface ProjectFilesMeta {
+  files: ProjectFile[];
+  /**
+   * Whether at least one configured model is capable of producing image
+   * descriptions. Defaults to true when the server omits the flag so older
+   * deployments don't regress to "unavailable".
+   */
+  imageDescriptionAvailable: boolean;
 }
 
 export interface DriveStatus {
@@ -167,6 +191,8 @@ interface ProjectResponse {
 }
 interface ProjectFilesResponse {
   files: ProjectFile[];
+  /** Server flag indicating whether image-description models are configured. */
+  imageDescription?: { available: boolean };
 }
 interface ProjectConversationsResponse {
   conversations: ProjectConversation[];
@@ -270,6 +296,23 @@ export const projectsApi = {
     ).then((data) => data.files ?? []);
   },
 
+  /**
+   * Same as {@link listFiles} but also returns whether the server has at
+   * least one model capable of producing image descriptions. Returns
+   * `imageDescriptionAvailable: true` when the server omits the flag so older
+   * deployments don't regress to "unavailable".
+   */
+  listFilesWithMeta(projectId: number): Promise<ProjectFilesMeta> {
+    return request<ProjectFilesResponse>(
+      `/api/projects/${projectId}/files`,
+      {},
+      "参考ファイル一覧を取得できませんでした。",
+    ).then((data) => ({
+      files: data.files ?? [],
+      imageDescriptionAvailable: data.imageDescription?.available ?? true,
+    }));
+  },
+
   uploadFile(
     projectId: number,
     file: { filename: string; dataBase64: string },
@@ -301,6 +344,32 @@ export const projectsApi = {
     ).then((data) => data.file);
   },
 
+  /** Set the per-image "send the image itself (not just the description)" flag. */
+  setFileSendImage(
+    projectId: number,
+    fileId: number,
+    sendImage: boolean,
+  ): Promise<ProjectFile> {
+    return request<ProjectFileResponse>(
+      `/api/projects/${projectId}/files/${fileId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sendImage }),
+      },
+      "画像送信設定を更新できませんでした。",
+    ).then((data) => data.file);
+  },
+
+  /** Re-run the background description/OCR job for an image. Returns 202 + file. */
+  describeFile(projectId: number, fileId: number): Promise<ProjectFile> {
+    return request<ProjectFileResponse>(
+      `/api/projects/${projectId}/files/${fileId}/describe`,
+      { method: "POST" },
+      "説明の再作成を開始できませんでした。",
+    ).then((data) => data.file);
+  },
+
   removeFile(projectId: number, fileId: number): Promise<void> {
     return request<{ deleted?: boolean }>(
       `/api/projects/${projectId}/files/${fileId}`,
@@ -311,6 +380,11 @@ export const projectsApi = {
 
   fileDownloadUrl(projectId: number, fileId: number): string {
     return `${BASE}/api/projects/${projectId}/files/${fileId}/download`;
+  },
+
+  /** Same-origin URL for an image file's server-stripped thumbnail (image/webp). */
+  fileThumbnailUrl(projectId: number, fileId: number): string {
+    return `${BASE}/api/projects/${projectId}/files/${fileId}/thumbnail`;
   },
 
   listConversations(projectId: number): Promise<ProjectConversation[]> {
@@ -487,4 +561,19 @@ export function parseProjectIdFromSearch(search: string): number | null {
   if (!/^\d+$/.test(raw)) return null;
   const parsed = Number.parseInt(raw, 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * True when at least one image file in the list is still waiting on its
+ * background description / OCR job. The project-detail page polls while this
+ * is true so the UI updates as the server finishes each job.
+ *
+ * Exported as a pure helper so the test can verify the polling trigger
+ * without running fake timers in jsdom.
+ */
+export function hasPendingDescriptions(files: ProjectFile[] | null): boolean {
+  if (!files) return false;
+  return files.some(
+    (file) => file.kind === "image" && file.descriptionStatus === "pending",
+  );
 }

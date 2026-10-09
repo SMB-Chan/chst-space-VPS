@@ -434,6 +434,13 @@ CREATE TABLE IF NOT EXISTS project_files (
 );
 CREATE INDEX IF NOT EXISTS project_files_project_idx ON project_files(project_id);
 CREATE INDEX IF NOT EXISTS project_files_user_idx ON project_files(user_id);
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'document';
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS thumbnail text;
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS image_width integer;
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS image_height integer;
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS send_image boolean NOT NULL DEFAULT false;
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS description_status text NOT NULL DEFAULT 'none';
+ALTER TABLE project_files ADD COLUMN IF NOT EXISTS description_model text;
 
 CREATE TABLE IF NOT EXISTS project_drive_files (
   id serial PRIMARY KEY,
