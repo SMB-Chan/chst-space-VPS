@@ -7,6 +7,11 @@ import {
 import { and, eq } from "drizzle-orm";
 import { db, providerCredentials } from "@workspace/db";
 import type { ModelProvider } from "./ai-clients";
+import {
+  getBuiltinProviderDbKey,
+  isBuiltinEnvKeyAllowed,
+  isBuiltinProviderActive,
+} from "./model-registry";
 
 export type ProviderId = Exclude<ModelProvider, "custom">;
 
@@ -163,7 +168,12 @@ export async function listProviderCredentials(
 
   return PROVIDER_IDS.map((provider) => {
     const row = rows.find((r) => r.provider === provider);
-    const envOk = envKeyPresent(provider);
+    // Server default key: an admin-stored key, or the env key unless the
+    // admin disconnected it; nothing while the provider is disabled/hidden.
+    const envOk =
+      isBuiltinProviderActive(provider) &&
+      (Boolean(getBuiltinProviderDbKey(provider)) ||
+        (envKeyPresent(provider) && isBuiltinEnvKeyAllowed(provider)));
     const source: ProviderCredentialSummary["source"] = row
       ? "user"
       : envOk

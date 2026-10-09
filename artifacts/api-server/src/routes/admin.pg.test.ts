@@ -152,7 +152,7 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
       [BUILTIN_SLASH_MODEL],
     );
     await pool.query(
-      "UPDATE llm_providers SET enabled = true WHERE id = 'openrouter'",
+      "UPDATE llm_providers SET enabled = true, deleted = false, use_env_key = true, api_key_encrypted = NULL, key_hint = NULL WHERE id = 'openrouter'",
     );
     await pool.query("DELETE FROM app_users WHERE id = ANY($1::text[])", [
       createdAccountIds,
@@ -308,6 +308,47 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
     expect(resolved.provider).toBe("custom");
     expect(resolved.client.baseURL).toBe("https://gateway.example.test/v1");
 
+    // キーを解除: the key is removed but the provider stays.
+    expect(
+      (
+        await call("DELETE", `/admin/providers/${PROVIDER_ID}/key`, {
+          cookie: adminCookie,
+        })
+      ).status,
+    ).toBe(204);
+    const afterKey = (
+      (await call("GET", "/admin/providers", { cookie: adminCookie }))
+        .body as Array<Record<string, unknown>>
+    ).find((p) => p.id === PROVIDER_ID);
+    expect(afterKey).toMatchObject({
+      hasKey: false,
+      keyHint: null,
+      keySource: "none",
+      configured: false,
+      enabled: true,
+    });
+    expect(getCustomChatModels().map((m) => m.id)).not.toContain(CUSTOM_MODEL);
+    expect(() => getClientForModel(CUSTOM_MODEL)).toThrow(
+      "Test Gateway のAPIキーが設定されていない",
+    );
+    expect(
+      (
+        await call("PATCH", `/admin/providers/${PROVIDER_ID}`, {
+          cookie: adminCookie,
+          body: { useEnvKey: true },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("PATCH", `/admin/providers/${PROVIDER_ID}`, {
+          cookie: adminCookie,
+          body: { apiKey: PROVIDER_KEY },
+        })
+      ).status,
+    ).toBe(204);
+    expect(getCustomChatModels().map((m) => m.id)).toContain(CUSTOM_MODEL);
+
     // Disabling the provider removes its models from the chat catalog.
     expect(
       (
@@ -318,7 +359,9 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
       ).status,
     ).toBe(204);
     expect(getCustomChatModels().map((m) => m.id)).not.toContain(CUSTOM_MODEL);
-    expect(() => getClientForModel(CUSTOM_MODEL)).toThrow();
+    expect(() => getClientForModel(CUSTOM_MODEL)).toThrow(
+      "Test Gateway は管理者により無効化されています",
+    );
 
     // Deleting the provider cascades to its models.
     expect(
@@ -334,8 +377,11 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
     ).toBe(false);
   });
 
-  it("protects built-in providers: toggle only, never delete", async () => {
+  it("toggles built-in providers and reports the label when disabled", async () => {
     const { isCatalogProviderEnabled } = await import("../lib/model-registry");
+    const { getClientForModel } = await import("../lib/ai-clients");
+    const { getCuratedBuiltinChatModels } =
+      await import("../lib/model-catalog");
     expect(
       (
         await call("PATCH", "/admin/providers/openrouter", {
@@ -346,11 +392,12 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
     ).toBe(400);
     expect(
       (
-        await call("DELETE", "/admin/providers/openrouter", {
-          cookie: adminCookie,
+        await call("PATCH", "/admin/providers/openrouter", {
+          cookie: userCookie,
+          body: { enabled: false },
         })
       ).status,
-    ).toBe(400);
+    ).toBe(403);
     expect(
       (
         await call("PATCH", "/admin/providers/openrouter", {
@@ -360,11 +407,178 @@ describePostgres("password auth + admin console (PostgreSQL)", () => {
       ).status,
     ).toBe(204);
     expect(isCatalogProviderEnabled("openrouter")).toBe(false);
+    expect(
+      getCuratedBuiltinChatModels().some((m) => m.provider === "openrouter"),
+    ).toBe(false);
+    expect(() => getClientForModel(BUILTIN_SLASH_MODEL)).toThrow(
+      "OpenRouter は管理者により無効化されています。別のモデルを選択してください。",
+    );
     await call("PATCH", "/admin/providers/openrouter", {
       cookie: adminCookie,
       body: { enabled: true },
     });
     expect(isCatalogProviderEnabled("openrouter")).toBe(true);
+    expect(
+      getCuratedBuiltinChatModels().some((m) => m.provider === "openrouter"),
+    ).toBe(true);
+  });
+
+  it("stores and disconnects built-in keys (DB key, env key opt-out, restore)", async () => {
+    const { getClientForModel } = await import("../lib/ai-clients");
+    const builtinKey = `sk-or-test-${randomBytes(12).toString("hex")}`;
+    const providerRow = async () =>
+      (
+        (await call("GET", "/admin/providers", { cookie: adminCookie }))
+          .body as Array<Record<string, unknown>>
+      ).find((p) => p.id === "openrouter")!;
+
+    const set = await call("PATCH", "/admin/providers/openrouter", {
+      cookie: adminCookie,
+      body: { apiKey: builtinKey },
+    });
+    expect(set.status).toBe(204);
+    const list = await call("GET", "/admin/providers", { cookie: adminCookie });
+    expect(list.raw).not.toContain(builtinKey);
+    expect(await providerRow()).toMatchObject({
+      kind: "builtin",
+      hasKey: true,
+      keyHint: `…${builtinKey.slice(-4)}`,
+      keySource: "db",
+      configured: true,
+      useEnvKey: true,
+      deleted: false,
+    });
+    const resolved = getClientForModel(BUILTIN_SLASH_MODEL);
+    expect(resolved.provider).toBe("openrouter");
+    expect(resolved.client.apiKey).toBe(builtinKey);
+
+    // キーを解除: DB key removed and the env key is no longer used.
+    expect(
+      (
+        await call("DELETE", "/admin/providers/openrouter/key", {
+          cookie: adminCookie,
+        })
+      ).status,
+    ).toBe(204);
+    expect(await providerRow()).toMatchObject({
+      hasKey: false,
+      keyHint: null,
+      keySource: "none",
+      configured: false,
+      useEnvKey: false,
+      enabled: true,
+    });
+    expect(() => getClientForModel(BUILTIN_SLASH_MODEL)).toThrow(
+      "OpenRouter のAPIキーは管理者により解除されています",
+    );
+
+    // 環境変数のキーを使う: restore the env key opt-in.
+    expect(
+      (
+        await call("PATCH", "/admin/providers/openrouter", {
+          cookie: adminCookie,
+          body: { useEnvKey: true },
+        })
+      ).status,
+    ).toBe(204);
+    expect(await providerRow()).toMatchObject({ useEnvKey: true });
+    expect(
+      (
+        await call("DELETE", "/admin/providers/openrouter/key", {
+          cookie: userCookie,
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call("DELETE", `/admin/providers/nope-${suffix}/key`, {
+          cookie: adminCookie,
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("soft-deletes built-in providers, survives re-seeding, and restores", async () => {
+    const { seedModelCatalog, getCuratedBuiltinChatModels } =
+      await import("../lib/model-catalog");
+    const { getClientForModel } = await import("../lib/ai-clients");
+    expect(
+      (
+        await call("DELETE", "/admin/providers/openrouter", {
+          cookie: userCookie,
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call("DELETE", "/admin/providers/openrouter", {
+          cookie: adminCookie,
+        })
+      ).status,
+    ).toBe(204);
+    const rows = async () =>
+      (await call("GET", "/admin/providers", { cookie: adminCookie }))
+        .body as Array<Record<string, unknown>>;
+    expect((await rows()).find((p) => p.id === "openrouter")).toMatchObject({
+      deleted: true,
+      enabled: false,
+    });
+    const models = await call("GET", "/admin/models", { cookie: adminCookie });
+    expect(
+      (models.body as Array<{ providerId: string }>).some(
+        (m) => m.providerId === "openrouter",
+      ),
+    ).toBe(false);
+    expect(
+      (
+        await call("PATCH", "/admin/providers/openrouter", {
+          cookie: adminCookie,
+          body: { enabled: true },
+        })
+      ).status,
+    ).toBe(409);
+
+    // A restart re-runs the seed; the hidden flag must survive it.
+    await seedModelCatalog();
+    expect((await rows()).find((p) => p.id === "openrouter")).toMatchObject({
+      deleted: true,
+      enabled: false,
+    });
+    expect(
+      getCuratedBuiltinChatModels().some((m) => m.provider === "openrouter"),
+    ).toBe(false);
+    expect(() => getClientForModel(BUILTIN_SLASH_MODEL)).toThrow(
+      "OpenRouter は管理者により無効化されています",
+    );
+
+    expect(
+      (
+        await call("POST", "/admin/providers/openrouter/restore", {
+          cookie: userCookie,
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call("POST", `/admin/providers/${PROVIDER_ID}/restore`, {
+          cookie: adminCookie,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", "/admin/providers/openrouter/restore", {
+          cookie: adminCookie,
+        })
+      ).status,
+    ).toBe(204);
+    expect((await rows()).find((p) => p.id === "openrouter")).toMatchObject({
+      deleted: false,
+      enabled: true,
+    });
+    expect(
+      getCuratedBuiltinChatModels().some((m) => m.provider === "openrouter"),
+    ).toBe(true);
   });
 
   it("tombstones built-in models (ids with '/'), survives re-seeding, and restores on re-add", async () => {
