@@ -30,6 +30,43 @@ export function splitThinkTags(text: string): {
   return { reasoning: blocks.join("\n\n"), content };
 }
 
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/**
+ * Streaming-safe view of answer text from models that put their reasoning
+ * inline as a leading <think>…</think> block (MiniMax, some Qwen/DeepSeek
+ * compatible gateways). Returns the visible answer so far plus the text of
+ * any leading think blocks. While a leading block is still open, or the text
+ * so far could still become "<think>", nothing is visible yet, so the raw
+ * reasoning never streams to the user. Only leading blocks are treated as
+ * reasoning; a literal "<think>" later in an answer stays visible here.
+ */
+export function splitLeadingThink(raw: string): {
+  visible: string;
+  reasoning: string;
+} {
+  let rest = raw.replace(/^\s+/, "");
+  const blocks: string[] = [];
+  for (;;) {
+    if (rest.length < THINK_OPEN.length) {
+      if (THINK_OPEN.startsWith(rest.toLowerCase())) {
+        return { visible: "", reasoning: blocks.join("\n\n") };
+      }
+      break;
+    }
+    if (rest.slice(0, THINK_OPEN.length).toLowerCase() !== THINK_OPEN) break;
+    const close = rest.toLowerCase().indexOf(THINK_CLOSE, THINK_OPEN.length);
+    if (close === -1) {
+      blocks.push(rest.slice(THINK_OPEN.length).trim());
+      return { visible: "", reasoning: blocks.join("\n\n") };
+    }
+    blocks.push(rest.slice(THINK_OPEN.length, close).trim());
+    rest = rest.slice(close + THINK_CLOSE.length).replace(/^\s+/, "");
+  }
+  return { visible: rest, reasoning: blocks.filter(Boolean).join("\n\n") };
+}
+
 const TEXT_TOOL_OPEN_MARKERS = ["<tool_call", "<function_call"] as const;
 const TEXT_TOOL_BLOCK_RE =
   /<(tool_call|function_call)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;

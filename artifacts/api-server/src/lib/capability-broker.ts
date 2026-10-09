@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { splitThinkTags } from "./stream-delta";
 import {
   applyGenerationParams,
   applySafeGenerationParams,
@@ -395,7 +396,8 @@ async function runRouterCall(args: {
       options as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
       { signal: args.signal },
     );
-    return completion.choices?.[0]?.message?.content ?? "";
+    return splitThinkTags(completion.choices?.[0]?.message?.content ?? "")
+      .content;
   } catch (error) {
     if (args.signal?.aborted) throw args.signal.reason ?? error;
     if (!isUnsupportedGenerationParam(error)) throw error;
@@ -417,7 +419,8 @@ async function runRouterCall(args: {
       options as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
       { signal: args.signal },
     );
-    return completion.choices?.[0]?.message?.content ?? "";
+    return splitThinkTags(completion.choices?.[0]?.message?.content ?? "")
+      .content;
   }
 }
 
