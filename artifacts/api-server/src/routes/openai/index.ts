@@ -1658,13 +1658,32 @@ router.post(
       } = shared;
       let newMessage = shared.resolvedMessage;
 
-      if (cancellation.signal.aborted) return;
+      // The client left before generation started: keep the user's message so
+      // the turn survives navigation; there is no partial output to save.
+      const persistAbandonedTurn = async (): Promise<void> => {
+        await persistInterruptedChatTurn({
+          userId,
+          conversationId,
+          userContent: newMessage.storedContent,
+          assistantContent: undefined,
+          modelId,
+          sources: [],
+        });
+      };
+
+      if (cancellation.signal.aborted) {
+        await persistAbandonedTurn();
+        return;
+      }
       const history = await db
         .select()
         .from(messages)
         .where(eq(messages.conversationId, conversationId))
         .orderBy(asc(messages.createdAt), asc(messages.id));
-      if (cancellation.signal.aborted) return;
+      if (cancellation.signal.aborted) {
+        await persistAbandonedTurn();
+        return;
+      }
 
       const historicalImageBudget = createHistoricalImageBudget();
       const historicalChatMessages: {
@@ -1721,7 +1740,10 @@ router.post(
           ? newMessage.modelText
           : modelContentFor(newMessage, supportsVision),
       });
-      if (cancellation.signal.aborted) return;
+      if (cancellation.signal.aborted) {
+        await persistAbandonedTurn();
+        return;
+      }
 
       const { client, provider } = getClientForModel(
         modelId,
@@ -1781,7 +1803,8 @@ router.post(
           generatedAssets,
           filesMeta: codingFilesMeta,
         }) => {
-          if (cancellation.signal.aborted) return;
+          // Persist even when the client left mid-stream: chat history is
+          // server-side and must survive page navigation and deploys.
           const persisted = await persistChatCompletion({
             userId,
             conversationId,
@@ -1807,7 +1830,6 @@ router.post(
           };
         },
         onFailure: async ({ content, sources }) => {
-          if (cancellation.signal.aborted) return;
           const interruptedContent = content.trim()
             ? content
             : sources.length > 0

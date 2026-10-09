@@ -40,6 +40,13 @@ async function main(): Promise<void> {
       { name: "alibaba-video-worker", close: videoWorker.close },
       { name: "alibaba-realtime-websocket", close: realtimeSocket.close },
       { name: "browser-egress", close: closeBrowser },
+      // Force-closed SSE sockets at the end of the drain window trigger
+      // interrupted-turn persists; give those writes a moment to land before
+      // the Postgres pool closes.
+      {
+        name: "persist-settle",
+        close: () => new Promise<void>((resolve) => setTimeout(resolve, 750)),
+      },
       { name: "postgres", close: async () => pool.end() },
     ],
     logger,
@@ -76,6 +83,22 @@ async function main(): Promise<void> {
     // user-settings stores) is ensured here. Enumerating functions here used
     // to drift from ensureChatSchema and left new tables uncreated at boot.
     await ensureChatSchema((sql) => pool.query(sql));
+    // A previous process may have died mid-turn (deploy restart, crash). No
+    // run can still be executing after a restart, so settle stragglers as
+    // failed; their turns were either already persisted or are unrecoverable.
+    try {
+      const swept = await pool.query(
+        "UPDATE runs SET status = 'failed', error_code = 'PROCESS_RESTARTED', completed_at = now(), updated_at = now() WHERE status = 'running'",
+      );
+      if ((swept.rowCount ?? 0) > 0) {
+        logger.warn(
+          { count: swept.rowCount },
+          "Marked orphaned running runs as failed after restart",
+        );
+      }
+    } catch (err) {
+      logger.warn({ err }, "Failed to sweep orphaned running runs");
+    }
     // Seed built-in providers/models into the admin-managed catalog
     // (ON CONFLICT DO NOTHING keeps admin edits) and load the registry.
     try {

@@ -410,8 +410,14 @@ export async function streamChatReply(args: {
       });
   };
 
+  // A dropped client (page navigation, stop button, deploy restart) must not
+  // erase the turn: the user message and any streamed partial are durable
+  // history. Guarded once-only so the catch and finally paths cannot
+  // double-insert after a successful completion persist.
+  let turnFinalized = false;
   const persistInterruptedTurn = async (): Promise<boolean> => {
-    if (clientAbort.signal.aborted || !onFailure) return false;
+    if (turnFinalized || !onFailure) return false;
+    turnFinalized = true;
     const durableContent =
       streamedResponse.trim().length >= fullResponse.trim().length
         ? streamedResponse
@@ -1797,9 +1803,9 @@ export async function streamChatReply(args: {
           restoredDraft || restoredStream || EMPTY_ASSISTANT_FALLBACK;
       }
 
-      // Disconnects that happen after model output but before this boundary
-      // must not create a durable message or generated asset.
-      if (clientAbort.signal.aborted) return;
+      // Persist the completion even when the client has already left: chat
+      // history is server-side, so a page navigation mid-generation must not
+      // lose the finished answer. Emit helpers stay silent when clientGone().
 
       if (!streamedResponse.trim() && !clientGone()) {
         streamedResponse = fullResponse;
@@ -1860,6 +1866,7 @@ export async function streamChatReply(args: {
           filesMeta: codingFilesMeta,
         },
       });
+      if (completionEmitted) turnFinalized = true;
       if (!completionEmitted) return;
     }
   } catch (err) {
@@ -1867,13 +1874,18 @@ export async function streamChatReply(args: {
       safeFailureFields(err, "chat-stream", "AI_RESPONSE_STREAM_FAILED"),
       "Error streaming AI response",
     );
+    // Persist even for a gone client: the turn must survive navigation.
+    const turnSaved = await persistInterruptedTurn();
     if (!clientGone()) {
-      const turnSaved = await persistInterruptedTurn();
       res.write(
         `data: ${JSON.stringify({ error: publicAiError(err), turnSaved })}\n\n`,
       );
     }
   } finally {
+    // Safety net for abort paths that never throw (client stop/navigation,
+    // force-closed sockets at deploy time): nothing above persisted, so keep
+    // at least the user message here. No-op once the turn is finalized.
+    await persistInterruptedTurn();
     flushUsage();
     // Every early-return path (client cancellation, persistence failure, etc.)
     // must release the keepalive timer and terminate the SSE response.
