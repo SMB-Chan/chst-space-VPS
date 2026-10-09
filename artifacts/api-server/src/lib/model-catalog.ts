@@ -304,3 +304,30 @@ export function resetModelCatalogForTests(): void {
 }
 
 export { isBuiltinProviderActive } from "./model-registry";
+
+/**
+ * Japanese explanation for a chat model that is unavailable because of an
+ * admin action on its provider (disabled, deleted, or key removed), or null
+ * when the provider is fine (unknown id, disabled model, ...).
+ */
+export function describeProviderUnavailability(modelId: string): string | null {
+  const snap = getCatalogSnapshot();
+  if (!snap) return null;
+  const providerId =
+    snap.models.get(modelId)?.providerId ??
+    AVAILABLE_MODELS.find((model) => model.id === modelId)?.provider;
+  const provider = providerId ? snap.providers.get(providerId) : undefined;
+  if (!provider) return null;
+  if (!provider.enabled || provider.deleted) {
+    return `${provider.label} は管理者により無効化されています。別のモデルを選択してください。`;
+  }
+  if (provider.kind === "custom") {
+    return snap.customClients.has(provider.id)
+      ? null
+      : `${provider.label} のAPIキーが設定されていないため利用できません。別のモデルを選択してください。`;
+  }
+  if (!provider.useEnvKey && !provider.apiKey) {
+    return `${provider.label} のAPIキーは管理者により解除されています。別のモデルを選択してください。`;
+  }
+  return null;
+}
