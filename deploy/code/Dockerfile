@@ -23,7 +23,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 USER root
 
+# Upgrade the Debian 12 base (perl-base deb12u4+, gnutls, and the rest)
+# before installing packages so both preinstalled and newly installed
+# packages, including openssh-client, come from the current security archive.
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
@@ -34,8 +38,12 @@ RUN apt-get update && \
       ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
-# Install pnpm at the exact pinned version (matches CI).
-RUN npm install -g "pnpm@${PNPM_VERSION}" && \
+# Node 22.20 ships npm 10.9.3, which vendors tar 6.2.1. There is no patched
+# 6.x release; npm 10.9.9 vendors tar 7.5.22. pnpm stays on the CI pin.
+RUN npm install -g npm@10.9.9 && \
+    tar_version="$(node -p "require('$(npm root -g)/npm/node_modules/tar/package.json').version")" && \
+    test "$tar_version" = "7.5.22" && \
+    npm install -g "pnpm@${PNPM_VERSION}" && \
     pnpm --version
 
 # Add the GitHub CLI apt repo once and pin gh to the current stable
