@@ -4,9 +4,10 @@
 # owned by the chat-space stack and bound together via docker-compose.
 #
 # Pin summary (bump intentionally):
-#   * Node 22 LTS:       matches deploy/Dockerfile build stage and the
-#                        currently-running VPS host (ik1-406-35022 ships
-#                        v22.23.2). Bump together with CI matrix when ready.
+#   * Node 22 LTS:       coding environment only. The app image and CI use
+#                        Node 24. This image stays on Node 22 for the VPS host
+#                        (ik1-406-35022 ships v22.23.2). Patch pin is 22.20.0;
+#                        bump it with the host, not with the app image.
 #   * pnpm 10.x:         matches .github/workflows/ci.yml (10.34.5).
 #   * opencode-ai 1.x:   pin the latest published minor at deploy time so
 #                        `npm install -g` is deterministic; bump on the
@@ -23,7 +24,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 USER root
 
+# Upgrade the Debian 12 base (perl-base deb12u4+, gnutls, and the rest)
+# before installing packages so both preinstalled and newly installed
+# packages, including openssh-client, come from the current security archive.
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
@@ -34,8 +39,12 @@ RUN apt-get update && \
       ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
-# Install pnpm at the exact pinned version (matches CI).
-RUN npm install -g "pnpm@${PNPM_VERSION}" && \
+# Node 22.20 ships npm 10.9.3, which vendors tar 6.2.1. There is no patched
+# 6.x release; npm 10.9.9 vendors tar 7.5.22. pnpm stays on the CI pin.
+RUN npm install -g npm@10.9.9 && \
+    tar_version="$(node -p "require('$(npm root -g)/npm/node_modules/tar/package.json').version")" && \
+    test "$tar_version" = "7.5.22" && \
+    npm install -g "pnpm@${PNPM_VERSION}" && \
     pnpm --version
 
 # Add the GitHub CLI apt repo once and pin gh to the current stable
