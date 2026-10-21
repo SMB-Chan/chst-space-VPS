@@ -1,5 +1,8 @@
-# Debian 12 (bookworm). `node:24-slim` tracks this image today; pin bookworm
-# so security updates stay on the deb12 line (perl-base, gnutls, ...).
+# Node 24, the same major as the previous `node:24-slim` tag and as CI
+# (`node-version: 24`). `24-bookworm-slim` is that major's current Debian 12
+# image (24.22.0 as of 2026-10-14) and keeps tracking later 24.x patches.
+# Bookworm is pinned so apt security updates stay on deb12 (perl-base, gnutls).
+# The code image stays on Node 22; it is the VPS coding environment, not this app.
 FROM node:24-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,12 +27,15 @@ COPY . .
 ARG VITE_AUTH_MODE=local
 ENV VITE_AUTH_MODE=${VITE_AUTH_MODE}
 
-# Full install is required to build (vite, esbuild, typescript). A second
-# production install then drops devDependencies, including vite, esbuild,
-# and tinypool. `pnpm prune --prod` does not remove those from the pnpm
-# store. NODE_ENV stays unset until the build finishes; production mode is
-# set only for the running server, which does not load the dev-only
-# pino-pretty transport.
+# Full install is required to build (vite, typescript). A second production
+# install then drops devDependencies such as vite, tinypool, and vitest.
+# `pnpm prune --prod` does not remove those from the pnpm store.
+# drizzle-kit stays: it is a production dependency of @workspace/db, so
+# `pnpm --filter @workspace/db run migrate` and `push-force` (deploy.sh)
+# keep working. That pulls drizzle-kit's own tools (tsx, esbuild) and not
+# the frontend toolchain. NODE_ENV stays unset until the build finishes;
+# production mode is set only for the running server, which does not load
+# the dev-only pino-pretty transport.
 RUN pnpm install --frozen-lockfile && pnpm build \
     && find . -name node_modules -type d -prune -exec rm -rf {} + \
     && CI=true pnpm install --frozen-lockfile --prod

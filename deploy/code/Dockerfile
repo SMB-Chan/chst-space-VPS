@@ -4,9 +4,10 @@
 # owned by the chat-space stack and bound together via docker-compose.
 #
 # Pin summary (bump intentionally):
-#   * Node 22 LTS:       matches deploy/Dockerfile build stage and the
-#                        currently-running VPS host (ik1-406-35022 ships
-#                        v22.23.2). Bump together with CI matrix when ready.
+#   * Node 22 LTS:       coding environment only. The app image and CI use
+#                        Node 24. This image stays on Node 22 for the VPS host
+#                        (ik1-406-35022 ships v22.23.2). Patch pin is 22.20.0;
+#                        bump it with the host, not with the app image.
 #   * pnpm 10.x:         matches .github/workflows/ci.yml (10.34.5).
 #   * opencode-ai 1.x:   pin the latest published minor at deploy time so
 #                        `npm install -g` is deterministic; bump on the
